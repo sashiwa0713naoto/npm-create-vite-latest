@@ -66,19 +66,88 @@ npm run build
 
 どちらのサービスも、後から独自ドメインを接続できます。
 
+## microCMS（CMS）のセットアップ手順
+
+News・Showcase・Blogは、コードを直接編集せずmicroCMSの管理画面から更新できます。
+
+### 1. アカウント作成・サービス作成
+1. [microCMS](https://microcms.io/) で無料アカウントを作成
+2. 「サービスを作成」→ サービスID（例: `sashiwa-cms`）を決める
+   → これが `https://sashiwa-cms.microcms.io` のURLになります
+
+### 2. APIエンドポイントを3つ作成
+「API作成」から、以下の3つを作成してください（タイプは「リスト形式」）。
+
+**① `news`**
+| フィールドID | 表示名 | 種類 |
+|---|---|---|
+| title | タイトル | テキストフィールド |
+| category | カテゴリ | テキストフィールド |
+| eyecatch | 画像 | 画像 |
+| aiGenerated | AI自動生成 | 真偽値 |
+
+**② `blog`**
+| フィールドID | 表示名 | 種類 |
+|---|---|---|
+| title | タイトル | テキストフィールド |
+| category | カテゴリ | テキストフィールド |
+| eyecatch | 画像 | 画像 |
+| aiGenerated | AI自動生成 | 真偽値 |
+| body | 本文 | リッチエディタ（任意） |
+
+**③ `showcase`**
+| フィールドID | 表示名 | 種類 |
+|---|---|---|
+| title | タイトル | テキストフィールド |
+| client | クライアント名 | テキストフィールド |
+| metric | 成果指標 | テキストフィールド |
+| image | 画像 | 画像 |
+| videoUrl | 動画URL | テキストフィールド（任意） |
+
+### 3. APIキーを2種類発行する
+「サービス設定」→「APIキー」から、**必ず2つ**発行してください。
+
+- **読み取り専用キー**：GETのみ許可 → サイト（`.env`の`VITE_MICROCMS_API_KEY`）で使用
+- **書き込み専用キー**：POST/PUT/PATCH/DELETEを許可 → AIエージェント側のスクリプトでのみ使用し、絶対にフロントエンドのコードや`VITE_`変数には含めないこと
+
+### 4. サイト側の環境変数を設定
+`.env.example` を `.env` にコピーし、サービスIDと読み取り専用キーを設定してください。
+
+```
+cp .env.example .env
+```
+
+### 5. 試しに1件データを入れて動作確認
+microCMSの管理画面から `news` に1件仮のお知らせを入れて公開し、`npm run dev` でサイトに反映されるか確認してください。
+
+### 6. AIエージェントからの自動投稿
+`docs/ai-agent-post-example.py` または `docs/ai-agent-post-example.js` に、AIエージェント側から書き込み専用キーを使って投稿するサンプルコードがあります。AIエージェントのワークフローに組み込んでご利用ください。
+
+
 ## フォルダ構成
 
 ```
 sashiwa-corporate-site/
-├── index.html          # ページの土台となるHTML
-├── package.json        # 依存パッケージの定義
-├── vite.config.js       # Viteの設定
-├── tailwind.config.js   # Tailwind CSSの設定
-├── postcss.config.js    # PostCSSの設定
+├── index.html
+├── package.json
+├── vite.config.js
+├── tailwind.config.js
+├── postcss.config.js
+├── .env.example          # microCMSの接続情報のテンプレート
+├── docs/
+│   ├── ai-agent-post-example.py   # AIエージェント(Python)からの自動投稿サンプル
+│   └── ai-agent-post-example.js   # AIエージェント(Node.js)からの自動投稿サンプル
 ├── public/
-│   └── favicon.svg      # ファビコン
+│   └── favicon.svg
 └── src/
-    ├── main.jsx          # アプリの起動ファイル
-    ├── index.css         # Tailwindの読み込み
-    └── App.jsx           # サイト本体（すべてのコンポーネント・データ）
+    ├── main.jsx
+    ├── index.css
+    ├── App.jsx
+    ├── lib/
+    │   ├── microcms.js           # microCMS取得の共通関数（読み取り専用）
+    │   └── useMicroCMSList.js    # 一覧取得用の共通フック
+    └── components/
+        ├── layout/    # Header, Footer, LiveActivity
+        ├── sections/  # Hero, Services, Showcase, Team, News, Blog, Contact
+        └── ui/        # Button, Badge, ChatBotFloating
 ```

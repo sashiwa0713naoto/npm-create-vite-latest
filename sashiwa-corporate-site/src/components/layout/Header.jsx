@@ -13,7 +13,7 @@ const NAV_LINKS = [
   { id: "contact", label: "Contact" },
 ];
 
-export default function Header() {
+export default function Header({ onNavigate }) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeId, setActiveId] = useState("services");
@@ -43,6 +43,11 @@ export default function Header() {
 
   const scrollTo = (id) => {
     setMenuOpen(false);
+    // 💡 詳細ページ表示中にナビが押された場合は、App側でトップページに戻ってからスクロールします
+    if (onNavigate) {
+      onNavigate(id);
+      return;
+    }
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };

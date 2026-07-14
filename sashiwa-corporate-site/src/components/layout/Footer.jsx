@@ -10,7 +10,7 @@ const SITEMAP = [
   { id: "contact", label: "Contact" },
 ];
 
-export default function Footer() {
+export default function Footer({ onNavigate }) {
   // 💡 サーバー稼働率はダミーでランダムに揺らぎを持たせ、
   //    「今まさに動いている」感を演出しています（本番ではAPIから取得する想定）
   const [load, setLoad] = useState(42);
@@ -23,6 +23,10 @@ export default function Footer() {
   }, []);
 
   const scrollTo = (id) => {
+    if (onNavigate) {
+      onNavigate(id);
+      return;
+    }
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
