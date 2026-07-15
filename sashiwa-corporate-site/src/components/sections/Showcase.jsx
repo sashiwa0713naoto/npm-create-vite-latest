@@ -1,7 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Play, TrendingUp, AlertTriangle } from "lucide-react";
-import Badge from "../ui/Badge.jsx";
 import { useMicroCMSList } from "../../lib/useMicroCMSList.js";
 
 /* ============================================================================
@@ -20,7 +19,7 @@ function ShowcaseSkeleton() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="aspect-[4/5] rounded-3xl bg-neutral-100 animate-pulse" />
+        <div key={i} className="aspect-[4/5] rounded-3xl bg-slate-100 animate-pulse" />
       ))}
     </div>
   );
@@ -34,15 +33,20 @@ export default function Showcase({ onSelectItem }) {
     <section id="showcase" className="relative bg-white py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.3 }}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
         >
-          <Badge variant="outline">Showcase</Badge>
-          <h2 className="mt-4 text-4xl sm:text-5xl font-black tracking-tight text-neutral-950 max-w-2xl">
-            AIエージェントの実績。
+          <p className="text-xs font-semibold tracking-[0.2em] text-red-600 uppercase">Showcase</p>
+          <h2 className="mt-4 text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 max-w-2xl">
+            確かな成果が、
+            <br />
+            私たちの実績です。
           </h2>
+          <p className="mt-5 text-slate-500 max-w-xl leading-relaxed">
+            業種・規模を問わず、幅広いご依頼にお応えしてきました。実際の成果指標とあわせてご紹介します。
+          </p>
         </motion.div>
 
         <div className="mt-16">
@@ -63,13 +67,13 @@ export default function Showcase({ onSelectItem }) {
               {items.map((item, i) => (
                 <motion.button
                   key={item.id}
-                  initial={{ opacity: 0, y: 32 }}
+                  initial={{ opacity: 0, y: 28 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, amount: 0.3 }}
-                  transition={{ duration: 0.6, delay: i * 0.12, ease: [0.16, 1, 0.3, 1] }}
-                  whileHover={{ y: -6 }}
+                  transition={{ duration: 0.6, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+                  whileHover={{ y: -4 }}
                   onClick={() => onSelectItem?.(item)}
-                  className="group relative aspect-[4/5] overflow-hidden rounded-3xl bg-neutral-100 text-left focus:outline-none focus-visible:ring-4 focus-visible:ring-red-100"
+                  className="group relative aspect-[4/5] overflow-hidden rounded-3xl bg-slate-100 text-left focus:outline-none focus-visible:ring-4 focus-visible:ring-red-100"
                 >
                   {item.image?.url && (
                     <img
@@ -78,10 +82,10 @@ export default function Showcase({ onSelectItem }) {
                       className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
                     />
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/10" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-black/5" />
 
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/30 bg-white/10 backdrop-blur-md transition-all duration-500 group-hover:scale-110 group-hover:bg-red-600/80 group-hover:shadow-[0_0_30px_rgba(220,38,38,0.6)]">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/30 bg-white/10 backdrop-blur-md transition-all duration-500 group-hover:scale-110 group-hover:bg-red-600">
                       <Play className="h-6 w-6 text-white ml-0.5" fill="white" strokeWidth={0} />
                     </div>
                   </div>
@@ -93,8 +97,8 @@ export default function Showcase({ onSelectItem }) {
                     <h3 className="mt-1 text-base font-bold text-white leading-snug">{item.title}</h3>
                     {item.metric && (
                       <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 px-3 py-1">
-                        <TrendingUp className="h-3 w-3 text-emerald-400" />
-                        <span className="text-[11px] font-semibold text-white">{item.metric}</span>
+                        <TrendingUp className="h-3 w-3 text-emerald-300" />
+                        <span className="font-mono text-[11px] font-semibold text-white">{item.metric}</span>
                       </div>
                     )}
                   </div>
@@ -104,11 +108,10 @@ export default function Showcase({ onSelectItem }) {
           )}
 
           {!isLoading && !error && items.length === 0 && (
-            <p className="py-10 text-center text-sm text-neutral-400">まだ実績が登録されていません。</p>
+            <p className="py-10 text-center text-sm text-slate-400">まだ実績が登録されていません。</p>
           )}
         </div>
       </div>
     </section>
   );
 }
-

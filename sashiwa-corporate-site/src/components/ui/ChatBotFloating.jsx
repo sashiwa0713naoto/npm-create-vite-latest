@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, MessageCircle, X, Send, Sparkles } from "lucide-react";
+import { MessageCircle, X, Send } from "lucide-react";
 
 /* 💡【編集ポイント】初期表示メッセージ
    将来的にはDify等のRAGチャットボットのiframeに置き換える想定です。
    下部の「Difyへの差し替え例」を参照してください。 */
 const INITIAL_MESSAGES = [
   {
-    role: "ai",
-    text: "ただいまAIエージェントが待機しています。ご質問やご相談内容をお聞かせください。",
+    role: "assistant",
+    text: "こんにちは。サービス内容やお見積りについて、ご質問があればお気軽にどうぞ。",
   },
 ];
 
@@ -24,8 +24,8 @@ export default function ChatBotFloating() {
       ...prev,
       { role: "user", text: input },
       {
-        role: "ai",
-        text: "ご連絡ありがとうございます。担当のAIエージェントが内容を確認し、まもなく回答いたします。",
+        role: "assistant",
+        text: "ご連絡ありがとうございます。担当チームが内容を確認し、追ってご連絡いたします。",
       },
     ]);
     setInput("");
@@ -36,23 +36,22 @@ export default function ChatBotFloating() {
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            initial={{ opacity: 0, y: 20, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 24, scale: 0.96 }}
-            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-4 flex h-[28rem] w-[22rem] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_60px_-12px_rgba(0,0,0,0.25)]"
+            exit={{ opacity: 0, y: 20, scale: 0.97 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="mb-4 flex h-[28rem] w-[22rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_60px_-12px_rgba(15,23,42,0.2)]"
           >
-            {/* ヘッダー */}
-            <div className="flex items-center gap-3 border-b border-neutral-100 bg-neutral-950 px-5 py-4">
-              <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-red-600">
-                <Bot className="h-4 w-4 text-white" />
-                <span className="status-dot absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-neutral-950" />
+            {/* ヘッダー：白基調＋赤のワンポイントで、落ち着いた印象に */}
+            <div className="flex items-center gap-3 border-b border-slate-100 bg-white px-5 py-4">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-50">
+                <MessageCircle className="h-4 w-4 text-red-600" strokeWidth={1.8} />
               </span>
               <div>
-                <p className="text-sm font-semibold text-white">AI Concierge</p>
-                <p className="text-[11px] text-neutral-400">Status: Online</p>
+                <p className="text-sm font-semibold text-slate-900">お問い合わせ窓口</p>
+                <p className="text-[11px] text-slate-400">通常、数分以内に返信します</p>
               </div>
-              <button onClick={() => setOpen(false)} className="ml-auto text-neutral-400 hover:text-white transition-colors">
+              <button onClick={() => setOpen(false)} className="ml-auto text-slate-400 hover:text-slate-700 transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -71,12 +70,12 @@ export default function ChatBotFloating() {
             */}
 
             {/* メッセージ欄 */}
-            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+            <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-4 py-4">
               {messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                      m.role === "user" ? "bg-red-600 text-white" : "bg-neutral-100 text-neutral-800"
+                      m.role === "user" ? "bg-red-600 text-white" : "bg-white text-slate-700 border border-slate-200"
                     }`}
                   >
                     {m.text}
@@ -86,17 +85,17 @@ export default function ChatBotFloating() {
             </div>
 
             {/* 入力欄 */}
-            <form onSubmit={handleSend} className="flex items-center gap-2 border-t border-neutral-100 p-3">
+            <form onSubmit={handleSend} className="flex items-center gap-2 border-t border-slate-100 bg-white p-3">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="メッセージを入力..."
-                className="flex-1 rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm outline-none focus:border-red-400"
+                className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition-colors duration-300 focus:border-red-400"
               />
               <button
                 type="submit"
-                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-600 text-white transition-transform hover:scale-105"
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-600 text-white transition-transform duration-300 hover:scale-105"
               >
                 <Send className="h-4 w-4" />
               </button>
@@ -105,20 +104,15 @@ export default function ChatBotFloating() {
         )}
       </AnimatePresence>
 
-      {/* フローティングボタン本体 */}
+      {/* フローティングボタン本体：控えめで上品な単色仕上げ */}
       <motion.button
         onClick={() => setOpen((v) => !v)}
-        whileHover={{ scale: 1.06 }}
+        whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.96 }}
-        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_12px_30px_-6px_rgba(220,38,38,0.6)]"
-        aria-label="AIコンシェルジュを開く"
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_12px_30px_-8px_rgba(220,38,38,0.5)] transition-shadow duration-300 hover:shadow-[0_16px_36px_-6px_rgba(220,38,38,0.6)]"
+        aria-label="お問い合わせ窓口を開く"
       >
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
-        {!open && (
-          <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 ring-2 ring-white">
-            <Sparkles className="h-2 w-2 text-emerald-900" />
-          </span>
-        )}
       </motion.button>
     </div>
   );

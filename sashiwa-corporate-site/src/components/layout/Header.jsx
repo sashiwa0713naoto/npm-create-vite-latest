@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Menu, X, Bot } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import Button from "../ui/Button.jsx";
 
 /* 💡【編集ポイント】ナビゲーションメニュー */
 const NAV_LINKS = [
   { id: "services", label: "Services" },
   { id: "showcase", label: "Showcase" },
-  { id: "team", label: "AI Team" },
+  { id: "team", label: "Team" },
   { id: "news", label: "News" },
   { id: "blog", label: "Blog" },
   { id: "contact", label: "Contact" },
@@ -55,21 +55,21 @@ export default function Header({ onNavigate }) {
   return (
     <header
       className={`sticky top-0 z-50 transition-all duration-300 ${
-        scrolled ? "bg-white/85 backdrop-blur-xl border-b border-neutral-200" : "bg-white border-b border-transparent"
+        scrolled ? "bg-white/85 backdrop-blur-xl border-b border-slate-200" : "bg-white border-b border-transparent"
       }`}
     >
       <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
         <div className="flex items-center justify-between h-20">
-          <button onClick={() => scrollTo("home")} className="flex items-center gap-2">
+          <button onClick={() => scrollTo("home")} className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600">
-              <Bot className="h-4 w-4 text-white" strokeWidth={2.2} />
+              <span className="text-sm font-bold text-white">S</span>
             </span>
-            <span className="text-lg font-black tracking-tight text-neutral-900">SASHIWA</span>
+            <span className="text-lg font-bold tracking-tight text-slate-900">SASHIWA</span>
           </button>
 
           <nav className="hidden lg:flex items-center gap-8">
             {NAV_LINKS.map((link) => (
-              <button key={link.id} onClick={() => scrollTo(link.id)} className="relative py-2 text-sm font-semibold text-neutral-600 hover:text-neutral-900 transition-colors">
+              <button key={link.id} onClick={() => scrollTo(link.id)} className="relative py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
                 {link.label}
                 {activeId === link.id && (
                   <motion.span
@@ -84,24 +84,24 @@ export default function Header({ onNavigate }) {
 
           <div className="hidden lg:block">
             <Button size="sm" onClick={() => scrollTo("contact")}>
-              AIに相談する
+              ご相談する
             </Button>
           </div>
 
-          <button className="lg:hidden text-neutral-900 p-2" onClick={() => setMenuOpen((v) => !v)} aria-label="メニューを開く">
+          <button className="lg:hidden text-slate-900 p-2" onClick={() => setMenuOpen((v) => !v)} aria-label="メニューを開く">
             {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
         </div>
       </div>
 
       {menuOpen && (
-        <div className="lg:hidden border-t border-neutral-100 bg-white px-6 py-4 space-y-1">
+        <div className="lg:hidden border-t border-slate-100 bg-white px-6 py-4 space-y-1">
           {NAV_LINKS.map((link) => (
             <button
               key={link.id}
               onClick={() => scrollTo(link.id)}
-              className={`block w-full text-left px-3 py-3 rounded-lg text-sm font-semibold transition-colors ${
-                activeId === link.id ? "text-red-600 bg-red-50" : "text-neutral-600 hover:bg-neutral-50"
+              className={`block w-full text-left px-3 py-3 rounded-lg text-sm font-medium transition-colors ${
+                activeId === link.id ? "text-red-600 bg-red-50" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
               {link.label}
@@ -109,7 +109,7 @@ export default function Header({ onNavigate }) {
           ))}
           <div className="pt-2">
             <Button size="sm" className="w-full" onClick={() => scrollTo("contact")}>
-              AIに相談する
+              ご相談する
             </Button>
           </div>
         </div>

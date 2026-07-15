@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import LiveActivity from "./components/layout/LiveActivity.jsx";
 import Header from "./components/layout/Header.jsx";
 import Footer from "./components/layout/Footer.jsx";
 import ChatBotFloating from "./components/ui/ChatBotFloating.jsx";
@@ -65,7 +64,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-neutral-900 antialiased">
-      <LiveActivity />
       <Header onNavigate={isDetailView ? handleNavigate : undefined} />
 
       {selectedService ? (
