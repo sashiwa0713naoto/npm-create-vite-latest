@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import Dashboard from "./Dashboard.jsx";
 
 /* ============================================================================
    株式会社SASHIWA — コーポレートサイト（複数ページ構成）
@@ -221,6 +222,7 @@ const ROUTES = {
   blog: { title: "記事｜株式会社SASHIWA" },
   company: { title: "会社概要｜株式会社SASHIWA" },
   contact: { title: "お問い合わせ｜株式会社SASHIWA" },
+  dashboard: { title: "CONTROL｜株式会社SASHIWA" },
 };
 
 function parseHash() {
@@ -1347,6 +1349,9 @@ export default function App() {
       window.location.hash = hash;
     }
   }, []);
+
+  // ダッシュボードはヘッダー・フッターなしの独立画面（公開ナビには出しません）
+  if (route.page === "dashboard") return <Dashboard />;
 
   let body = null;
   if (route.page === "business" && route.slug) body = <BusinessDetailPage slug={route.slug} go={go} />;
