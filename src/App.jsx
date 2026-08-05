@@ -1,992 +1,1740 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  Cpu,
-  BarChart3,
-  Code,
-  Shield,
-  Lock,
-  FileCheck,
-  ArrowRight,
-  ArrowDown,
-  Menu,
-  X,
-  Mail,
-  Building2,
-  Users,
-  Briefcase,
-  MapPin,
-  Calendar,
-  Wallet,
-  ChevronRight,
-  ChevronDown,
-  Send,
-  Quote,
-} from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* ============================================================================
-   💡【編集ポイント】会社名の一元管理
-   ここを変更すると、サイト内すべての「株式会社SASHIWA」表記が一括で変わります。
-============================================================================ */
-const COMPANY_NAME = "株式会社SASHIWA";
-const COMPANY_NAME_EN = "SASHIWA.inc";
+   株式会社SASHIWA — コーポレートサイト（複数ページ構成）
 
-/* ============================================================================
-   💡【編集ポイント】SASHIWA本体システムへの連携先（Make Webhook URL）
-   Make側は client_name, client_email, message の3キーのみを学習済みのため、
-   Contactコンポーネントの handleSubmit 内でフォームの複数項目を
-   1つの message に整形してから送信します。
-============================================================================ */
+   ページ：home / business（一覧）/ business-detail（3種）/ flow / blog /
+           company / contact
+   ルーティング：URLハッシュ（例 #/business/agent）。React Router 不要、
+                 Vercel の設定変更も不要です。
+
+   ★ 変更禁止：Contact の WEBHOOK_URL と payload のキー
+     （client_name / client_email / message）は Make 側の規格です。
+
+   ★ 差し替え箇所
+     - POSTS：記事データ（microCMS 連携時はここを置き換え）
+     - COMPANY：「準備中」の項目
+     - STATS：実数が出たら更新
+   ============================================================================ */
+
 const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv";
 
-/* ============================================================================
-   💡【編集ポイント】ナビゲーションメニュー
-============================================================================ */
-const NAV_LINKS = [
-  { id: "home", label: "トップ" },
-  { id: "services", label: "サービス" },
-  { id: "about", label: "会社概要" },
+/* ---------------------------------------------------------------- データ */
+
+const BUSINESSES = [
+  {
+    slug: "agent",
+    no: "BUSINESS 01",
+    en: "AI EMPLOYEE",
+    title: "AI社員構築代行",
+    lede: "部門ごとに役割を持ったAIを設計し、実務が人の手を離れて回る状態にします。",
+    icon: "robot",
+    detail: {
+      what:
+        "社内の判断基準・商品知識・業務手順を、AIが読める形に整理します（ナレッジ基盤）。その上に、部門ごとの役割を持たせたAIエージェント＝「AI社員」を設計・実装し、成果物が出るところまでを請け負います。ツールの導入やプロンプトの受け渡しでは終わりません。",
+      points: [
+        { t: "ナレッジ基盤をつくる", d: "社内の暗黙知を、AIが参照できるドキュメントに変換します。" },
+        { t: "役割を持たせて実装する", d: "部門ごとに担当と権限を定義し、エージェントとして動かします。" },
+        { t: "検査工程を必ず挟む", d: "別のAIが品質と表現リスクを確認してから、外に出します。" },
+      ],
+      deliver: ["業務棚卸しレポート", "AI社員の設計書", "ナレッジ基盤の構築", "稼働環境の実装"],
+      span: "初期構築 約2〜4週間 ／ 納品後3ヶ月の伴走",
+    },
+  },
+  {
+    slug: "pipeline",
+    no: "BUSINESS 02",
+    en: "AUTOMATION",
+    title: "自動化パイプライン構築",
+    lede: "情報の収集から成果物の配信まで、途切れずにつながる処理の流れをつくります。",
+    icon: "flow",
+    detail: {
+      what:
+        "メール、フォーム、スプレッドシート、SNS、社内システムを連携させ、人の介在なしで動き続ける処理の流れを構築します。単発のタスク処理ではなく、決まった時刻に自動で起動し、止まらずに回り続けるパイプラインです。",
+      points: [
+        { t: "端から端までつなぐ", d: "収集・加工・生成・配信を一本の流れにまとめます。" },
+        { t: "決まった時刻に動かす", d: "毎日・毎週の定期実行を設定し、起動忘れをなくします。" },
+        { t: "止まったら知らせる", d: "エラー時の通知と再実行の仕組みまで含めて設計します。" },
+      ],
+      deliver: ["連携設計書", "パイプライン実装", "監視・通知の設定", "運用手順書"],
+      span: "初期構築 約2〜6週間",
+    },
+  },
+  {
+    slug: "ops",
+    no: "BUSINESS 03",
+    en: "MODEL OPS",
+    title: "マルチモデル運用設計",
+    lede: "作業の性質に応じてモデルを使い分け、品質を保ったままコストを抑えます。",
+    icon: "chip",
+    detail: {
+      what:
+        "文章生成、コード実装、データ分析、検査。作業ごとに向いているモデルは違います。用途別に最適なモデルを自動で選ぶ構成を設計し、品質を落とさずに運用コストを下げる仕組みをつくります。",
+      points: [
+        { t: "用途別に選定する", d: "精度が要る工程と、軽くて速い方がいい工程を切り分けます。" },
+        { t: "コストを可視化する", d: "1件あたりの処理コストを算出し、上限を設定します。" },
+        { t: "切り替えられる形にする", d: "新しいモデルが出たときに差し替えられる構成にします。" },
+      ],
+      deliver: ["モデル選定基準", "コスト試算表", "切替ロジックの実装"],
+      span: "初期構築 約2〜4週間",
+    },
+  },
 ];
 
-/* 💡【編集ポイント】提供サービス一覧
-   新しいサービスを追加・変更する場合は、この配列の中身を編集してください。
-   image は写真のURLです。今はデモ用のプレースホルダー画像を入れていますが、
-   実際の業務写真やイメージ画像が用意できたら、このURLを差し替えるだけで
-   サイト上の画像がすべて自動的に切り替わります。 */
-const SERVICES_DATA = [
+const TASKS = [
+  { icon: "mail", t: "問い合わせ対応", d: "受信を分類し、定型は自動返信。判断が要るものだけ人へ。" },
+  { icon: "doc", t: "レポート作成", d: "各所の数字を集計し、決まった書式で自動配信。" },
+  { icon: "sns", t: "SNS投稿", d: "企画・下書き・体裁チェック・予約投稿まで自動。" },
+  { icon: "slide", t: "資料づくり", d: "提案書やセミナー資料を、構成から自動生成。" },
+  { icon: "search", t: "社内検索", d: "マニュアルや過去案件を横断検索し、根拠つきで要約。" },
+  { icon: "yen", t: "請求・経費処理", d: "書類を自動で仕分け・記録し、人は承認だけ。" },
+];
+
+const STATS = [
+  { v: "100", u: "%", label: "自社業務のAI稼働" },
+  { v: "0", u: "名", label: "人間の従業員" },
+  { v: "5", u: "体", label: "稼働中のAI社員" },
+  { v: "24", u: "/365", label: "依頼の受付・処理" },
+];
+
+const BEFORE_AFTER = [
+  { before: "問い合わせに気づくのが翌朝", after: "届いた瞬間に解析が始まる" },
+  { before: "レポートを毎週手作業で集計", after: "決まった時刻に配信されている" },
+  { before: "資料の体裁チェックで半日", after: "別のAIが自動で検査する" },
+  { before: "担当者が休むと業務が止まる", after: "24時間365日、止まらない" },
+];
+
+const AGENTS = [
+  { code: "AG-01", name: "CEO_AI", role: "統括", mission: "依頼を読み解き、担当を決める", lead: true },
+  { code: "AG-02", name: "Creative_PR_AI", role: "制作・広報", mission: "原稿・構成・デザイン方針" },
+  { code: "AG-03", name: "Engineer_DevOps_AI", role: "技術・運用", mission: "実装・技術調査・稼働監視" },
+  { code: "AG-04", name: "QA_Ethics_AI", role: "品質・倫理", mission: "成果物の検査とリスク確認" },
+  { code: "AG-05", name: "CFO_Resource_AI", role: "原価・資源", mission: "工数の試算とコスト算出" },
+];
+
+const WORKFLOWS = [
   {
-    id: "svc-01",
-    no: "01",
-    icon: Cpu,
-    label: "Smart Operation",
-    title: "AI業務効率化・LLM導入支援",
-    image: "https://picsum.photos/seed/sashiwa-operation/900/700",
+    time: "24時間",
+    tag: "問い合わせ自動化",
+    title: "送信された瞬間に、担当が決まっている",
     body:
-      "最新の生成AIを活用し、稟議・議事録作成・カスタマー対応など日々の業務を自動化します。ツールを導入して終わりにせず、現場のワークフローに合わせた設計から定着化までを一貫してご支援します。属人化していた業務の棚卸しを行い、社内向けLLM環境の構築・運用体制づくりまで伴走いたします。",
+      "フォーム送信をきっかけに処理が起動。統括AIが依頼文を構造化し、必要な作業を洗い出して担当を選定します。深夜でも土日でも、待ち時間はありません。",
+    steps: ["受信", "要件の構造化", "担当の自動選定", "並行実行"],
   },
   {
-    id: "svc-02",
-    no: "02",
-    icon: BarChart3,
-    label: "Smart Analytics",
-    title: "予測データ分析コンサルティング",
-    image: "https://picsum.photos/seed/sashiwa-analytics/900/700",
+    time: "納品前",
+    tag: "検査と原価計算",
+    title: "外に出る前に、必ず二重の確認が入る",
     body:
-      "高度な統計・機械学習アルゴリズムにより、経営データを可視化し、未来の意思決定を支える予測基盤を構築します。需要予測や異常検知モデルの開発から、経営指標のダッシュボード化、定期的なレポーティング体制の整備まで、データドリブンな経営を実現するための土台をつくります。",
+      "成果物ができた時点で、品質・倫理を担当するAIが内容を検査。同時に原価担当のAIが工数とコストを算出します。この2工程を通らないものは納品されません。",
+    steps: ["成果物の受領", "品質・倫理検査", "工数試算", "差戻し／通過"],
   },
   {
-    id: "svc-03",
-    no: "03",
-    icon: Code,
-    label: "Smart Development",
-    title: "カスタムAI・受託システム開発",
-    image: "https://picsum.photos/seed/sashiwa-development/900/700",
+    time: "毎日22:00",
+    tag: "コンテンツ運用",
+    title: "翌日の分が、寝ている間に用意される",
     body:
-      "企業固有の課題に真正面から向き合い、既製品では対応できない専用AIモデルとシステムを設計・開発します。要件定義から実装、既存システムとのAPI連携、リリース後の保守・継続改善まで、ワンストップで対応いたします。",
+      "テーマの収集から下書き生成、体裁の調整、投稿予約までを自動で実行。人が行うのは最終確認だけという状態まで組み上げます。",
+    steps: ["情報収集", "下書き生成", "体裁チェック", "予約配信"],
   },
 ];
 
-/* ============================================================================
-   💡【編集ポイント】会社概要データ
-============================================================================ */
-const COMPANY_PROFILE = {
-  established: "2026年（予定）",
-  capital: "10,000,000円（予定）",
-  address: "東京都渋谷区渋谷二丁目21番1号 渋谷ヒカリエ 28階（予定）",
-  representative: "代表取締役CEO　指輪　直人（予定）",
-  business: "AIソリューション開発、LLM活用支援、データ分析コンサルティング",
-  partners: ["各種事業会社・スタートアップ（協議中）"],
+const FLOW = [
+  {
+    n: "01",
+    title: "無料相談（30分）",
+    span: "オンライン",
+    body: "いま手作業でやっていることをうかがい、AIに渡せそうな業務と、おおよその費用感をご案内します。",
+  },
+  {
+    n: "02",
+    title: "業務の棚卸し・設計",
+    span: "1〜2週間",
+    body: "業務の流れを整理し、効果の大きいものから優先順位をつけます。どのAI社員に何を任せるかを決めます。",
+  },
+  {
+    n: "03",
+    title: "ナレッジ整備と実装",
+    span: "2〜4週間",
+    body: "判断基準や手順をAIが読める形に整理し、エージェントとパイプラインを実装。実データで稼働テストを行います。",
+  },
+  {
+    n: "04",
+    title: "稼働開始と改善",
+    span: "3ヶ月伴走",
+    body: "狭い範囲から動かしはじめ、問題がなければ対象を広げます。定期ミーティングで調整を続けます。",
+  },
+];
+
+const FAQ = [
+  {
+    q: "AI社員とは、何ですか？",
+    a: "自社の判断基準・商品知識・業務手順をAIが読める形に整理したうえで、部門ごとに役割を持たせたAIエージェントのことです。毎回ゼロから前提を説明する単発のチャットとは違い、「この業務はこの担当に渡せばいい」という状態をつくります。",
+  },
+  {
+    q: "どんな業務を任せられますか？",
+    a: "問い合わせの一次対応、定例レポートの作成、社内資料の検索と要約、記事やSNS投稿の制作、データの集計と分析、請求・経費の処理。手順が言葉で説明できる業務であれば、ほとんどが対象になります。",
+  },
+  {
+    q: "導入までどれくらいかかりますか？",
+    a: "対象業務の洗い出しに1〜2週間、実装と稼働テストに2〜4週間が目安です。範囲を絞った小さな構成であれば、より短い期間で動かしはじめることもできます。",
+  },
+  {
+    q: "納品したら終わりですか？",
+    a: "納品後3ヶ月の伴走がつきます。定期のミーティングで稼働状況を確認し、任せる範囲を広げたり、精度を上げる調整を行います。",
+  },
+  {
+    q: "費用はいくらですか？",
+    a: "任せる業務の範囲と数によって変わるため、個別のお見積もりです。まずは30分の無料相談で、どの業務を渡せそうかと概算をご案内します。オンラインで全国対応しています。",
+  },
+  {
+    q: "自社でChatGPTを使うのと、何が違いますか？",
+    a: "毎回、前提の説明から始めなくて済むことです。会社の情報・商品・判断基準・過去の成果物をAIが参照できる状態にしておき、必要なときに必要な担当へ仕事を渡します。加えて、成果物は必ず別のAIが検査してから出てきます。",
+  },
+  {
+    q: "預けた情報の扱いが心配です。",
+    a: "ご提供いただいた資料やデータは、案件の対応にのみ使用します。モデルの学習用途への転用や、第三者への提供は行いません。処理の経過は記録として保全し、後から経緯を確認できる状態にしています。",
+  },
+];
+
+const COMPANY = [
+  { k: "商号", v: "株式会社SASHIWA", ready: true },
+  { k: "代表者", v: "指輪直人", ready: true },
+  { k: "従業員", v: "AIエージェント 5体（人間 0名）", ready: true },
+  { k: "事業内容", v: "AI社員構築代行／自動化パイプライン構築／マルチモデル運用設計", ready: true },
+  { k: "対応地域", v: "オンラインで全国対応", ready: true },
+  { k: "設立", v: "準備中", ready: false },
+  { k: "資本金", v: "準備中", ready: false },
+  { k: "所在地", v: "準備中", ready: false },
+];
+
+/* 記事データ。microCMS 連携時はここを API 取得結果に差し替えてください。
+   形式：{ id, date, category, title, excerpt, url } */
+const POSTS = [];
+
+/* ---------------------------------------------------------------- ルート定義 */
+
+const ROUTES = {
+  home: { title: "株式会社SASHIWA｜社員は全員AI。AI社員構築代行" },
+  business: { title: "事業内容｜株式会社SASHIWA" },
+  flow: { title: "導入の流れ｜株式会社SASHIWA" },
+  blog: { title: "記事｜株式会社SASHIWA" },
+  company: { title: "会社概要｜株式会社SASHIWA" },
+  contact: { title: "お問い合わせ｜株式会社SASHIWA" },
 };
 
-/* ============================================================================
-   💡【編集ポイント】セキュリティ・AI倫理方針
-============================================================================ */
-const ETHICS_AND_SECURITY = [
-  {
-    icon: Lock,
-    title: "データ保護・セキュリティ方針",
-    body:
-      "お客様よりお預かりする機密情報および個人情報は、暗号化通信・アクセス権限の厳格な管理・定期的な脆弱性診断を通じて多層的に保護します。情報は業務遂行に必要な最小限の範囲でのみ取り扱い、第三者への提供は法令および契約に基づく場合を除き行いません。",
-  },
-  {
-    icon: Shield,
-    title: "AI倫理ガイドライン",
-    body:
-      "私たちは、AIの出力に対して常に人による確認と説明責任を保持する「Human in the Loop」を原則とします。学習データの偏りや誤情報のリスクを継続的に検証し、公平性・透明性・説明可能性を欠いたAI実装は行いません。",
-  },
-  {
-    icon: FileCheck,
-    title: "コンプライアンス体制",
-    body:
-      "個人情報保護法をはじめとする関連法令を遵守し、社内規程および委託先管理規程に基づく監査体制を整備します。お客様との契約に定めるセキュリティ要件には、専任担当者が責任を持って対応します。",
-  },
-];
+function parseHash() {
+  const h = (typeof window !== "undefined" ? window.location.hash : "") || "";
+  const clean = h.replace(/^#\/?/, "").replace(/\/$/, "");
+  if (!clean) return { page: "home", slug: null };
+  const [page, slug] = clean.split("/");
+  if (page === "business" && slug) return { page: "business", slug };
+  if (ROUTES[page]) return { page, slug: null };
+  return { page: "home", slug: null };
+}
 
-/* 💡【編集ポイント】その他の写真・画像
-   About（会社紹介）セクションとHero下のバナーで使う画像です。
-   今はデモ用のプレースホルダー画像を入れていますが、実際の写真が
-   用意できたら、このURLを差し替えるだけでサイト上の画像が切り替わります。 */
-const ABOUT_IMAGE = "https://picsum.photos/seed/sashiwa-team/1000/1300";
-const HERO_BANNER_IMAGE = "https://picsum.photos/seed/sashiwa-technology/1600/1000";
+/* ---------------------------------------------------------------- アイコン */
 
-/* 💡【編集ポイント】お問い合わせ件名の選択肢はこの配列を編集してください */
-const CONTACT_SUBJECTS = [
-  "AI導入について",
-  "データ分析コンサルティングについて",
-  "受託開発のご依頼",
-  "取材・登壇のご依頼",
-  "採用について",
-  "その他",
-];
-
-/* ============================================================================
-   🎨 プレミアムなタイポグラフィのための書体読み込み
-   見出しの飾り数字などに上質なセリフ体を使い、高級感を演出しています。
-============================================================================ */
-function FontLoader() {
+function Icon({ name, size = 28 }) {
+  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
+  const paths = {
+    robot: (
+      <>
+        <rect x="4" y="8" width="16" height="12" rx="4" {...s} />
+        <path d="M12 4v4" {...s} />
+        <circle cx="12" cy="3.2" r="1.4" {...s} />
+        <circle cx="9.2" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="14.8" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+        <path d="M9.5 17h5" {...s} />
+      </>
+    ),
+    flow: (
+      <>
+        <rect x="2.5" y="9" width="6" height="6" rx="1.6" {...s} />
+        <rect x="15.5" y="9" width="6" height="6" rx="1.6" {...s} />
+        <path d="M8.5 12h7" {...s} />
+        <path d="M13.4 10.2 15.5 12l-2.1 1.8" {...s} />
+        <path d="M5.5 9V5.5h13V9" {...s} opacity=".4" />
+      </>
+    ),
+    chip: (
+      <>
+        <rect x="6" y="6" width="12" height="12" rx="2.4" {...s} />
+        <rect x="9.5" y="9.5" width="5" height="5" rx="1" {...s} />
+        <path d="M9 6V3M15 6V3M9 21v-3M15 21v-3M6 9H3M6 15H3M21 9h-3M21 15h-3" {...s} />
+      </>
+    ),
+    mail: (
+      <>
+        <rect x="2.5" y="5" width="19" height="14" rx="2.4" {...s} />
+        <path d="m3.5 7 8.5 6 8.5-6" {...s} />
+      </>
+    ),
+    doc: (
+      <>
+        <path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} />
+        <path d="M14 2.8V7h4" {...s} />
+        <path d="M8.5 12h7M8.5 16h5" {...s} />
+      </>
+    ),
+    sns: (
+      <>
+        <circle cx="6" cy="12" r="2.6" {...s} />
+        <circle cx="17.5" cy="6.5" r="2.6" {...s} />
+        <circle cx="17.5" cy="17.5" r="2.6" {...s} />
+        <path d="m8.4 10.8 6.8-3.2M8.4 13.2l6.8 3.2" {...s} />
+      </>
+    ),
+    slide: (
+      <>
+        <rect x="2.5" y="4" width="19" height="12.5" rx="2" {...s} />
+        <path d="M12 16.5V20M8.5 20h7" {...s} />
+        <path d="M7 12.5V9M11 12.5V7M15 12.5v-2.5" {...s} />
+      </>
+    ),
+    search: (
+      <>
+        <circle cx="10.8" cy="10.8" r="6.8" {...s} />
+        <path d="m15.8 15.8 4.4 4.4" {...s} />
+      </>
+    ),
+    yen: (
+      <>
+        <circle cx="12" cy="12" r="9" {...s} />
+        <path d="m8.5 7.5 3.5 5 3.5-5M8.5 13.5h7M8.5 16h7M12 12.5V17.5" {...s} />
+      </>
+    ),
+    check: (
+      <>
+        <circle cx="12" cy="12" r="9" {...s} />
+        <path d="m8 12.3 2.8 2.8L16 9.8" {...s} />
+      </>
+    ),
+  };
   return (
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap');
-      .font-display { font-family: 'Newsreader', Georgia, serif; }
-    `}</style>
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className="sw-ic">
+      {paths[name] || paths.check}
+    </svg>
   );
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】Header
-============================================================================ */
-function Header() {
-  const [scrolled, setScrolled] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+/* ---------------------------------------------------------------- マスコット */
 
+function Mascot() {
+  return (
+    <svg viewBox="0 0 320 260" className="sw-mascot" aria-hidden="true">
+      <ellipse cx="160" cy="238" rx="118" ry="12" fill="#111A2B" opacity=".07" />
+      {/* 後ろの小さいAI社員 */}
+      <g className="sw-mascot__bot" style={{ animationDelay: "0s" }}>
+        <rect x="120" y="150" width="34" height="30" rx="9" fill="#FFFFFF" stroke="#1A2233" strokeWidth="2" />
+        <circle cx="130" cy="164" r="2.6" fill="#1A2233" />
+        <circle cx="144" cy="164" r="2.6" fill="#1A2233" />
+        <path d="M137 150v-7" stroke="#1A2233" strokeWidth="2" />
+        <circle cx="137" cy="141" r="3" fill="#E0402F" />
+      </g>
+      <g className="sw-mascot__bot" style={{ animationDelay: ".4s" }}>
+        <rect x="166" y="150" width="34" height="30" rx="9" fill="#FFFFFF" stroke="#1A2233" strokeWidth="2" />
+        <circle cx="176" cy="164" r="2.6" fill="#1A2233" />
+        <circle cx="190" cy="164" r="2.6" fill="#1A2233" />
+        <path d="M183 150v-7" stroke="#1A2233" strokeWidth="2" />
+        <circle cx="183" cy="141" r="3" fill="#E0402F" />
+      </g>
+      {/* 大きい2体 */}
+      <g className="sw-mascot__big">
+        <path
+          d="M62 118c0-30 20-52 46-52s46 22 46 52c0 34-18 58-46 58s-46-24-46-58Z"
+          fill="#E0402F"
+        />
+        <circle cx="94" cy="118" r="5.6" fill="#fff" />
+        <circle cx="122" cy="118" r="5.6" fill="#fff" />
+        <circle cx="95.5" cy="119.5" r="2.6" fill="#1A2233" />
+        <circle cx="123.5" cy="119.5" r="2.6" fill="#1A2233" />
+        <path d="M100 136q8 7 16 0" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <path d="M108 66c-4-12 2-20 8-22-2 8 2 14 6 16" fill="#3E5C4B" />
+      </g>
+      <g className="sw-mascot__big" style={{ animationDelay: ".8s" }}>
+        <path
+          d="M166 122c0-28 19-49 43-49s43 21 43 49c0 32-17 55-43 55s-43-23-43-55Z"
+          fill="#1F3358"
+        />
+        <circle cx="196" cy="122" r="5.4" fill="#fff" />
+        <circle cx="222" cy="122" r="5.4" fill="#fff" />
+        <circle cx="197.5" cy="123.5" r="2.5" fill="#1A2233" />
+        <circle cx="223.5" cy="123.5" r="2.5" fill="#1A2233" />
+        <path d="M202 139q7 6 14 0" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <path d="M209 73c-4-11 2-19 8-21-2 8 2 13 6 15" fill="#3E5C4B" />
+        {/* クリップボード */}
+        <rect x="238" y="120" width="30" height="38" rx="4" fill="#fff" stroke="#1A2233" strokeWidth="2" />
+        <rect x="246" y="114" width="14" height="9" rx="3" fill="#E0402F" />
+        <path d="M245 134h16M245 141h16M245 148h10" stroke="#C3CAD6" strokeWidth="2.4" strokeLinecap="round" />
+      </g>
+    </svg>
+  );
+}
+
+/* ---------------------------------------------------------------- 補助 */
+
+function useReveal() {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(false);
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 12);
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") return setShown(true);
+    const io = new IntersectionObserver(
+      (es) =>
+        es.forEach((e) => {
+          if (e.isIntersecting) {
+            setShown(true);
+            io.disconnect();
+          }
+        }),
+      { threshold: 0.08, rootMargin: "0px 0px -5% 0px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, []);
-
-  const scrollTo = (id) => {
-    setMenuOpen(false);
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  };
-
-  return (
-    <header
-      className={`sticky top-0 z-50 bg-white/90 backdrop-blur-md transition-shadow duration-300 ${
-        scrolled ? "shadow-[0_1px_0_0_rgba(15,23,42,0.06)]" : ""
-      }`}
-    >
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="flex items-center justify-between h-20 sm:h-24">
-          <button
-            onClick={() => scrollTo("home")}
-            className="flex items-baseline gap-2.5"
-          >
-            <span className="h-2 w-2 rounded-full bg-gradient-to-br from-blue-600 to-indigo-800" />
-            <span className="text-xl sm:text-2xl font-semibold tracking-tight text-neutral-900">
-              {COMPANY_NAME_EN}
-            </span>
-          </button>
-
-          <nav className="hidden md:flex items-center gap-10">
-            {NAV_LINKS.map((link) => (
-              <button
-                key={link.id}
-                onClick={() => scrollTo(link.id)}
-                className="text-[13px] font-medium tracking-wide text-neutral-500 transition-colors duration-300 hover:text-neutral-900"
-              >
-                {link.label}
-              </button>
-            ))}
-            <button
-              onClick={() => scrollTo("contact")}
-              className="inline-flex items-center gap-1.5 rounded-full border border-neutral-900 px-6 py-2.5 text-[13px] font-medium tracking-wide text-neutral-900 transition-all duration-300 hover:bg-neutral-900 hover:text-white"
-            >
-              お問合わせ
-            </button>
-          </nav>
-
-          <button
-            className="md:hidden text-neutral-900 p-2"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="メニューを開く"
-          >
-            {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
-        </div>
-      </div>
-
-      {menuOpen && (
-        <div className="md:hidden border-t border-neutral-100 bg-white px-6 py-4 space-y-1">
-          {NAV_LINKS.map((link) => (
-            <button
-              key={link.id}
-              onClick={() => scrollTo(link.id)}
-              className="block w-full text-left px-3 py-3 rounded-lg text-neutral-600 hover:bg-neutral-50 transition-all duration-300"
-            >
-              {link.label}
-            </button>
-          ))}
-          <button
-            onClick={() => scrollTo("contact")}
-            className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-full bg-neutral-900 px-5 py-3 text-sm font-medium text-white"
-          >
-            お問合わせ
-          </button>
-        </div>
-      )}
-    </header>
-  );
+  return [ref, shown];
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】Hero
-============================================================================ */
-function Hero() {
-  const scrollTo = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  };
-
+function Reveal({ children, delay = 0, className = "" }) {
+  const [ref, shown] = useReveal();
   return (
-    <section id="home" className="relative bg-white overflow-hidden">
-      {/* 高級感を出すための、極めて淡いメッシュグラデーション背景 */}
-      <div className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute -top-40 right-0 h-[36rem] w-[36rem] rounded-full opacity-[0.35]"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(30,58,138,0.10) 0%, rgba(30,58,138,0) 70%)",
-          }}
-        />
-        <div
-          className="absolute inset-0 opacity-[0.4]"
-          style={{
-            backgroundImage:
-              "linear-gradient(to right, rgba(15,23,42,0.035) 1px, transparent 1px)",
-            backgroundSize: "120px 100%",
-          }}
-        />
-      </div>
-
-      <div className="relative mx-auto max-w-7xl px-6 sm:px-10 lg:px-14 pt-20 sm:pt-28 pb-20 sm:pb-24">
-        <div className="flex items-center gap-3 mb-8">
-          <span className="h-px w-10 bg-neutral-300" />
-          <p className="text-[11px] sm:text-xs font-medium tracking-[0.2em] text-neutral-500 uppercase">
-            Next-Generation AI Solutions
-          </p>
-        </div>
-
-        <h1 className="text-[2.75rem] sm:text-6xl lg:text-7xl font-display italic font-medium leading-[1.08] tracking-tight text-neutral-900 max-w-4xl">
-          AIで、ビジネスの
-          <br className="hidden sm:block" />
-          限界を超える。
-        </h1>
-
-        <p className="mt-8 text-base sm:text-lg text-neutral-500 leading-relaxed max-w-xl font-light">
-          {COMPANY_NAME}は、最先端のLLM技術とデータ分析力を武器に、企業の意思決定と業務のあり方を根本から再設計する次世代AIソリューションカンパニーです。構想から実装、運用まで、確かな技術力で伴走します。
-        </p>
-
-        <div className="mt-11 flex flex-col sm:flex-row gap-4">
-          <button
-            onClick={() => scrollTo("contact")}
-            className="group inline-flex items-center justify-center gap-2 rounded-full bg-neutral-900 px-8 py-4 text-sm font-medium text-white shadow-[0_8px_24px_-8px_rgba(15,23,42,0.5)] transition-all duration-300 hover:shadow-[0_12px_32px_-8px_rgba(15,23,42,0.6)] hover:-translate-y-0.5"
-          >
-            お問い合わせ・無料相談
-            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
-          </button>
-          <button
-            onClick={() => scrollTo("services")}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 px-8 py-4 text-sm font-medium text-neutral-700 transition-all duration-300 hover:border-neutral-900 hover:text-neutral-900"
-          >
-            サービスを見る
-          </button>
-        </div>
-
-        {/* 統計ストリップ：飾り数字にセリフ体を使い、上質さを演出 */}
-        <div className="mt-20 sm:mt-24 grid grid-cols-2 gap-6 sm:gap-12 max-w-md border-t border-neutral-200 pt-10">
-          {[
-            { value: "2026", unit: "", label: "設立予定" },
-            { value: "3", unit: "領域", label: "コア事業" },
-          ].map((stat) => (
-            <div key={stat.label}>
-              <p className="font-display italic text-3xl sm:text-4xl text-neutral-900">
-                {stat.value}
-                <span className="text-base not-italic text-neutral-400 ml-1">
-                  {stat.unit}
-                </span>
-              </p>
-              <p className="mt-2 text-[11px] sm:text-xs tracking-wide text-neutral-400">
-                {stat.label}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 💡【編集ポイント】AIビジュアルバナー：外部画像は使わずSVGでネットワーク図を表現 */}
-      <AIBanner />
-    </section>
-  );
-}
-
-/* 🛠️【サブコンポーネント】AIBanner：デモ写真＋発光するネットワーク図を組み合わせた演出
-   💡【編集ポイント】HERO_BANNER_IMAGE定数のURLを差し替えると、この背景写真が変わります。 */
-function AIBanner() {
-  const nodes = [
-    { x: 60, y: 40 }, { x: 130, y: 90 }, { x: 90, y: 150 },
-    { x: 190, y: 60 }, { x: 230, y: 130 }, { x: 170, y: 190 },
-    { x: 280, y: 90 }, { x: 320, y: 170 }, { x: 260, y: 220 },
-    { x: 370, y: 60 }, { x: 400, y: 150 },
-  ];
-  const edges = [
-    [0, 1], [1, 2], [1, 3], [3, 4], [4, 5], [2, 5],
-    [4, 6], [6, 7], [7, 8], [5, 8], [6, 9], [9, 10], [7, 10],
-  ];
-
-  return (
-    <div className="relative w-full overflow-hidden bg-[#0a1128]" style={{ minHeight: "24rem" }}>
-      {/* 背景の写真（デモ画像） */}
-      <img
-        src={HERO_BANNER_IMAGE}
-        alt="AIとテクノロジーのイメージ"
-        className="absolute inset-0 h-full w-full object-cover opacity-40"
-      />
-      <div className="absolute inset-0 bg-gradient-to-br from-[#0a1128]/95 via-[#0d1b3a]/90 to-[#0a1128]/95" />
-      <div
-        className="absolute inset-0 opacity-[0.5]"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 15% 20%, rgba(56,189,248,0.12), transparent 40%), radial-gradient(circle at 85% 80%, rgba(99,102,241,0.12), transparent 40%)",
-        }}
-      />
-      <div className="relative mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="grid grid-cols-1 lg:grid-cols-2 items-center gap-8 py-16 sm:py-24">
-          <div>
-            <p className="text-[11px] font-medium tracking-[0.25em] text-sky-400/80 uppercase mb-4">
-              Powered by Intelligence
-            </p>
-            <span className="font-display italic text-6xl sm:text-7xl font-medium bg-gradient-to-r from-sky-300 via-sky-400 to-indigo-400 bg-clip-text text-transparent">
-              AI
-            </span>
-            <p className="mt-5 text-neutral-300 text-sm sm:text-base leading-relaxed max-w-sm font-light">
-              データとテクノロジーを繋ぎ、ビジネスに新しい知能を実装する。{COMPANY_NAME}が描くのは、AIが当たり前に現場で働く未来です。
-            </p>
-          </div>
-          <div className="relative h-64 sm:h-80">
-            <svg
-              viewBox="0 0 440 260"
-              className="absolute inset-0 h-full w-full"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {edges.map(([a, b], i) => (
-                <line
-                  key={i}
-                  x1={nodes[a].x}
-                  y1={nodes[a].y}
-                  x2={nodes[b].x}
-                  y2={nodes[b].y}
-                  stroke="rgba(125,211,252,0.3)"
-                  strokeWidth="0.75"
-                />
-              ))}
-              {nodes.map((n, i) => (
-                <circle
-                  key={i}
-                  cx={n.x}
-                  cy={n.y}
-                  r={i % 3 === 0 ? 5.5 : 3}
-                  fill={i % 3 === 0 ? "#7dd3fc" : "#a5b4fc"}
-                  opacity={i % 3 === 0 ? 1 : 0.6}
-                />
-              ))}
-            </svg>
-          </div>
-        </div>
-      </div>
+    <div ref={ref} className={`sw-rv ${shown ? "is-in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+      {children}
     </div>
   );
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】Services
-============================================================================ */
-function Services() {
+function Head({ en, jp, note, center }) {
   return (
-    <section id="services" className="relative bg-white py-24 sm:py-32">
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="flex items-center gap-3 mb-5">
-          <span className="h-px w-10 bg-neutral-300" />
-          <p className="text-[11px] font-medium tracking-[0.2em] text-neutral-500 uppercase">
-            Features
-          </p>
-        </div>
-        <h2 className="font-display italic text-4xl sm:text-5xl font-medium text-neutral-900 tracking-tight max-w-xl">
-          サービスの特徴
-        </h2>
+    <Reveal className={`sw-head ${center ? "is-center" : ""}`}>
+      <p className="sw-mono sw-head__en">{en}</p>
+      <h2 className="sw-head__jp">{jp}</h2>
+      {note && <p className="sw-head__note">{note}</p>}
+    </Reveal>
+  );
+}
 
-        {/* 💡 SERVICES_DATA配列をループして各サービスのブロックを自動生成しています */}
-        <div className="mt-20 sm:mt-24 divide-y divide-neutral-200">
-          {SERVICES_DATA.map((service, i) => {
-            const Icon = service.icon;
-            const imageFirst = i % 2 === 0;
-            return (
-              <div
-                key={service.id}
-                className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-20 items-center py-14 sm:py-16 first:pt-0 last:pb-0"
-              >
-                <div
-                  className={`relative aspect-[4/3] rounded-3xl overflow-hidden bg-[#0a1128] ${
-                    imageFirst ? "lg:order-1" : "lg:order-2"
-                  }`}
-                >
-                  {/* 💡 サービスの写真：SERVICES_DATA配列のimageフィールドを差し替えると更新されます */}
-                  <img
-                    src={service.image}
-                    alt={service.title}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <div
-                    className="absolute inset-0 opacity-60"
-                    style={{
-                      background:
-                        "linear-gradient(160deg, rgba(10,17,40,0.85) 0%, rgba(10,17,40,0.35) 55%, rgba(10,17,40,0.75) 100%)",
-                    }}
-                  />
-                  <span className="font-display italic absolute top-6 left-7 text-white/40 text-7xl">
-                    {service.no}
-                  </span>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm border border-white/20">
-                      <Icon className="h-8 w-8 text-sky-200" strokeWidth={1.3} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={imageFirst ? "lg:order-2" : "lg:order-1"}>
-                  <p className="text-xs font-medium tracking-[0.2em] text-blue-800/70 uppercase mb-3">
-                    {service.label}
-                  </p>
-                  <h3 className="text-2xl sm:text-[1.9rem] font-semibold text-neutral-900 tracking-tight">
-                    {service.title}
-                  </h3>
-                  <p className="mt-5 text-neutral-500 leading-loose text-sm sm:text-[15px] font-light">
-                    {service.body}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+function PageHero({ en, title, lede }) {
+  return (
+    <section className="sw-phero">
+      <div className="sw-wrap">
+        <p className="sw-mono sw-phero__en">{en}</p>
+        <h1 className="sw-phero__t">{title}</h1>
+        {lede && <p className="sw-phero__l">{lede}</p>}
       </div>
     </section>
   );
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】About
-============================================================================ */
-function About() {
+function CtaBand({ go }) {
   return (
-    <section className="relative bg-[#faf9f7] py-24 sm:py-32">
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10">
-          <div className="lg:col-span-7">
-            <div className="flex items-center gap-3 mb-5">
-              <span className="h-px w-10 bg-neutral-300" />
-              <p className="text-[11px] font-medium tracking-[0.2em] text-neutral-500 uppercase">
-                About &amp; Vision
-              </p>
-            </div>
-            <h2 className="font-display italic text-3xl sm:text-4xl font-medium text-neutral-900 tracking-tight leading-tight">
-              確かな技術力で、
-              AIの可能性を社会実装する。
-            </h2>
+    <section className="sw-cta">
+      <div className="sw-wrap">
+        <Reveal>
+          <h2 className="sw-cta__h">
+            御社にも、24時間はたらく<span className="sw-sig">AI社員</span>を。
+          </h2>
+          <p className="sw-cta__b">
+            まずは30分の無料相談から。どの業務をAIに渡せるか、実際の構成をお見せしながらご案内します。
+          </p>
+          <div className="sw-cta__btns">
+            <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("contact")}>
+              無料相談を申し込む
+            </button>
+            <button className="sw-btn sw-btn--wline sw-btn--lg" onClick={() => go("flow")}>
+              導入の流れを見る
+            </button>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
 
-            <div className="mt-8 flex flex-wrap gap-2.5">
-              {["技術への誠実さ", "現場主義", "AIの民主化", "スピードと信頼"].map(
-                (tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-[11px] text-neutral-500"
-                  >
-                    {tag}
-                  </span>
-                )
-              )}
-            </div>
+/* ---------------------------------------------------------------- ヘッダー */
 
-            <Quote className="h-8 w-8 text-neutral-300 mt-10 mb-4" strokeWidth={1.2} />
-            <p className="font-display italic text-xl sm:text-2xl text-neutral-800 leading-relaxed max-w-2xl">
-              AI技術を一部の専門家だけのものにせず、あらゆる企業が当たり前に使いこなせる状態へ。
+function Header({ page, go }) {
+  const [scrolled, setScrolled] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [dd, setDd] = useState(false);
+
+  useEffect(() => {
+    const f = () => setScrolled(window.scrollY > 20);
+    f();
+    window.addEventListener("scroll", f, { passive: true });
+    return () => window.removeEventListener("scroll", f);
+  }, []);
+
+  const nav = (p, slug) => {
+    setOpen(false);
+    setDd(false);
+    go(p, slug);
+  };
+
+  return (
+    <header className={`sw-hd ${scrolled ? "is-on" : ""}`}>
+      <div className="sw-hd__in">
+        <a
+          className="sw-logo"
+          href="#/"
+          onClick={(e) => {
+            e.preventDefault();
+            nav("home");
+          }}
+        >
+          <span className="sw-logo__m" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path d="M5 18 L12 6 L19 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+              <circle cx="12" cy="5.4" r="2.4" fill="currentColor" />
+            </svg>
+          </span>
+          <span className="sw-logo__t">
+            SASHIWA<span>Inc.</span>
+          </span>
+        </a>
+
+        <nav className="sw-nav" aria-label="メインナビゲーション">
+          <div className="sw-nav__pill">
+            <div
+              className={`sw-dd ${dd ? "is-open" : ""}`}
+              onMouseEnter={() => setDd(true)}
+              onMouseLeave={() => setDd(false)}
+            >
+              <button
+                className={`sw-nav__a ${page === "business" ? "is-cur" : ""}`}
+                onClick={() => nav("business")}
+                aria-expanded={dd}
+              >
+                事業内容 <span className="sw-dd__c" aria-hidden="true" />
+              </button>
+              <div className="sw-dd__m">
+                {BUSINESSES.map((b) => (
+                  <button key={b.slug} onClick={() => nav("business", b.slug)}>
+                    <span className="sw-mono">{b.no}</span>
+                    {b.title}
+                  </button>
+                ))}
+                <button className="sw-dd__all" onClick={() => nav("business")}>
+                  事業一覧を見る →
+                </button>
+              </div>
+            </div>
+            <button className={`sw-nav__a ${page === "flow" ? "is-cur" : ""}`} onClick={() => nav("flow")}>
+              導入の流れ
+            </button>
+            <button className={`sw-nav__a ${page === "blog" ? "is-cur" : ""}`} onClick={() => nav("blog")}>
+              記事
+            </button>
+            <button className={`sw-nav__a ${page === "company" ? "is-cur" : ""}`} onClick={() => nav("company")}>
+              会社概要
+            </button>
+          </div>
+        </nav>
+
+        <button className="sw-hd__cta" onClick={() => nav("contact")}>
+          お問い合わせ
+        </button>
+
+        <button
+          className={`sw-burger ${open ? "is-x" : ""}`}
+          aria-label={open ? "メニューを閉じる" : "メニューを開く"}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span />
+          <span />
+        </button>
+      </div>
+
+      <div className={`sw-drawer ${open ? "is-open" : ""}`}>
+        <p className="sw-mono sw-drawer__k">事業内容</p>
+        {BUSINESSES.map((b) => (
+          <button key={b.slug} className="sw-drawer__sub" onClick={() => nav("business", b.slug)}>
+            {b.title}
+          </button>
+        ))}
+        <button className="sw-drawer__a" onClick={() => nav("business")}>
+          事業一覧
+        </button>
+        <button className="sw-drawer__a" onClick={() => nav("flow")}>
+          導入の流れ
+        </button>
+        <button className="sw-drawer__a" onClick={() => nav("blog")}>
+          記事
+        </button>
+        <button className="sw-drawer__a" onClick={() => nav("company")}>
+          会社概要
+        </button>
+        <button className="sw-drawer__cta" onClick={() => nav("contact")}>
+          お問い合わせ
+        </button>
+      </div>
+    </header>
+  );
+}
+
+/* ---------------------------------------------------------------- ホーム */
+
+function HomePage({ go }) {
+  return (
+    <>
+      {/* ヒーロー */}
+      <section className="sw-hero">
+        <div className="sw-hero__bg" aria-hidden="true" />
+        <div className="sw-wrap sw-hero__in">
+          <div className="sw-hero__l">
+            <p className="sw-mono sw-hero__eb">
+              AI EMPLOYEE <span className="sw-hero__bar" /> 社員は、全員AI。
+            </p>
+            <h1 className="sw-hero__h1">
+              いまの手作業を、
+              <br />
+              <span className="sw-hero__em">AI社員</span>に任せる。
+            </h1>
+            <p className="sw-hero__lede">
+              メール対応、レポート作成、SNS運用、資料づくり、請求処理。
+              人がくり返している業務を、24時間はたらくAIエージェントに置き換えます。
+              <b>設計から実装、稼働開始まで一貫してお引き受けします。</b>
             </p>
 
-            <div className="mt-10 space-y-5 text-neutral-500 leading-loose text-sm sm:text-[15px] font-light max-w-2xl">
-              <p>
-                {COMPANY_NAME}は、次世代のAIソリューションを提供する専業カンパニーとして立ち上がりました。現場で磨き上げたAI実装のノウハウをもとに、より大胆に、より速く、AIの可能性を社会実装していくことを使命としています。
-              </p>
-              <p>
-                私たちが目指すのは、AI技術を一部の専門家だけのものにせず、あらゆる企業が当たり前に使いこなせる状態、すなわち「AI技術の民主化」です。
-              </p>
-              <p>
-                知的好奇心と誠実さを両輪に、クライアント一社一社の課題に真摯に向き合う。それが、これから築いていく{COMPANY_NAME}のブランドそのものです。
-              </p>
+            <div className="sw-hero__cta">
+              <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("contact")}>
+                30分の無料相談へ
+              </button>
+              <button className="sw-btn sw-btn--line sw-btn--lg" onClick={() => go("business")}>
+                事業内容を見る
+              </button>
             </div>
+
+            <ul className="sw-hero__chips">
+              <li>
+                <Icon name="check" size={16} />
+                初期構築 約2〜4週間
+              </li>
+              <li>
+                <Icon name="check" size={16} />
+                納品後3ヶ月の伴走つき
+              </li>
+              <li>
+                <Icon name="check" size={16} />
+                オンライン全国対応
+              </li>
+            </ul>
           </div>
 
-          {/* 💡 会社紹介の写真：ABOUT_IMAGE定数のURLを差し替えると更新されます */}
-          <div className="lg:col-span-5">
-            <div className="relative aspect-[4/5] rounded-3xl overflow-hidden">
-              <img
-                src={ABOUT_IMAGE}
-                alt={`${COMPANY_NAME}のチームイメージ`}
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-              <div className="absolute inset-0 ring-1 ring-inset ring-black/5 rounded-3xl" />
-            </div>
+          <div className="sw-hero__r">
+            <Mascot />
           </div>
         </div>
-      </div>
-    </section>
-  );
-}
+      </section>
 
-/* ============================================================================
-   🛠️【コンポーネント】CompanyProfile
-============================================================================ */
-function CompanyProfile() {
-  const rows = [
-    { icon: Calendar, label: "設立", value: COMPANY_PROFILE.established },
-    { icon: Wallet, label: "資本金", value: COMPANY_PROFILE.capital },
-    { icon: MapPin, label: "所在地", value: COMPANY_PROFILE.address },
-    { icon: Users, label: "代表者", value: COMPANY_PROFILE.representative },
-    { icon: Briefcase, label: "事業内容", value: COMPANY_PROFILE.business },
-  ];
-
-  return (
-    <section id="about" className="relative bg-white py-24 sm:py-32">
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="flex items-center gap-3 mb-5">
-          <span className="h-px w-10 bg-neutral-300" />
-          <p className="text-[11px] font-medium tracking-[0.2em] text-neutral-500 uppercase">
-            Company Profile
-          </p>
+      {/* 何をする会社か（1行で説明） */}
+      <section className="sw-oneline">
+        <div className="sw-wrap">
+          <Reveal>
+            <p className="sw-oneline__t">
+              株式会社SASHIWAは、<b>「AI社員」をつくって会社に置いていく</b>会社です。
+            </p>
+            <p className="sw-oneline__b">
+              ツールを渡して終わりではありません。御社の判断基準や手順をAIが読める形に整え、
+              役割を持ったAIエージェントとして実装し、実務が回りはじめるところまでを請け負います。
+            </p>
+          </Reveal>
         </div>
-        <h2 className="font-display italic text-4xl sm:text-5xl font-medium text-neutral-900 tracking-tight">
-          会社概要
-        </h2>
+      </section>
 
-        <div className="mt-16 border-t border-neutral-200">
-          {rows.map((row) => {
-            const Icon = row.icon;
-            return (
-              <div
-                key={row.label}
-                className="group flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-8 py-6 border-b border-neutral-200 transition-colors duration-300 hover:bg-neutral-50/60"
-              >
-                <div className="flex items-center gap-2.5 sm:w-40 flex-shrink-0">
-                  <Icon className="h-4 w-4 text-neutral-400" strokeWidth={1.5} />
-                  <span className="text-[13px] font-medium tracking-wide text-neutral-500">
-                    {row.label}
+      {/* 任せられる業務 */}
+      <section className="sw-sec">
+        <div className="sw-wrap">
+          <Head
+            center
+            en="WHAT YOU CAN HAND OVER"
+            jp="こんな業務を任せられます"
+            note="手順が言葉で説明できる業務であれば、ほとんどが対象になります。"
+          />
+          <div className="sw-tasks">
+            {TASKS.map((t, i) => (
+              <Reveal key={t.t} delay={i * 55}>
+                <article className="sw-task">
+                  <span className="sw-task__ic">
+                    <Icon name={t.icon} size={26} />
                   </span>
-                </div>
-                <p className="text-sm sm:text-[15px] text-neutral-900 leading-relaxed">
-                  {row.value}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-12">
-          <p className="text-[11px] font-medium text-neutral-400 uppercase tracking-[0.2em] mb-4">
-            主要取引先（予定）
-          </p>
-          <div className="flex flex-wrap gap-2.5">
-            {COMPANY_PROFILE.partners.map((partner) => (
-              <span
-                key={partner}
-                className="rounded-full border border-neutral-200 bg-[#faf9f7] px-4 py-2 text-xs text-neutral-600"
-              >
-                {partner}
-              </span>
+                  <h3>{t.t}</h3>
+                  <p>{t.d}</p>
+                </article>
+              </Reveal>
             ))}
           </div>
         </div>
-      </div>
-    </section>
-  );
-}
+      </section>
 
-/* ============================================================================
-   🛠️【コンポーネント】SecurityEthics
-============================================================================ */
-function SecurityEthics() {
-  return (
-    <section className="relative bg-[#faf9f7] py-24 sm:py-32">
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-3 mb-5">
-            <span className="h-px w-10 bg-neutral-300" />
-            <p className="text-[11px] font-medium tracking-[0.2em] text-neutral-500 uppercase">
-              Security &amp; Ethics
-            </p>
-          </div>
-          <h2 className="font-display italic text-4xl sm:text-5xl font-medium text-neutral-900 tracking-tight">
-            AIセキュリティ・倫理方針
-          </h2>
-          <p className="mt-5 text-neutral-500 leading-relaxed font-light">
-            AIを社会に実装する企業として、安全性と誠実さを何よりも重視します。
-          </p>
-        </div>
-
-        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {ETHICS_AND_SECURITY.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.title}
-                className="rounded-2xl border border-neutral-200 bg-white p-8 transition-all duration-300 hover:shadow-[0_20px_40px_-16px_rgba(15,23,42,0.12)] hover:-translate-y-1"
-              >
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#0a1128]">
-                  <Icon className="h-5 w-5 text-sky-300" strokeWidth={1.5} />
-                </div>
-                <h3 className="mt-6 text-base font-semibold text-neutral-900">
-                  {item.title}
-                </h3>
-                <p className="mt-3 text-sm text-neutral-500 leading-relaxed font-light">
-                  {item.body}
+      {/* Before / After */}
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap">
+          <Head center en="BEFORE / AFTER" jp="導入すると、こう変わります" />
+          <div className="sw-ba">
+            <div className="sw-ba__hd">
+              <span>いま</span>
+              <span className="is-after">AI社員を置いたあと</span>
+            </div>
+            {BEFORE_AFTER.map((r, i) => (
+              <Reveal key={r.before} delay={i * 60} className="sw-ba__r">
+                <p className="sw-ba__b">{r.before}</p>
+                <span className="sw-ba__ar" aria-hidden="true">
+                  →
+                </span>
+                <p className="sw-ba__a">
+                  <Icon name="check" size={17} />
+                  {r.after}
                 </p>
-              </div>
-            );
-          })}
+              </Reveal>
+            ))}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {/* 事業内容 → 別ページへ */}
+      <section className="sw-sec">
+        <div className="sw-wrap">
+          <Head en="BUSINESS" jp="事業内容" note="3つの領域で、AIの導入から運用までをお引き受けします。" />
+          <div className="sw-bz">
+            {BUSINESSES.map((b, i) => (
+              <Reveal key={b.slug} delay={i * 70}>
+                <article className="sw-bz__c" onClick={() => go("business", b.slug)}>
+                  <span className="sw-bz__ic">
+                    <Icon name={b.icon} size={30} />
+                  </span>
+                  <p className="sw-mono sw-bz__no">
+                    {b.no} <span>{b.en}</span>
+                  </p>
+                  <h3>{b.title}</h3>
+                  <p className="sw-bz__l">{b.lede}</p>
+                  <span className="sw-bz__link">
+                    詳しく見る <em aria-hidden="true">→</em>
+                  </span>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 自社実証 */}
+      <section className="sw-proof">
+        <div className="sw-wrap">
+          <Reveal className="sw-proof__top">
+            <p className="sw-mono sw-proof__en">PROOF OF WORK</p>
+            <h2 className="sw-proof__h">
+              「全部、<span className="sw-sig">AI</span>でやっています。」
+            </h2>
+            <p className="sw-proof__s">このサービスの一番の実例は、SASHIWA自身です。</p>
+          </Reveal>
+
+          <Reveal className="sw-proof__body" delay={60}>
+            <p>
+              SASHIWAには人間の従業員がいません。このWebサイト、記事、投稿、提案資料、問い合わせの一次処理、
+              原価計算まで、すべてをAIエージェントが制作・処理しています。
+            </p>
+            <p>
+              依頼が届くと統括AIが要件を構造化して担当を選定。制作担当と技術担当が並行して作業を進め、
+              品質・倫理担当が成果物を検査し、原価担当が工数を算出します。人が行うのは、方針の決定と最終承認だけです。
+            </p>
+          </Reveal>
+
+          <div className="sw-stats">
+            {STATS.map((s, i) => (
+              <Reveal key={s.label} delay={i * 60} className="sw-stat">
+                <p className="sw-mono sw-stat__v">
+                  {s.v}
+                  <span>{s.u}</span>
+                </p>
+                <p className="sw-stat__l">{s.label}</p>
+              </Reveal>
+            ))}
+          </div>
+
+          <div className="sw-roster">
+            <p className="sw-mono sw-roster__k">ROSTER — 稼働中のAI社員</p>
+            <div className="sw-roster__g">
+              {AGENTS.map((a, i) => (
+                <Reveal key={a.code} delay={i * 50}>
+                  <article className={`sw-ag ${a.lead ? "is-lead" : ""}`}>
+                    <p className="sw-mono sw-ag__c">{a.code}</p>
+                    <p className="sw-ag__r">{a.role}</p>
+                    <p className="sw-mono sw-ag__n">{a.name}</p>
+                    <p className="sw-ag__m">{a.mission}</p>
+                  </article>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 実際に動いている自動化 */}
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap">
+          <Head
+            en="REAL WORKFLOWS"
+            jp="実際に動いている自動化"
+            note="単発のタスク処理ではなく、止まらずに回り続けるパイプラインです。"
+          />
+          <div className="sw-wf">
+            {WORKFLOWS.map((w, i) => (
+              <Reveal key={w.title} delay={i * 70} className="sw-wf__r">
+                <div className="sw-wf__l">
+                  <span className="sw-mono sw-wf__time">{w.time}</span>
+                  <span className="sw-wf__tag">{w.tag}</span>
+                </div>
+                <div className="sw-wf__m">
+                  <h3>{w.title}</h3>
+                  <p>{w.body}</p>
+                  <ol className="sw-wf__st">
+                    {w.steps.map((s, k) => (
+                      <li key={s}>
+                        <span className="sw-mono">{String(k + 1).padStart(2, "0")}</span>
+                        {s}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 流れ（要約）→ 詳細ページへ */}
+      <section className="sw-sec">
+        <div className="sw-wrap">
+          <Head en="HOW IT WORKS" jp="導入の流れ" />
+          <div className="sw-flow">
+            {FLOW.map((f, i) => (
+              <Reveal key={f.n} delay={i * 60} className="sw-flow__c">
+                <p className="sw-mono sw-flow__n">STEP {f.n}</p>
+                <h3>{f.title}</h3>
+                <p className="sw-mono sw-flow__s">{f.span}</p>
+                <p className="sw-flow__b">{f.body}</p>
+              </Reveal>
+            ))}
+          </div>
+          <div className="sw-more">
+            <button className="sw-btn sw-btn--line" onClick={() => go("flow")}>
+              導入の流れを詳しく見る
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ 要約 */}
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap sw-narrow">
+          <Head center en="FAQ" jp="よくあるご質問" />
+          <FaqList items={FAQ.slice(0, 4)} />
+          <div className="sw-more">
+            <button className="sw-btn sw-btn--line" onClick={() => go("flow")}>
+              すべての質問を見る
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <CtaBand go={go} />
+    </>
   );
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】Contact
-   ※すべての入力欄はReactのuseStateで値を管理する「制御コンポーネント」です。
-   ※送信処理は WEBHOOK_URL（SASHIWA本体システムのMake Webhook）にPOSTします。
-============================================================================ */
-function Contact() {
-  const [submitted, setSubmitted] = useState(false);
+/* ---------------------------------------------------------------- FAQ部品 */
+
+function FaqList({ items }) {
+  const [open, setOpen] = useState(0);
+  return (
+    <div className="sw-faq">
+      {items.map((f, n) => (
+        <div key={f.q} className={`sw-faq__i ${open === n ? "is-open" : ""}`}>
+          <button className="sw-faq__q" aria-expanded={open === n} onClick={() => setOpen(open === n ? -1 : n)}>
+            <span className="sw-mono sw-faq__m">Q</span>
+            <span className="sw-faq__qt">{f.q}</span>
+            <span className="sw-faq__ic" aria-hidden="true" />
+          </button>
+          <div className="sw-faq__a">
+            <p>{f.a}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- 事業一覧 */
+
+function BusinessIndexPage({ go }) {
+  return (
+    <>
+      <PageHero
+        en="BUSINESS"
+        title="事業内容"
+        lede="AIの導入から運用までを、3つの領域でお引き受けします。気になる事業をお選びください。"
+      />
+      <section className="sw-sec">
+        <div className="sw-wrap">
+          <div className="sw-bz sw-bz--lg">
+            {BUSINESSES.map((b, i) => (
+              <Reveal key={b.slug} delay={i * 70}>
+                <article className="sw-bz__c" onClick={() => go("business", b.slug)}>
+                  <span className="sw-bz__ic">
+                    <Icon name={b.icon} size={30} />
+                  </span>
+                  <p className="sw-mono sw-bz__no">
+                    {b.no} <span>{b.en}</span>
+                  </p>
+                  <h3>{b.title}</h3>
+                  <p className="sw-bz__l">{b.lede}</p>
+                  <ul className="sw-bz__ul">
+                    {b.detail.deliver.slice(0, 3).map((d) => (
+                      <li key={d}>{d}</li>
+                    ))}
+                  </ul>
+                  <span className="sw-bz__link">
+                    詳しく見る <em aria-hidden="true">→</em>
+                  </span>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+      <CtaBand go={go} />
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- 事業詳細 */
+
+function BusinessDetailPage({ slug, go }) {
+  const idx = Math.max(0, BUSINESSES.findIndex((b) => b.slug === slug));
+  const b = BUSINESSES[idx];
+  const prev = BUSINESSES[(idx - 1 + BUSINESSES.length) % BUSINESSES.length];
+  const next = BUSINESSES[(idx + 1) % BUSINESSES.length];
+
+  return (
+    <>
+      <section className="sw-phero sw-phero--bz">
+        <div className="sw-wrap">
+          <button className="sw-crumb" onClick={() => go("business")}>
+            ← 事業一覧
+          </button>
+          <p className="sw-mono sw-phero__en">
+            {b.no} <span className="sw-phero__sep">｜</span> {b.en}
+          </p>
+          <h1 className="sw-phero__t">{b.title}</h1>
+          <p className="sw-phero__l">{b.lede}</p>
+          <button className="sw-btn sw-btn--sig" onClick={() => go("contact")}>
+            この事業について相談する
+          </button>
+        </div>
+      </section>
+
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap sw-narrow">
+          <Head en="WHAT IT IS" jp={`${b.title}とは`} />
+          <Reveal className="sw-prose">
+            <p>{b.detail.what}</p>
+          </Reveal>
+          <div className="sw-pts">
+            {b.detail.points.map((p, i) => (
+              <Reveal key={p.t} delay={i * 60} className="sw-pt">
+                <span className="sw-mono sw-pt__n">{String(i + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{p.t}</h3>
+                  <p>{p.d}</p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="sw-sec">
+        <div className="sw-wrap sw-narrow">
+          <Head en="DELIVERABLES" jp="お渡しするもの" />
+          <div className="sw-dl">
+            {b.detail.deliver.map((d, i) => (
+              <Reveal key={d} delay={i * 50}>
+                <div className="sw-dl__i">
+                  <Icon name="check" size={20} />
+                  {d}
+                </div>
+              </Reveal>
+            ))}
+          </div>
+          <Reveal className="sw-span">
+            <span className="sw-mono">期間の目安</span>
+            {b.detail.span}
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="sw-pager">
+        <div className="sw-wrap sw-pager__in">
+          <button onClick={() => go("business", prev.slug)}>
+            <span className="sw-mono">← {prev.no}</span>
+            {prev.title}
+          </button>
+          <button className="sw-pager__c" onClick={() => go("business")}>
+            事業一覧へ
+          </button>
+          <button className="sw-pager__r" onClick={() => go("business", next.slug)}>
+            <span className="sw-mono">{next.no} →</span>
+            {next.title}
+          </button>
+        </div>
+      </section>
+
+      <CtaBand go={go} />
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- 導入の流れ */
+
+function FlowPage({ go }) {
+  return (
+    <>
+      <PageHero
+        en="HOW IT WORKS"
+        title="導入の流れ"
+        lede="無料相談から稼働開始まで、おおよそ1〜2ヶ月です。範囲を絞れば、より短く始めることもできます。"
+      />
+      <section className="sw-sec">
+        <div className="sw-wrap sw-narrow">
+          <div className="sw-steps">
+            {FLOW.map((f, i) => (
+              <Reveal key={f.n} delay={i * 70} className="sw-step">
+                <div className="sw-step__l">
+                  <span className="sw-mono">STEP {f.n}</span>
+                  <span className="sw-step__dot" aria-hidden="true" />
+                </div>
+                <div className="sw-step__m">
+                  <h3>{f.title}</h3>
+                  <p className="sw-mono sw-step__s">{f.span}</p>
+                  <p className="sw-step__b">{f.body}</p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap sw-narrow">
+          <Head center en="FAQ" jp="よくあるご質問" />
+          <FaqList items={FAQ} />
+        </div>
+      </section>
+
+      <CtaBand go={go} />
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- 記事 */
+
+function BlogPage({ go }) {
+  return (
+    <>
+      <PageHero en="ARTICLES" title="記事" lede="AI社員の設計や自動化の実務について書いています。" />
+      <section className="sw-sec">
+        <div className="sw-wrap sw-narrow">
+          {POSTS.length === 0 ? (
+            <Reveal className="sw-empty">
+              <span className="sw-empty__ic">
+                <Icon name="doc" size={30} />
+              </span>
+              <h2>記事は準備中です</h2>
+              <p>
+                現在、AI社員の設計方法や自動化の実例をまとめています。公開までは、
+                実際の構成を無料相談で直接お見せしています。
+              </p>
+              <button className="sw-btn sw-btn--sig" onClick={() => go("contact")}>
+                無料相談で構成を見る
+              </button>
+            </Reveal>
+          ) : (
+            <div className="sw-posts">
+              {POSTS.map((p, i) => (
+                <Reveal key={p.id} delay={i * 50}>
+                  <a className="sw-post" href={p.url} target="_blank" rel="noopener noreferrer">
+                    <div className="sw-post__meta">
+                      <span className="sw-mono">{p.date}</span>
+                      <span className="sw-post__cat">{p.category}</span>
+                    </div>
+                    <h3>{p.title}</h3>
+                    <p>{p.excerpt}</p>
+                  </a>
+                </Reveal>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+      <CtaBand go={go} />
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- 会社概要 */
+
+function CompanyPage({ go }) {
+  return (
+    <>
+      <PageHero en="COMPANY" title="会社概要" lede="社員は全員AI。人間の従業員がいない会社です。" />
+      <section className="sw-sec">
+        <div className="sw-wrap sw-narrow">
+          <Reveal className="sw-tb">
+            {COMPANY.map((r) => (
+              <div className="sw-tb__r" key={r.k}>
+                <div className="sw-tb__k">{r.k}</div>
+                <div className="sw-tb__v">{r.ready ? r.v : <span className="sw-mono sw-badge">{r.v}</span>}</div>
+              </div>
+            ))}
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap">
+          <Head en="ROSTER" jp="AI社員のご紹介" note="5体がそれぞれ独立した役割を持ち、互いの成果物を検査し合います。" />
+          <div className="sw-roster__g sw-roster__g--light">
+            {AGENTS.map((a, i) => (
+              <Reveal key={a.code} delay={i * 50}>
+                <article className={`sw-ag ${a.lead ? "is-lead" : ""}`}>
+                  <p className="sw-mono sw-ag__c">{a.code}</p>
+                  <p className="sw-ag__r">{a.role}</p>
+                  <p className="sw-mono sw-ag__n">{a.name}</p>
+                  <p className="sw-ag__m">{a.mission}</p>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <CtaBand go={go} />
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- お問い合わせ
+   ★ WEBHOOK_URL / payload のキー名は Make 側の規格。変更禁止。
+   ------------------------------------------------------------------------- */
+
+function ContactPage() {
+  const [form, setForm] = useState({ name: "", company: "", email: "", subject: "", message: "" });
   const [sending, setSending] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    company: "",
-    email: "",
-    subject: CONTACT_SUBJECTS[0],
-    message: "",
-    agree: false,
-  });
-  const [subjectOpen, setSubjectOpen] = useState(false);
-  const subjectRef = useRef(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (subjectRef.current && !subjectRef.current.contains(e.target)) {
-        setSubjectOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const updateField = (field) => (e) => {
-    const value = field === "agree" ? e.target.checked : e.target.value;
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+  const up = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (sending) return;
+
+    if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
+      setError("お名前・メールアドレス・ご相談内容を入力してください。");
+      return;
+    }
+
+    setError("");
     setSending(true);
 
-    // 規格：Make側は client_name, client_email, message の3キーのみを学習済みのため、
-    // フォームの複数項目を1つのmessageに整形してから送信します。
-    const composedMessage =
-      `【貴社名】${formData.company || "未記入"}\n` +
-      `【件名】${formData.subject}\n` +
-      `【内容】\n${formData.message}`;
-
+    // ---- Make が受け取る規格（3キー固定）。変更しないこと ----
     const payload = {
-      client_name: formData.name,
-      client_email: formData.email,
-      message: composedMessage,
+      client_name: form.name,
+      client_email: form.email,
+      message: `【貴社名】${form.company}／【件名】${form.subject}／【内容】${form.message}`,
     };
 
     try {
-      const response = await fetch(WEBHOOK_URL, {
+      const res = await fetch(WEBHOOK_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      if (response.ok) {
-        setSubmitted(true);
-      } else {
-        console.error("Webhook送信エラー: ステータス", response.status);
-        alert("送信に失敗しました。時間をおいて再度お試しください。");
-      }
+      if (!res.ok) throw new Error(String(res.status));
+      setSubmitted(true);
     } catch (err) {
-      console.error("Webhook送信に失敗しました", err);
-      alert("送信に失敗しました。時間をおいて再度お試しください。");
+      setError("送信できませんでした。通信環境をご確認のうえ、もう一度お試しください。");
     } finally {
       setSending(false);
     }
   };
 
-  const inputClass =
-    "w-full rounded-xl border border-neutral-300 bg-white px-4 py-3.5 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none transition-all duration-200 focus:border-neutral-900 focus:ring-4 focus:ring-neutral-100";
-
   return (
-    <section id="contact" className="relative bg-white">
-      <div className="bg-[#0a1128] py-16 sm:py-20">
-        <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14 flex flex-col sm:flex-row items-start sm:items-center gap-6 sm:gap-8">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-white/10">
-            <Mail className="h-6 w-6 text-sky-300" strokeWidth={1.5} />
-          </div>
-          <div>
-            <h2 className="font-display italic text-2xl sm:text-3xl font-medium text-white">
-              お問い合わせ・無料相談
-            </h2>
-            <p className="mt-2 text-sm text-neutral-400 font-light">
-              AI導入のご相談から、開発案件のご依頼まで。まずはお気軽にお問い合わせください。
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-2xl px-6 sm:px-10 lg:px-14 py-20 sm:py-24">
-        {submitted ? (
-          <div className="rounded-2xl border border-neutral-200 py-16 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#0a1128]">
-              <Send className="h-6 w-6 text-white" />
-            </div>
-            <h3 className="mt-6 font-display italic text-lg text-neutral-900">
-              お問い合わせありがとうございます
-            </h3>
-            <p className="mt-2 text-sm text-neutral-500 font-light">
-              内容を確認の上、担当者よりご連絡いたします。
-            </p>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-7">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-7">
-              <div>
-                <label className="block text-[13px] font-medium text-neutral-600 mb-2.5">
-                  お名前
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoComplete="name"
-                  placeholder="山田 太郎"
-                  value={formData.name}
-                  onChange={updateField("name")}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-neutral-600 mb-2.5">
-                  貴社名
-                </label>
-                <input
-                  type="text"
-                  autoComplete="organization"
-                  placeholder="株式会社〇〇"
-                  value={formData.company}
-                  onChange={updateField("company")}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[13px] font-medium text-neutral-600 mb-2.5">
-                メールアドレス
-              </label>
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                placeholder="you@example.com"
-                value={formData.email}
-                onChange={updateField("email")}
-                className={inputClass}
-              />
-            </div>
-
-            <div className="relative" ref={subjectRef}>
-              <label className="block text-[13px] font-medium text-neutral-600 mb-2.5">
-                お問い合わせ件名
-              </label>
+    <>
+      <PageHero
+        en="CONTACT"
+        title="お問い合わせ"
+        lede="30分の無料相談を承っています。送信された時点で、統括AIが内容の解析を開始します。"
+      />
+      <section className="sw-sec">
+        <div className="sw-wrap sw-narrow">
+          {submitted ? (
+            <Reveal className="sw-done">
+              <span className="sw-done__ic">
+                <Icon name="check" size={34} />
+              </span>
+              <h2>受け付けました。</h2>
+              <p>
+                内容の解析を開始しました。担当エージェントの割り当てと、確認のご連絡を
+                ご記入のメールアドレス宛にお送りします。
+              </p>
               <button
-                type="button"
-                onClick={() => setSubjectOpen((v) => !v)}
-                className={`${inputClass} flex items-center justify-between text-left`}
+                className="sw-btn sw-btn--line"
+                onClick={() => {
+                  setSubmitted(false);
+                  setForm({ name: "", company: "", email: "", subject: "", message: "" });
+                }}
               >
-                <span>{formData.subject}</span>
-                <ChevronDown
-                  className={`h-4 w-4 text-neutral-400 transition-transform duration-300 ${
-                    subjectOpen ? "rotate-180" : ""
-                  }`}
-                />
+                続けて別の相談を送る
               </button>
+            </Reveal>
+          ) : (
+            <Reveal className="sw-form">
+              <div className="sw-form__g">
+                <label className="sw-fd">
+                  <span className="sw-fd__l">
+                    お名前 <em>必須</em>
+                  </span>
+                  <input type="text" value={form.name} onChange={up("name")} placeholder="指輪 直人" autoComplete="name" />
+                </label>
+                <label className="sw-fd">
+                  <span className="sw-fd__l">貴社名</span>
+                  <input
+                    type="text"
+                    value={form.company}
+                    onChange={up("company")}
+                    placeholder="株式会社◯◯"
+                    autoComplete="organization"
+                  />
+                </label>
+                <label className="sw-fd">
+                  <span className="sw-fd__l">
+                    メールアドレス <em>必須</em>
+                  </span>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={up("email")}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                  />
+                </label>
+                <label className="sw-fd">
+                  <span className="sw-fd__l">件名</span>
+                  <input
+                    type="text"
+                    value={form.subject}
+                    onChange={up("subject")}
+                    placeholder="問い合わせ対応の自動化について"
+                  />
+                </label>
+                <label className="sw-fd sw-fd--w">
+                  <span className="sw-fd__l">
+                    ご相談内容 <em>必須</em>
+                  </span>
+                  <textarea
+                    rows={7}
+                    value={form.message}
+                    onChange={up("message")}
+                    placeholder="いま手作業でやっていることと、困っている点をそのままお書きください。整った文章でなくて構いません。"
+                  />
+                </label>
+              </div>
 
-              {subjectOpen && (
-                <div className="absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl">
-                  {CONTACT_SUBJECTS.map((subject) => (
-                    <button
-                      type="button"
-                      key={subject}
-                      onClick={() => {
-                        setFormData((prev) => ({ ...prev, subject }));
-                        setSubjectOpen(false);
-                      }}
-                      className={`block w-full px-4 py-2.5 text-left text-sm transition-colors duration-200 ${
-                        formData.subject === subject
-                          ? "bg-neutral-100 text-neutral-900 font-medium"
-                          : "text-neutral-600 hover:bg-neutral-50"
-                      }`}
-                    >
-                      {subject}
-                    </button>
-                  ))}
-                </div>
+              {error && (
+                <p className="sw-form__err" role="alert">
+                  {error}
+                </p>
               )}
-            </div>
 
-            <div>
-              <label className="block text-[13px] font-medium text-neutral-600 mb-2.5">
-                お問い合わせ内容
-              </label>
-              <textarea
-                required
-                rows={5}
-                placeholder="ご相談内容の詳細をご記入ください。"
-                value={formData.message}
-                onChange={updateField("message")}
-                className={`${inputClass} resize-none`}
-              />
-            </div>
-
-            <label className="flex items-start gap-3 text-xs text-neutral-500">
-              <input
-                type="checkbox"
-                required
-                checked={formData.agree}
-                onChange={updateField("agree")}
-                className="mt-0.5 h-4 w-4 rounded border-neutral-300 accent-neutral-900"
-              />
-              <span>プライバシーポリシーの内容に同意の上、送信します。</span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={sending}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-neutral-900 px-7 py-4 text-sm font-medium text-white shadow-[0_8px_24px_-8px_rgba(15,23,42,0.5)] transition-all duration-300 hover:shadow-[0_12px_32px_-8px_rgba(15,23,42,0.6)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0"
-            >
-              {sending ? "送信中..." : "送信する"}
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
-        )}
-      </div>
-    </section>
+              <div className="sw-form__f">
+                <p className="sw-form__note">
+                  いただいた内容は案件の対応にのみ使用し、学習用途への転用や第三者への提供は行いません。
+                </p>
+                <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={handleSubmit} disabled={sending}>
+                  {sending ? "送信中..." : "この内容で送信する"}
+                </button>
+              </div>
+            </Reveal>
+          )}
+        </div>
+      </section>
+    </>
   );
 }
 
-/* ============================================================================
-   🛠️【コンポーネント】Footer：濃紺背景で引き締め、高級感を演出
-============================================================================ */
-function Footer() {
-  const scrollTo = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  };
+/* ---------------------------------------------------------------- フッター */
 
+function Footer({ go }) {
   return (
-    <footer className="relative bg-[#0a1128] pt-20 pb-10">
-      <div className="mx-auto max-w-7xl px-6 sm:px-10 lg:px-14">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-          <div>
-            <span className="font-display italic text-xl text-white">
-              {COMPANY_NAME_EN}
-            </span>
-            <p className="mt-4 text-sm text-neutral-400 leading-relaxed max-w-xs font-light">
-              {COMPANY_NAME}。AI技術の民主化を通じて、社会に変革をもたらす次世代AIソリューションカンパニー。
+    <footer className="sw-ft">
+      <div className="sw-wrap">
+        <div className="sw-ft__top">
+          <div className="sw-ft__brand">
+            <p className="sw-ft__logo">
+              SASHIWA<span>Inc.</span>
             </p>
+            <p className="sw-ft__tag">AI社員と、事業をつくる。</p>
+            <p className="sw-ft__sub">株式会社SASHIWA｜オンライン相談 全国対応</p>
           </div>
-
-          <div>
-            <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-[0.2em] mb-5">
-              Sitemap
-            </p>
-            <ul className="space-y-3">
-              {NAV_LINKS.map((link) => (
-                <li key={link.id}>
-                  <button
-                    onClick={() => scrollTo(link.id)}
-                    className="text-sm text-neutral-300 hover:text-white transition-colors duration-300"
-                  >
-                    {link.label}
-                  </button>
-                </li>
+          <div className="sw-ft__cols">
+            <div>
+              <p className="sw-mono sw-ft__k">BUSINESS</p>
+              {BUSINESSES.map((b) => (
+                <button key={b.slug} onClick={() => go("business", b.slug)}>
+                  {b.title}
+                </button>
               ))}
-            </ul>
-          </div>
-
-          <div>
-            <p className="text-[11px] font-medium text-neutral-500 uppercase tracking-[0.2em] mb-5">
-              Career
-            </p>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-              <p className="text-sm text-white font-medium">We are hiring!</p>
-              <p className="mt-1.5 text-xs text-neutral-400 leading-relaxed font-light">
-                私たちと一緒にAIの未来をつくりませんか。採用情報は準備中です。
-              </p>
-              <button
-                onClick={() => scrollTo("contact")}
-                className="mt-3.5 inline-flex items-center gap-1 text-xs font-medium text-sky-300 hover:text-sky-200"
-              >
-                お問い合わせはこちら <ArrowRight className="h-3 w-3" />
-              </button>
+            </div>
+            <div>
+              <p className="sw-mono sw-ft__k">COMPANY</p>
+              <button onClick={() => go("home")}>ホーム</button>
+              <button onClick={() => go("flow")}>導入の流れ</button>
+              <button onClick={() => go("blog")}>記事</button>
+              <button onClick={() => go("company")}>会社概要</button>
+              <button onClick={() => go("contact")}>お問い合わせ</button>
             </div>
           </div>
         </div>
-
-        <div className="mt-16 pt-7 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-neutral-500">
-            © 2026 {COMPANY_NAME} All Rights Reserved.
-          </p>
-          <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-            <Mail className="h-3.5 w-3.5" />
-            contact@sashiwa.example.com
-          </div>
-        </div>
+        <p className="sw-ft__note">
+          ※当サイトに記載の成果・稼働に関する記述は自社運用の実績であり、同様の成果を保証するものではありません。
+        </p>
+        <p className="sw-mono sw-ft__cp">© {new Date().getFullYear()} SASHIWA Inc. ALL RIGHTS RESERVED.</p>
       </div>
     </footer>
   );
 }
 
-/* ============================================================================
-   🚀 App：全コンポーネントを順序どおりに呼び出します
-============================================================================ */
+/* ---------------------------------------------------------------- ルート */
+
 export default function App() {
+  const [route, setRoute] = useState(() => parseHash());
+
+  useEffect(() => {
+    const onHash = () => {
+      setRoute(parseHash());
+      window.scrollTo({ top: 0, behavior: "auto" });
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    const meta = ROUTES[route.page];
+    if (meta && typeof document !== "undefined") document.title = meta.title;
+  }, [route]);
+
+  const go = useCallback((page, slug) => {
+    const hash = page === "home" ? "#/" : slug ? `#/${page}/${slug}` : `#/${page}`;
+    if (window.location.hash === hash) {
+      setRoute(parseHash());
+      window.scrollTo({ top: 0, behavior: "auto" });
+    } else {
+      window.location.hash = hash;
+    }
+  }, []);
+
+  let body = null;
+  if (route.page === "business" && route.slug) body = <BusinessDetailPage slug={route.slug} go={go} />;
+  else if (route.page === "business") body = <BusinessIndexPage go={go} />;
+  else if (route.page === "flow") body = <FlowPage go={go} />;
+  else if (route.page === "blog") body = <BlogPage go={go} />;
+  else if (route.page === "company") body = <CompanyPage go={go} />;
+  else if (route.page === "contact") body = <ContactPage />;
+  else body = <HomePage go={go} />;
+
   return (
-    <div className="min-h-screen bg-white antialiased" style={{ fontFamily: "'Hiragino Sans', 'Yu Gothic', sans-serif" }}>
-      <FontLoader />
-      <Header />
-      <Hero />
-      <Services />
-      <About />
-      <CompanyProfile />
-      <SecurityEthics />
-      <Contact />
-      <Footer />
+    <div className="sw-root">
+      <style>{CSS}</style>
+      <Header page={route.page} go={go} />
+      <main>{body}</main>
+      <Footer go={go} />
     </div>
   );
 }
+
+/* ================================================================== CSS */
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
+
+.sw-root{
+  --bg:#F4F6F9;
+  --white:#FFFFFF;
+  --ink:#1A2233;
+  --ink2:#121A29;
+  --muted:#616B7D;
+  --line:#E2E6EC;
+  --sig:#E0402F;
+  --sig-d:#C4342A;
+  --sig-s:#FDEDEB;
+  --navy:#1F3358;
+  --r:18px;
+
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:16px;line-height:1.9;min-height:100vh;overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+.sw-root *,.sw-root *::before,.sw-root *::after{box-sizing:border-box;}
+.sw-root h1,.sw-root h2,.sw-root h3,.sw-root p,.sw-root ul,.sw-root ol,.sw-root li{margin:0;padding:0;}
+.sw-root ul,.sw-root ol{list-style:none;}
+.sw-root a{color:inherit;text-decoration:none;}
+.sw-root button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.sw-root :focus-visible{outline:2px solid var(--sig);outline-offset:3px;}
+.sw-mono{font-family:var(--mono);font-feature-settings:"tnum";}
+.sw-wrap{width:100%;max-width:1120px;margin:0 auto;padding:0 24px;}
+.sw-narrow{max-width:820px;}
+.sw-sig{color:var(--sig);}
+.sw-ic{display:block;}
+
+.sw-rv{opacity:0;transform:translateY(14px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1);}
+.sw-rv.is-in{opacity:1;transform:none;}
+.sw-tasks > .sw-rv,.sw-bz > .sw-rv,.sw-roster__g > .sw-rv,.sw-dl > .sw-rv,.sw-posts > .sw-rv{height:100%;display:block;}
+@media (prefers-reduced-motion:reduce){.sw-rv{opacity:1;transform:none;transition:none;}.sw-root *{animation:none !important;}}
+
+/* buttons */
+.sw-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 28px;font-size:14px;font-weight:700;border-radius:999px;border:1.5px solid transparent;transition:background .22s,color .22s,border-color .22s,transform .2s,box-shadow .22s;}
+.sw-btn--sig{background:var(--sig);color:#fff;box-shadow:0 10px 22px -12px rgba(224,64,47,.7);}
+.sw-btn--sig:hover{background:var(--sig-d);transform:translateY(-2px);}
+.sw-btn--sig:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+.sw-btn--line{border-color:var(--line);background:var(--white);color:var(--ink);}
+.sw-btn--line:hover{border-color:var(--ink);transform:translateY(-2px);}
+.sw-btn--wline{border-color:rgba(255,255,255,.35);color:#fff;}
+.sw-btn--wline:hover{background:#fff;color:var(--ink);border-color:#fff;}
+.sw-btn--lg{padding:16px 36px;font-size:15px;}
+
+/* header */
+.sw-hd{position:fixed;top:0;left:0;right:0;z-index:90;transition:background .3s,box-shadow .3s;}
+.sw-hd.is-on{background:rgba(244,246,249,.92);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line);}
+.sw-hd__in{max-width:1220px;margin:0 auto;padding:0 24px;height:76px;display:flex;align-items:center;gap:18px;}
+.sw-logo{display:flex;align-items:center;gap:9px;flex-shrink:0;}
+.sw-logo__m{color:var(--sig);display:flex;}
+.sw-logo__t{font-weight:900;letter-spacing:.12em;font-size:17px;}
+.sw-logo__t span{font-family:var(--mono);font-weight:400;font-size:10px;letter-spacing:.1em;color:var(--muted);margin-left:5px;}
+.sw-nav{margin-left:auto;}
+.sw-nav__pill{display:flex;align-items:center;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:999px;padding:5px 8px;box-shadow:0 6px 18px -14px rgba(26,34,51,.5);}
+.sw-nav__a{font-size:13.5px;font-weight:500;padding:8px 15px;border-radius:999px;transition:background .2s,color .2s;white-space:nowrap;display:flex;align-items:center;gap:6px;}
+.sw-nav__a:hover{background:var(--bg);}
+.sw-nav__a.is-cur{color:var(--sig);}
+.sw-dd{position:relative;}
+.sw-dd__c{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.55;transition:transform .25s;}
+.sw-dd.is-open .sw-dd__c{transform:rotate(180deg);}
+.sw-dd__m{position:absolute;top:calc(100% + 10px);left:-6px;min-width:260px;background:var(--white);border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 22px 44px -22px rgba(26,34,51,.4);opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .22s,transform .22s,visibility .22s;}
+.sw-dd.is-open .sw-dd__m{opacity:1;visibility:visible;transform:none;}
+.sw-dd__m button{display:block;width:100%;padding:10px 14px;border-radius:9px;font-size:13.5px;font-weight:500;transition:background .18s;}
+.sw-dd__m button:hover{background:var(--bg);}
+.sw-dd__m button span{display:block;font-size:9.5px;letter-spacing:.14em;color:var(--sig);margin-bottom:2px;}
+.sw-dd__all{border-top:1px solid var(--line);margin-top:6px;padding-top:12px !important;border-radius:0 !important;font-size:12.5px !important;color:var(--muted);}
+.sw-hd__cta{font-size:13px;font-weight:700;background:var(--sig);color:#fff;padding:11px 22px;border-radius:999px;transition:background .2s,transform .2s;box-shadow:0 10px 22px -12px rgba(224,64,47,.7);}
+.sw-hd__cta:hover{background:var(--sig-d);transform:translateY(-2px);}
+.sw-burger{display:none;flex-direction:column;gap:5px;width:26px;padding:8px 0;margin-left:auto;}
+.sw-burger span{display:block;height:2px;background:var(--ink);width:100%;border-radius:2px;transition:transform .3s;}
+.sw-burger.is-x span:first-child{transform:translateY(3.5px) rotate(45deg);}
+.sw-burger.is-x span:last-child{transform:translateY(-3.5px) rotate(-45deg);}
+.sw-drawer{display:none;}
+@media (max-width:1020px){
+  .sw-nav,.sw-hd__cta{display:none;}
+  .sw-burger{display:flex;}
+  .sw-hd{background:rgba(244,246,249,.94);backdrop-filter:blur(14px);}
+  .sw-drawer{display:block;max-height:0;overflow:hidden;background:var(--white);transition:max-height .42s cubic-bezier(.22,1,.36,1);border-top:1px solid var(--line);}
+  .sw-drawer.is-open{max-height:620px;}
+  .sw-drawer__k{font-size:10px;letter-spacing:.18em;color:var(--muted);padding:18px 24px 6px;}
+  .sw-drawer__sub{display:block;width:100%;padding:11px 24px 11px 38px;font-size:14px;color:var(--muted);}
+  .sw-drawer__a{display:block;width:100%;padding:15px 24px;border-top:1px solid var(--line);font-size:15px;font-weight:500;}
+  .sw-drawer__cta{display:block;width:calc(100% - 48px);margin:18px 24px 24px;background:var(--sig);color:#fff;padding:15px;border-radius:999px;text-align:center;font-weight:700;}
+}
+
+/* hero */
+.sw-hero{position:relative;padding:150px 0 80px;overflow:hidden;}
+.sw-hero__bg{position:absolute;inset:0;background:
+  radial-gradient(46% 46% at 82% 22%,rgba(224,64,47,.12),transparent 68%),
+  radial-gradient(44% 44% at 12% 82%,rgba(31,51,88,.10),transparent 70%);}
+.sw-hero__in{position:relative;display:grid;grid-template-columns:1.08fr .92fr;gap:40px;align-items:center;}
+.sw-hero__eb{display:flex;align-items:center;gap:12px;font-size:11px;letter-spacing:.18em;color:var(--muted);margin-bottom:24px;}
+.sw-hero__bar{width:24px;height:1px;background:var(--sig);}
+.sw-hero__h1{font-weight:900;font-size:clamp(34px,5.6vw,60px);line-height:1.28;letter-spacing:.01em;margin-bottom:26px;}
+.sw-hero__em{color:var(--sig);}
+.sw-hero__lede{font-size:15.5px;line-height:2.15;color:var(--muted);max-width:32em;margin-bottom:32px;}
+.sw-hero__lede b{color:var(--ink);font-weight:700;}
+.sw-hero__cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;}
+.sw-hero__chips{display:flex;gap:10px;flex-wrap:wrap;}
+.sw-hero__chips li{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:7px 15px;}
+.sw-hero__chips svg{color:var(--sig);}
+.sw-hero__r{display:flex;justify-content:center;}
+.sw-mascot{width:100%;max-width:400px;height:auto;}
+.sw-mascot__big{animation:swFloat 5s ease-in-out infinite;transform-origin:center;}
+.sw-mascot__bot{animation:swFloat 3.4s ease-in-out infinite;}
+@keyframes swFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-7px);}}
+@media (max-width:940px){
+  .sw-hero{padding:118px 0 56px;}
+  .sw-hero__in{grid-template-columns:1fr;gap:24px;}
+  .sw-hero__r{order:-1;}
+  .sw-mascot{max-width:280px;}
+}
+
+/* oneline */
+.sw-oneline{padding:0 0 80px;}
+.sw-oneline .sw-wrap > div{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:38px 40px;box-shadow:0 20px 40px -34px rgba(26,34,51,.5);}
+.sw-oneline__t{font-size:clamp(19px,2.6vw,25px);font-weight:700;line-height:1.75;margin-bottom:14px;}
+.sw-oneline__t b{color:var(--sig);font-weight:900;}
+.sw-oneline__b{font-size:14.5px;line-height:2.1;color:var(--muted);}
+@media (max-width:700px){.sw-oneline .sw-wrap > div{padding:26px 22px;}}
+
+/* section shells */
+.sw-sec{padding:86px 0;}
+.sw-sec--white{background:var(--white);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+@media (max-width:760px){.sw-sec{padding:62px 0;}}
+.sw-head{margin-bottom:44px;}
+.sw-head.is-center{text-align:center;}
+.sw-head.is-center .sw-head__note{margin-left:auto;margin-right:auto;}
+.sw-head__en{font-size:10.5px;letter-spacing:.24em;color:var(--sig);margin-bottom:12px;font-weight:700;}
+.sw-head__jp{font-weight:900;font-size:clamp(25px,3.4vw,36px);line-height:1.45;letter-spacing:.01em;}
+.sw-head__note{font-size:14px;line-height:2.05;color:var(--muted);margin-top:14px;max-width:44em;}
+.sw-more{margin-top:36px;text-align:center;}
+
+/* page hero */
+.sw-phero{padding:138px 0 54px;background:linear-gradient(180deg,rgba(224,64,47,.07),transparent 82%);}
+.sw-phero__en{font-size:11px;letter-spacing:.22em;color:var(--sig);font-weight:700;margin-bottom:14px;}
+.sw-phero__sep{color:var(--muted);}
+.sw-phero__t{font-weight:900;font-size:clamp(30px,4.6vw,48px);line-height:1.3;margin-bottom:16px;}
+.sw-phero__l{font-size:15px;line-height:2.1;color:var(--muted);max-width:40em;}
+.sw-phero--bz .sw-btn{margin-top:26px;}
+.sw-crumb{font-size:12.5px;color:var(--muted);margin-bottom:18px;padding:6px 14px;border:1px solid var(--line);border-radius:999px;background:var(--white);transition:border-color .2s;}
+.sw-crumb:hover{border-color:var(--ink);}
+@media (max-width:760px){.sw-phero{padding:112px 0 42px;}}
+
+/* tasks */
+.sw-tasks{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.sw-task{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:28px 26px;height:100%;transition:transform .28s,box-shadow .28s,border-color .28s;}
+.sw-task:hover{transform:translateY(-4px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);border-color:transparent;}
+.sw-task__ic{display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:15px;background:var(--sig-s);color:var(--sig);margin-bottom:18px;}
+.sw-task h3{font-size:17px;font-weight:700;margin-bottom:8px;}
+.sw-task p{font-size:13.5px;line-height:1.95;color:var(--muted);}
+@media (max-width:900px){.sw-tasks{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:600px){.sw-tasks{grid-template-columns:1fr;}}
+
+/* before after */
+.sw-ba{max-width:880px;margin:0 auto;}
+.sw-ba__hd{display:grid;grid-template-columns:1fr 44px 1fr;gap:12px;margin-bottom:12px;}
+.sw-ba__hd span{font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--muted);text-align:center;}
+.sw-ba__hd span:first-child{grid-column:1;}
+.sw-ba__hd span.is-after{grid-column:3;color:var(--sig);}
+.sw-ba__r{display:grid;grid-template-columns:1fr 44px 1fr;gap:12px;align-items:stretch;margin-bottom:12px;}
+.sw-ba__b,.sw-ba__a{display:flex;align-items:center;gap:9px;font-size:14px;line-height:1.7;padding:18px 22px;border-radius:14px;}
+.sw-ba__b{background:#EAECF0;color:var(--muted);}
+.sw-ba__a{background:var(--white);border:1.5px solid var(--sig);color:var(--ink);font-weight:700;}
+.sw-ba__a svg{color:var(--sig);flex-shrink:0;}
+.sw-ba__ar{display:flex;align-items:center;justify-content:center;color:var(--sig);font-size:18px;}
+@media (max-width:700px){
+  .sw-ba__hd{display:none;}
+  .sw-ba__r{grid-template-columns:1fr;gap:6px;margin-bottom:20px;}
+  .sw-ba__ar{transform:rotate(90deg);}
+}
+
+/* business cards */
+.sw-bz{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.sw-bz__c{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:32px 28px;height:100%;display:flex;flex-direction:column;cursor:pointer;transition:transform .28s,box-shadow .28s,border-color .28s;}
+.sw-bz__c:hover{transform:translateY(-4px);box-shadow:0 26px 48px -30px rgba(26,34,51,.5);border-color:var(--sig);}
+.sw-bz__ic{display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:17px;background:var(--navy);color:#fff;margin-bottom:20px;}
+.sw-bz__no{font-size:10px;letter-spacing:.14em;color:var(--sig);font-weight:700;margin-bottom:10px;}
+.sw-bz__no span{color:var(--muted);font-weight:400;margin-left:6px;}
+.sw-bz__c h3{font-size:21px;font-weight:900;line-height:1.5;margin-bottom:12px;}
+.sw-bz__l{font-size:13.5px;line-height:2;color:var(--muted);margin-bottom:20px;}
+.sw-bz__ul{margin-bottom:20px;display:grid;gap:5px;}
+.sw-bz__ul li{font-size:12.5px;color:var(--muted);padding-left:15px;position:relative;}
+.sw-bz__ul li::before{content:"";position:absolute;left:0;top:.85em;width:8px;height:1.5px;background:var(--sig);}
+.sw-bz__link{margin-top:auto;font-size:13px;font-weight:700;color:var(--sig);display:inline-flex;align-items:center;gap:7px;}
+.sw-bz__link em{font-style:normal;transition:transform .25s;display:inline-block;}
+.sw-bz__c:hover .sw-bz__link em{transform:translateX(5px);}
+@media (max-width:900px){.sw-bz{grid-template-columns:1fr;}}
+
+/* proof (dark) */
+.sw-proof{background:var(--ink2);color:#D7DCE4;padding:86px 0;}
+.sw-proof__top{margin-bottom:30px;}
+.sw-proof__en{font-size:10.5px;letter-spacing:.24em;color:var(--sig);font-weight:700;margin-bottom:14px;}
+.sw-proof__h{font-weight:900;font-size:clamp(26px,4.6vw,48px);line-height:1.4;color:#fff;}
+.sw-proof__s{font-size:14px;color:#8B96A6;margin-top:14px;}
+.sw-proof__body{display:grid;grid-template-columns:repeat(2,1fr);gap:30px;padding-bottom:44px;border-bottom:1px solid #232C3C;}
+.sw-proof__body p{font-size:14.5px;line-height:2.15;color:#9EA9B8;}
+@media (max-width:820px){.sw-proof__body{grid-template-columns:1fr;gap:18px;}}
+.sw-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:44px 0;}
+.sw-stat{background:#1A2233;border:1px solid #262F41;border-radius:var(--r);padding:26px 22px;}
+.sw-stat__v{font-size:42px;font-weight:500;line-height:1;color:#fff;letter-spacing:-.02em;margin-bottom:10px;}
+.sw-stat__v span{font-size:14px;color:var(--sig);margin-left:3px;letter-spacing:0;}
+.sw-stat__l{font-size:12.5px;color:#8B96A6;}
+@media (max-width:760px){.sw-stats{grid-template-columns:repeat(2,1fr);}.sw-stat__v{font-size:34px;}}
+.sw-roster__k{font-size:10px;letter-spacing:.2em;color:#6F7B8B;margin-bottom:16px;}
+.sw-roster__g{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+.sw-ag{background:#1A2233;border:1px solid #262F41;border-radius:14px;padding:20px 18px;height:100%;transition:transform .28s,border-color .28s;}
+.sw-ag:hover{transform:translateY(-3px);border-color:#3B4658;}
+.sw-ag.is-lead{border-color:rgba(224,64,47,.5);}
+.sw-ag__c{font-size:9.5px;letter-spacing:.14em;color:#6F7B8B;margin-bottom:9px;}
+.sw-ag__r{font-size:13px;font-weight:700;color:#fff;margin-bottom:5px;}
+.sw-ag__n{font-size:10px;color:var(--sig);word-break:break-all;margin-bottom:11px;}
+.sw-ag__m{font-size:11.5px;line-height:1.8;color:#828D9C;}
+.sw-roster__g--light .sw-ag{background:var(--bg);border-color:var(--line);}
+.sw-roster__g--light .sw-ag__r{color:var(--ink);}
+.sw-roster__g--light .sw-ag__c{color:var(--muted);}
+.sw-roster__g--light .sw-ag__m{color:var(--muted);}
+@media (max-width:940px){.sw-roster__g{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:520px){.sw-roster__g{grid-template-columns:1fr;}}
+
+/* workflows */
+.sw-wf{display:grid;gap:16px;}
+.sw-wf__r{display:grid;grid-template-columns:180px 1fr;gap:28px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:30px 32px;}
+.sw-wf__l{display:flex;flex-direction:column;gap:10px;align-items:flex-start;}
+.sw-wf__time{font-size:15px;font-weight:700;color:var(--sig);}
+.sw-wf__tag{font-size:11.5px;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:4px 12px;}
+.sw-wf__m h3{font-size:clamp(18px,2.4vw,23px);font-weight:900;line-height:1.55;margin-bottom:12px;}
+.sw-wf__m > p{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:18px;}
+.sw-wf__st{display:flex;gap:8px;flex-wrap:wrap;}
+.sw-wf__st li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:6px 13px;}
+.sw-wf__st li span{font-size:9.5px;color:var(--sig);}
+@media (max-width:820px){.sw-wf__r{grid-template-columns:1fr;gap:14px;padding:24px 20px;}.sw-wf__l{flex-direction:row;align-items:center;}}
+
+/* flow cards */
+.sw-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.sw-flow__c{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 22px 30px;}
+.sw-flow__n{font-size:10.5px;letter-spacing:.16em;color:var(--sig);font-weight:700;margin-bottom:14px;}
+.sw-flow__c h3{font-size:18px;font-weight:900;margin-bottom:6px;line-height:1.5;}
+.sw-flow__s{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
+.sw-flow__b{font-size:13px;line-height:1.95;color:var(--muted);}
+@media (max-width:940px){.sw-flow{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:560px){.sw-flow{grid-template-columns:1fr;}}
+
+/* steps (flow page) */
+.sw-steps{display:grid;gap:0;}
+.sw-step{display:grid;grid-template-columns:120px 1fr;gap:28px;padding-bottom:34px;}
+.sw-step__l{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:12px;}
+.sw-step__l span:first-child{font-size:11px;letter-spacing:.16em;color:var(--sig);font-weight:700;}
+.sw-step__dot{position:absolute;left:0;top:34px;bottom:-34px;width:1px;background:var(--line);}
+.sw-step:last-child .sw-step__dot{display:none;}
+.sw-step__m{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 28px;}
+.sw-step__m h3{font-size:20px;font-weight:900;margin-bottom:6px;}
+.sw-step__s{font-size:12px;color:var(--sig);margin-bottom:12px;}
+.sw-step__b{font-size:14px;line-height:2.05;color:var(--muted);}
+@media (max-width:700px){.sw-step{grid-template-columns:1fr;gap:10px;padding-bottom:20px;}.sw-step__dot{display:none;}}
+
+/* prose / points / deliverables */
+.sw-prose p{font-size:15px;line-height:2.2;color:var(--muted);}
+.sw-pts{margin-top:34px;display:grid;gap:12px;}
+.sw-pt{display:grid;grid-template-columns:56px 1fr;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:22px 24px;}
+.sw-pt__n{font-size:12px;letter-spacing:.12em;color:var(--sig);font-weight:700;padding-top:4px;}
+.sw-pt h3{font-size:16.5px;font-weight:700;margin-bottom:5px;}
+.sw-pt p{font-size:13.5px;line-height:1.95;color:var(--muted);}
+.sw-dl{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.sw-dl__i{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:14px;padding:18px 22px;font-size:14.5px;font-weight:500;height:100%;}
+.sw-dl__i svg{color:var(--sig);flex-shrink:0;}
+.sw-span{margin-top:22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:14px;color:var(--muted);border-top:1px solid var(--line);padding-top:22px;}
+.sw-span span{font-size:10px;letter-spacing:.14em;color:var(--sig);border:1px solid var(--line);border-radius:999px;padding:5px 12px;}
+@media (max-width:600px){.sw-dl{grid-template-columns:1fr;}}
+
+/* pager */
+.sw-pager{border-top:1px solid var(--line);background:var(--white);}
+.sw-pager__in{display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center;padding-top:26px;padding-bottom:26px;}
+.sw-pager__in button{font-size:14px;font-weight:700;transition:color .2s;}
+.sw-pager__in button:hover{color:var(--sig);}
+.sw-pager__in button span{display:block;font-size:10px;letter-spacing:.12em;color:var(--muted);font-weight:400;margin-bottom:3px;}
+.sw-pager__c{font-size:12.5px !important;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:9px 18px;white-space:nowrap;}
+.sw-pager__r{text-align:right;}
+@media (max-width:700px){.sw-pager__in{grid-template-columns:1fr;gap:12px;}.sw-pager__r{text-align:left;}.sw-pager__c{justify-self:start;}}
+
+/* faq */
+.sw-faq{background:var(--white);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
+.sw-sec--white .sw-faq{background:var(--bg);}
+.sw-faq__i + .sw-faq__i{border-top:1px solid var(--line);}
+.sw-faq__q{width:100%;display:grid;grid-template-columns:32px 1fr 22px;gap:12px;align-items:start;padding:22px 26px;}
+.sw-faq__m{font-size:13px;color:var(--sig);font-weight:700;padding-top:2px;}
+.sw-faq__qt{font-size:15.5px;font-weight:700;line-height:1.75;}
+.sw-faq__ic{position:relative;width:14px;height:14px;margin-top:7px;justify-self:end;}
+.sw-faq__ic::before,.sw-faq__ic::after{content:"";position:absolute;background:var(--sig);transition:transform .3s;}
+.sw-faq__ic::before{left:0;top:6.3px;width:14px;height:1.6px;}
+.sw-faq__ic::after{left:6.3px;top:0;width:1.6px;height:14px;}
+.sw-faq__i.is-open .sw-faq__ic::after{transform:scaleY(0);}
+.sw-faq__a{max-height:0;overflow:hidden;transition:max-height .42s cubic-bezier(.22,1,.36,1);}
+.sw-faq__i.is-open .sw-faq__a{max-height:520px;}
+.sw-faq__a p{font-size:13.5px;line-height:2.15;color:var(--muted);padding:0 26px 24px 70px;}
+@media (max-width:600px){.sw-faq__q{padding:18px 18px;}.sw-faq__a p{padding:0 18px 20px;}}
+
+/* empty (blog) */
+.sw-empty{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:56px 34px;text-align:center;}
+.sw-empty__ic{display:inline-flex;align-items:center;justify-content:center;width:66px;height:66px;border-radius:20px;background:var(--sig-s);color:var(--sig);margin-bottom:20px;}
+.sw-empty h2{font-size:22px;font-weight:900;margin-bottom:12px;}
+.sw-empty p{font-size:14px;line-height:2.05;color:var(--muted);max-width:32em;margin:0 auto 26px;}
+.sw-posts{display:grid;gap:14px;}
+.sw-post{display:block;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 28px;height:100%;transition:transform .25s,box-shadow .25s;}
+.sw-post:hover{transform:translateY(-3px);box-shadow:0 22px 40px -30px rgba(26,34,51,.5);}
+.sw-post__meta{display:flex;gap:12px;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:10px;}
+.sw-post__cat{color:var(--sig);border:1px solid var(--line);border-radius:999px;padding:2px 10px;}
+.sw-post h3{font-size:18px;font-weight:700;line-height:1.6;margin-bottom:8px;}
+.sw-post p{font-size:13.5px;line-height:1.95;color:var(--muted);}
+
+/* company table */
+.sw-tb{background:var(--white);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
+.sw-tb__r{display:grid;grid-template-columns:190px 1fr;gap:20px;padding:18px 26px;align-items:center;}
+.sw-tb__r + .sw-tb__r{border-top:1px solid var(--line);}
+.sw-tb__k{font-size:13px;color:var(--muted);font-weight:500;}
+.sw-tb__v{font-size:14.5px;}
+.sw-badge{font-size:11px;letter-spacing:.08em;color:var(--muted);background:var(--bg);border-radius:999px;padding:4px 12px;}
+@media (max-width:600px){.sw-tb__r{grid-template-columns:1fr;gap:3px;padding:15px 18px;}}
+
+/* cta band */
+.sw-cta{background:var(--ink2);color:#fff;padding:80px 0;text-align:center;position:relative;overflow:hidden;}
+.sw-cta::before{content:"";position:absolute;inset:0;background:radial-gradient(58% 100% at 50% 0%,rgba(224,64,47,.26),transparent 72%);}
+.sw-cta .sw-wrap{position:relative;}
+.sw-cta__h{font-weight:900;font-size:clamp(24px,4.2vw,42px);line-height:1.45;margin-bottom:16px;}
+.sw-cta__b{font-size:14.5px;line-height:2;color:#A9B3C1;margin-bottom:32px;}
+.sw-cta__btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+
+/* contact form */
+.sw-form{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:38px 36px;}
+.sw-form__g{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
+.sw-fd{display:flex;flex-direction:column;gap:9px;}
+.sw-fd--w{grid-column:1/-1;}
+.sw-fd__l{font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:8px;}
+.sw-fd__l em{font-style:normal;font-size:10px;font-weight:700;color:#fff;background:var(--sig);border-radius:4px;padding:2px 7px;}
+.sw-fd input,.sw-fd textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;color:var(--ink);padding:14px 16px;font-family:var(--sans);font-size:14.5px;line-height:1.8;resize:vertical;transition:border-color .22s,background .22s;}
+.sw-fd input::placeholder,.sw-fd textarea::placeholder{color:#9BA3B1;}
+.sw-fd input:focus,.sw-fd textarea:focus{outline:none;border-color:var(--sig);background:var(--white);}
+.sw-form__err{margin-top:16px;font-size:13px;color:var(--sig);background:var(--sig-s);border-radius:10px;padding:12px 16px;line-height:1.8;}
+.sw-form__f{margin-top:28px;padding-top:24px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;}
+.sw-form__note{font-size:12px;color:var(--muted);line-height:1.9;max-width:30em;}
+@media (max-width:700px){.sw-form{padding:26px 20px;}.sw-form__g{grid-template-columns:1fr;}.sw-form__f .sw-btn{width:100%;}}
+.sw-done{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:52px 36px;text-align:center;}
+.sw-done__ic{display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:22px;background:var(--sig-s);color:var(--sig);margin-bottom:22px;}
+.sw-done h2{font-size:24px;font-weight:900;margin-bottom:14px;}
+.sw-done p{font-size:14px;line-height:2.05;color:var(--muted);max-width:34em;margin:0 auto 26px;}
+
+/* footer */
+.sw-ft{background:#0E1626;color:#8B96A6;padding:56px 0 34px;}
+.sw-ft__top{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;padding-bottom:32px;border-bottom:1px solid #1E2739;}
+.sw-ft__logo{font-weight:900;letter-spacing:.12em;font-size:18px;color:#fff;margin-bottom:10px;}
+.sw-ft__logo span{font-family:var(--mono);font-weight:400;font-size:10px;color:#6F7B8B;margin-left:5px;}
+.sw-ft__tag{font-size:15px;font-weight:700;color:#C6CEDA;margin-bottom:6px;}
+.sw-ft__sub{font-size:12px;}
+.sw-ft__cols{display:flex;gap:56px;flex-wrap:wrap;}
+.sw-ft__cols > div{display:flex;flex-direction:column;gap:9px;}
+.sw-ft__k{font-size:9.5px;letter-spacing:.18em;color:#5D6779;margin-bottom:4px;}
+.sw-ft__cols button{font-size:13px;transition:color .2s;}
+.sw-ft__cols button:hover{color:#fff;}
+.sw-ft__note{font-size:11px;line-height:1.9;color:#5C6672;margin:22px 0 16px;}
+.sw-ft__cp{font-size:10px;letter-spacing:.1em;color:#4C5561;}
+@media (max-width:700px){.sw-ft__cols{gap:32px;}}
+`;
