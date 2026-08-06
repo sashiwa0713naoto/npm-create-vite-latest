@@ -25,59 +25,84 @@ const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv"
 const BUSINESSES = [
   {
     slug: "agent",
+    code: "AGENT",
     no: "BUSINESS 01",
     en: "AI EMPLOYEE",
     title: "AI社員構築代行",
-    lede: "部門ごとに役割を持ったAIを設計し、実務が人の手を離れて回る状態にします。",
+    sub: "仕組みをつくって、御社に置く",
+    theme: "#E0402F",
+    soft: "#FDECEA",
+    lede: "御社の業務を処理するAI社員を設計・実装し、実務が人の手を離れて回る状態にします。",
+    price: "初期構築 30万円〜",
     icon: "robot",
     detail: {
       what:
-        "社内の判断基準・商品知識・業務手順を、AIが読める形に整理します（ナレッジ基盤）。その上に、部門ごとの役割を持たせたAIエージェント＝「AI社員」を設計・実装し、成果物が出るところまでを請け負います。ツールの導入やプロンプトの受け渡しでは終わりません。",
+        "社内の判断基準・商品知識・業務手順を、AIが読める形に整理します（ナレッジ基盤）。その上に、部門ごとの役割を持たせたAIエージェント＝「AI社員」を設計・実装し、実務が回りはじめるところまでを請け負います。ツールの導入やプロンプトの受け渡しでは終わりません。",
       points: [
         { t: "ナレッジ基盤をつくる", d: "社内の暗黙知を、AIが参照できるドキュメントに変換します。" },
         { t: "役割を持たせて実装する", d: "部門ごとに担当と権限を定義し、エージェントとして動かします。" },
         { t: "検査工程を必ず挟む", d: "別のAIが品質と表現リスクを確認してから、外に出します。" },
       ],
-      deliver: ["業務棚卸しレポート", "AI社員の設計書", "ナレッジ基盤の構築", "稼働環境の実装"],
+      plans: [
+        { n: "スモール構築", d: "業務1つ分のAI社員を設計・実装します。まず1箇所を自動化して効果を確かめたい方向け。", p: "30万円〜" },
+        { n: "標準構築", d: "部門単位で複数のAI社員と、それらをつなぐ処理の流れまで構築します。", p: "50万円〜" },
+        { n: "フル構築", d: "全社の業務棚卸しから設計・実装・稼働後の伴走までを一貫して行います。", p: "80万円〜" },
+      ],
+      deliver: ["業務棚卸しレポート", "AI社員の設計書", "ナレッジ基盤の構築", "稼働環境の実装", "運用手順書"],
       span: "初期構築 約2〜4週間 ／ 納品後3ヶ月の伴走",
     },
   },
   {
-    slug: "pipeline",
+    slug: "studio",
+    code: "STUDIO",
     no: "BUSINESS 02",
-    en: "AUTOMATION",
-    title: "自動化パイプライン構築",
-    lede: "情報の収集から成果物の配信まで、途切れずにつながる処理の流れをつくります。",
-    icon: "flow",
+    en: "AUTO PRODUCTION",
+    title: "文書・動画 自動制作",
+    sub: "成果物そのものを、つくって納品する",
+    theme: "#2456C8",
+    soft: "#E8EEFB",
+    lede: "記事・資料・マニュアル・動画を、企画から仕上げまでAIが一貫して制作し、完成物としてお渡しします。",
+    price: "月額 4万円〜／単発 1.2万円〜",
+    icon: "studio",
     detail: {
       what:
-        "メール、フォーム、スプレッドシート、SNS、社内システムを連携させ、人の介在なしで動き続ける処理の流れを構築します。単発のタスク処理ではなく、決まった時刻に自動で起動し、止まらずに回り続けるパイプラインです。",
+        "毎回だれかが手を動かして作っている制作物を、SASHIWAのAIエージェントが引き受けます。企画・構成の設計、本文や台本の執筆、表現上のリスク検査、体裁の整形までを一本の流れで処理し、そのまま使える完成物としてお渡しします。ライターや編集者の手配も、進捗の催促も発生しません。",
       points: [
-        { t: "端から端までつなぐ", d: "収集・加工・生成・配信を一本の流れにまとめます。" },
-        { t: "決まった時刻に動かす", d: "毎日・毎週の定期実行を設定し、起動忘れをなくします。" },
-        { t: "止まったら知らせる", d: "エラー時の通知と再実行の仕組みまで含めて設計します。" },
+        { t: "企画から仕上げまで一貫して", d: "テーマを渡すだけで、構成の設計から完成データまでが揃います。" },
+        { t: "毎月止まらない", d: "担当者の繁忙や離職で制作が止まる、という事態が起きません。" },
+        { t: "別のAIが検査する", d: "制作したAIとは別のAIが、事実関係と法令上の表現を一次スクリーニングします。" },
       ],
-      deliver: ["連携設計書", "パイプライン実装", "監視・通知の設定", "運用手順書"],
-      span: "初期構築 約2〜6週間",
-    },
-  },
-  {
-    slug: "ops",
-    no: "BUSINESS 03",
-    en: "MODEL OPS",
-    title: "マルチモデル運用設計",
-    lede: "作業の性質に応じてモデルを使い分け、品質を保ったままコストを抑えます。",
-    icon: "chip",
-    detail: {
-      what:
-        "文章生成、コード実装、データ分析、検査。作業ごとに向いているモデルは違います。用途別に最適なモデルを自動で選ぶ構成を設計し、品質を落とさずに運用コストを下げる仕組みをつくります。",
-      points: [
-        { t: "用途別に選定する", d: "精度が要る工程と、軽くて速い方がいい工程を切り分けます。" },
-        { t: "コストを可視化する", d: "1件あたりの処理コストを算出し、上限を設定します。" },
-        { t: "切り替えられる形にする", d: "新しいモデルが出たときに差し替えられる構成にします。" },
+      menus: [
+        {
+          label: "文書制作",
+          en: "DOCUMENT",
+          icon: "pen",
+          items: [
+            { n: "SEO記事・オウンドメディア", d: "検索意図の分析から構成設計、本文執筆まで（2,000〜3,000字）", p: "12,000円／本" },
+            { n: "営業資料・提案書", d: "訴求の整理から構成、本文まで。スライド原稿の形でお渡しします", p: "30,000円／式" },
+            { n: "マニュアル・手順書", d: "口頭で説明している手順を、読んで分かる文書に整えます", p: "40,000円／式" },
+            { n: "定例レポート", d: "毎月・毎週の報告書を、決まった書式で自動生成します", p: "月20,000円〜" },
+          ],
+        },
+        {
+          label: "動画制作",
+          en: "VIDEO",
+          icon: "film",
+          items: [
+            { n: "縦型ショート動画", d: "企画・台本・テロップ・書き出しまで自動処理（30〜60秒）", p: "20,000円／本", prep: true },
+            { n: "解説動画", d: "横型2〜3分。スライドとナレーションを組み合わせた構成", p: "50,000円／本", prep: true },
+          ],
+        },
       ],
-      deliver: ["モデル選定基準", "コスト試算表", "切替ロジックの実装"],
-      span: "初期構築 約2〜4週間",
+      plans: [
+        { n: "ライト", d: "文書 月4本。まずは更新を止めない状態をつくりたい方向け。", p: "40,000円／月" },
+        { n: "スタンダード", d: "文書 月8本。オウンドメディアを本格的に回す構成。", p: "72,000円／月" },
+        { n: "フル", d: "文書 月16本＋コンテンツ設計。動画も組み合わせられます。", p: "128,000円／月" },
+      ],
+      deliver: ["完成データ（Google Docs／動画ファイル）", "構成・台本原稿", "想定キーワードと訴求の整理", "月次の制作実績レポート"],
+      span: "初回納品 約1週間 ／ 以降は毎月の定期納品",
+      note:
+        "AIが生成した文章・映像には、事実の誤りが含まれる可能性があります。公開前の最終確認はお客様側で行っていただく前提です。検査工程は一次スクリーニングであり、内容の正確性を保証するものではありません。なお動画制作は、使用する音源・音声合成の商用利用条件を確認中のため、現在は事前相談のみ承っています。",
     },
   },
 ];
@@ -202,7 +227,7 @@ const COMPANY = [
   { k: "商号", v: "株式会社SASHIWA", ready: true },
   { k: "代表者", v: "指輪直人", ready: true },
   { k: "従業員", v: "AIエージェント 5体（人間 0名）", ready: true },
-  { k: "事業内容", v: "AI社員構築代行／自動化パイプライン構築／マルチモデル運用設計", ready: true },
+  { k: "事業内容", v: "AI社員構築代行／文書・動画の自動制作", ready: true },
   { k: "対応地域", v: "オンラインで全国対応", ready: true },
   { k: "設立", v: "準備中", ready: false },
   { k: "資本金", v: "準備中", ready: false },
@@ -310,6 +335,28 @@ function Icon({ name, size = 28 }) {
       <>
         <circle cx="12" cy="12" r="9" {...s} />
         <path d="m8 12.3 2.8 2.8L16 9.8" {...s} />
+      </>
+    ),
+    pen: (
+      <>
+        <path d="M16.8 3.4a2.3 2.3 0 0 1 3.3 3.3L8.4 18.4l-4.4 1.2 1.2-4.4Z" {...s} />
+        <path d="m15 5.2 3.3 3.3" {...s} />
+      </>
+    ),
+    studio: (
+      <>
+        <path d="M4 3.2h7.5l3.2 3.2v9.4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4.2a1 1 0 0 1 1-1Z" {...s} />
+        <path d="M11.5 3.2v3.4h3.2" {...s} />
+        <path d="M6 10h5M6 13h3.5" {...s} />
+        <rect x="12.5" y="12" width="9" height="8.8" rx="2" {...s} />
+        <path d="m16.2 14.7 3 1.7-3 1.7z" {...s} />
+      </>
+    ),
+    film: (
+      <>
+        <rect x="2.5" y="4.5" width="19" height="15" rx="2.6" {...s} />
+        <path d="M7.5 4.5v15M16.5 4.5v15M2.5 12h19" {...s} opacity=".45" />
+        <path d="m10.8 9.4 3.4 2.1-3.4 2.1z" {...s} />
       </>
     ),
   };
@@ -596,9 +643,9 @@ function HomePage({ go }) {
               <span className="sw-hero__em">AI社員</span>に任せる。
             </h1>
             <p className="sw-hero__lede">
-              メール対応、レポート作成、SNS運用、資料づくり、請求処理。
-              人がくり返している業務を、24時間はたらくAIエージェントに置き換えます。
-              <b>設計から実装、稼働開始まで一貫してお引き受けします。</b>
+              御社にAI社員を置く。あるいは、記事や資料や動画そのものをつくって納品する。
+              人がくり返している仕事を、24時間止まらないAIエージェントが引き受けます。
+              <b>SASHIWAには人間の従業員が0名。すべてAI社員が処理しています。</b>
             </p>
 
             <div className="sw-hero__cta">
@@ -606,23 +653,23 @@ function HomePage({ go }) {
                 30分の無料相談へ
               </button>
               <button className="sw-btn sw-btn--line sw-btn--lg" onClick={() => go("business")}>
-                事業内容を見る
+                2つの事業を見る
               </button>
             </div>
 
             <ul className="sw-hero__chips">
-              <li>
-                <Icon name="check" size={16} />
-                初期構築 約2〜4週間
-              </li>
-              <li>
-                <Icon name="check" size={16} />
-                納品後3ヶ月の伴走つき
-              </li>
-              <li>
-                <Icon name="check" size={16} />
-                オンライン全国対応
-              </li>
+              {BUSINESSES.map((b) => (
+                <li
+                  key={b.slug}
+                  className="sw-hero__chip is-biz"
+                  style={{ "--t": b.theme }}
+                  onClick={() => go("business", b.slug)}
+                >
+                  <span className="sw-hero__chipd" />
+                  {b.title}
+                  <em>{b.price}</em>
+                </li>
+              ))}
             </ul>
           </div>
 
@@ -637,11 +684,12 @@ function HomePage({ go }) {
         <div className="sw-wrap">
           <Reveal>
             <p className="sw-oneline__t">
-              株式会社SASHIWAは、<b>「AI社員」をつくって会社に置いていく</b>会社です。
+              株式会社SASHIWAは、<b>AI社員だけで運営されている</b>会社です。
             </p>
             <p className="sw-oneline__b">
-              ツールを渡して終わりではありません。御社の判断基準や手順をAIが読める形に整え、
-              役割を持ったAIエージェントとして実装し、実務が回りはじめるところまでを請け負います。
+              5体のAIエージェントが、受注から制作、検査、原価計算までを人の介在なしで処理しています。
+              事業は2つ。<b>仕組みをつくって御社に置く「AI社員構築代行」</b>と、
+              <b>成果物そのものをつくって納品する「文書・動画 自動制作」</b>です。
             </p>
           </Reveal>
         </div>
@@ -700,11 +748,15 @@ function HomePage({ go }) {
       {/* 事業内容 → 別ページへ */}
       <section className="sw-sec">
         <div className="sw-wrap">
-          <Head en="BUSINESS" jp="事業内容" note="3つの領域で、AIの導入から運用までをお引き受けします。" />
+          <Head en="BUSINESS" jp="事業内容" note="仕組みを買うか、成果物を買うか。目的に合わせてお選びいただけます。" />
           <div className="sw-bz">
             {BUSINESSES.map((b, i) => (
               <Reveal key={b.slug} delay={i * 70}>
-                <article className="sw-bz__c" onClick={() => go("business", b.slug)}>
+                <article
+                  className="sw-bz__c"
+                  style={{ "--t": b.theme, "--s": b.soft }}
+                  onClick={() => go("business", b.slug)}
+                >
                   <span className="sw-bz__ic">
                     <Icon name={b.icon} size={30} />
                   </span>
@@ -712,7 +764,9 @@ function HomePage({ go }) {
                     {b.no} <span>{b.en}</span>
                   </p>
                   <h3>{b.title}</h3>
+                  <p className="sw-bz__sub">{b.sub}</p>
                   <p className="sw-bz__l">{b.lede}</p>
+                  <p className="sw-bz__price">{b.price}</p>
                   <span className="sw-bz__link">
                     詳しく見る <em aria-hidden="true">→</em>
                   </span>
@@ -878,14 +932,18 @@ function BusinessIndexPage({ go }) {
       <PageHero
         en="BUSINESS"
         title="事業内容"
-        lede="AIの導入から運用までを、3つの領域でお引き受けします。気になる事業をお選びください。"
+        lede="仕組みを買うか、成果物を買うか。目的に合わせてお選びいただけます。"
       />
       <section className="sw-sec">
         <div className="sw-wrap">
           <div className="sw-bz sw-bz--lg">
             {BUSINESSES.map((b, i) => (
               <Reveal key={b.slug} delay={i * 70}>
-                <article className="sw-bz__c" onClick={() => go("business", b.slug)}>
+                <article
+                  className="sw-bz__c"
+                  style={{ "--t": b.theme, "--s": b.soft }}
+                  onClick={() => go("business", b.slug)}
+                >
                   <span className="sw-bz__ic">
                     <Icon name={b.icon} size={30} />
                   </span>
@@ -893,7 +951,9 @@ function BusinessIndexPage({ go }) {
                     {b.no} <span>{b.en}</span>
                   </p>
                   <h3>{b.title}</h3>
+                  <p className="sw-bz__sub">{b.sub}</p>
                   <p className="sw-bz__l">{b.lede}</p>
+                  <p className="sw-bz__price">{b.price}</p>
                   <ul className="sw-bz__ul">
                     {b.detail.deliver.slice(0, 3).map((d) => (
                       <li key={d}>{d}</li>
@@ -923,15 +983,16 @@ function BusinessDetailPage({ slug, go }) {
 
   return (
     <>
-      <section className="sw-phero sw-phero--bz">
+      <section className="sw-phero sw-phero--bz" style={{ "--t": b.theme, "--s": b.soft }}>
         <div className="sw-wrap">
           <button className="sw-crumb" onClick={() => go("business")}>
             ← 事業一覧
           </button>
-          <p className="sw-mono sw-phero__en">
+          <p className="sw-mono sw-phero__en" style={{ color: b.theme }}>
             {b.no} <span className="sw-phero__sep">｜</span> {b.en}
           </p>
           <h1 className="sw-phero__t">{b.title}</h1>
+          <p className="sw-phero__sub">{b.sub}</p>
           <p className="sw-phero__l">{b.lede}</p>
           <button className="sw-btn sw-btn--sig" onClick={() => go("contact")}>
             この事業について相談する
@@ -959,7 +1020,60 @@ function BusinessDetailPage({ slug, go }) {
         </div>
       </section>
 
-      <section className="sw-sec">
+      {b.detail.menus && (
+        <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
+          <div className="sw-wrap sw-narrow">
+            <Head en="MENU" jp="制作メニュー" note="単発でのご依頼も承っています。" />
+            {b.detail.menus.map((m) => (
+              <Reveal key={m.label} className="sw-menu">
+                <div className="sw-menu__hd">
+                  <span className="sw-menu__ic">
+                    <Icon name={m.icon} size={22} />
+                  </span>
+                  <h3>{m.label}</h3>
+                  <span className="sw-mono sw-menu__en">{m.en}</span>
+                </div>
+                <div className="sw-menu__l">
+                  {m.items.map((it) => (
+                    <div className="sw-menu__i" key={it.n}>
+                      <div>
+                        <p className="sw-menu__n">
+                          {it.n}
+                          {it.prep && <em className="sw-bz__prep">準備中</em>}
+                        </p>
+                        <p className="sw-menu__d">{it.d}</p>
+                      </div>
+                      <p className="sw-mono sw-menu__p">{it.p}</p>
+                    </div>
+                  ))}
+                </div>
+              </Reveal>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
+        <div className="sw-wrap sw-narrow">
+          <Head en="PLANS" jp={b.detail.menus ? "継続プラン" : "料金プラン"} />
+          <div className="sw-plans">
+            {b.detail.plans.map((pl, i) => (
+              <Reveal key={pl.n} delay={i * 60}>
+                <article className="sw-plan">
+                  <p className="sw-plan__n">{pl.n}</p>
+                  <p className="sw-plan__d">{pl.d}</p>
+                  <p className="sw-plan__p">{pl.p}</p>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+          <p className="sw-plans__n">
+            ※ 表示価格は税別・目安です。業務量や範囲により変動しますので、無料相談で確定のお見積りをお出しします。
+          </p>
+        </div>
+      </section>
+
+      <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
         <div className="sw-wrap sw-narrow">
           <Head en="DELIVERABLES" jp="お渡しするもの" />
           <div className="sw-dl">
@@ -976,6 +1090,12 @@ function BusinessDetailPage({ slug, go }) {
             <span className="sw-mono">期間の目安</span>
             {b.detail.span}
           </Reveal>
+          {b.detail.note && (
+            <Reveal className="sw-note">
+              <Icon name="check" size={18} />
+              <p>{b.detail.note}</p>
+            </Reveal>
+          )}
         </div>
       </section>
 
@@ -1134,6 +1254,7 @@ function CompanyPage({ go }) {
    ------------------------------------------------------------------------- */
 
 function ContactPage() {
+  const [service, setService] = useState("AGENT");
   const [form, setForm] = useState({ name: "", company: "", email: "", subject: "", message: "" });
   const [sending, setSending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -1157,7 +1278,7 @@ function ContactPage() {
     const payload = {
       client_name: form.name,
       client_email: form.email,
-      message: `【貴社名】${form.company}／【件名】${form.subject}／【内容】${form.message}`,
+      message: `【事業】${service}／【貴社名】${form.company}／【件名】${form.subject}／【内容】${form.message}`,
     };
 
     try {
@@ -1198,6 +1319,7 @@ function ContactPage() {
                 className="sw-btn sw-btn--line"
                 onClick={() => {
                   setSubmitted(false);
+                  setService("AGENT");
                   setForm({ name: "", company: "", email: "", subject: "", message: "" });
                 }}
               >
@@ -1206,6 +1328,41 @@ function ContactPage() {
             </Reveal>
           ) : (
             <Reveal className="sw-form">
+              <p className="sw-fd__l sw-svcpick__k">ご相談の内容</p>
+              <div className="sw-svcpick">
+                {BUSINESSES.map((b) => (
+                  <button
+                    key={b.code}
+                    type="button"
+                    className={`sw-svcpick__b ${service === b.code ? "is-on" : ""}`}
+                    style={{ "--t": b.theme, "--s": b.soft }}
+                    onClick={() => setService(b.code)}
+                  >
+                    <span className="sw-svcpick__ic">
+                      <Icon name={b.icon} size={20} />
+                    </span>
+                    <span>
+                      <b>{b.title}</b>
+                      <em>{b.price}</em>
+                    </span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={`sw-svcpick__b ${service === "OTHER" ? "is-on" : ""}`}
+                  style={{ "--t": "#5B6373", "--s": "#EDEFF3" }}
+                  onClick={() => setService("OTHER")}
+                >
+                  <span className="sw-svcpick__ic">
+                    <Icon name="search" size={20} />
+                  </span>
+                  <span>
+                    <b>まだ決まっていない</b>
+                    <em>相談しながら決めたい</em>
+                  </span>
+                </button>
+              </div>
+
               <div className="sw-form__g">
                 <label className="sw-fd">
                   <span className="sw-fd__l">
@@ -1742,4 +1899,70 @@ const CSS = `
 .sw-ft__note{font-size:11px;line-height:1.9;color:#5C6672;margin:22px 0 16px;}
 .sw-ft__cp{font-size:10px;letter-spacing:.1em;color:#4C5561;}
 @media (max-width:700px){.sw-ft__cols{gap:32px;}}
+
+/* ---- 事業ブランド ---- */
+.sw-hero__chip.is-biz{cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s;padding:8px 16px 8px 12px;}
+.sw-hero__chip.is-biz:hover{border-color:var(--t);transform:translateY(-2px);box-shadow:0 14px 26px -20px rgba(26,34,51,.6);}
+.sw-hero__chipd{width:8px;height:8px;border-radius:50%;background:var(--t);flex-shrink:0;}
+.sw-hero__chip.is-biz em{font-style:normal;font-size:11px;color:var(--t);font-weight:700;margin-left:2px;}
+.sw-bz__c{--t:var(--sig);--s:var(--sig-s);}
+.sw-bz__c:hover{border-color:var(--t);}
+.sw-bz__ic{background:var(--t) !important;}
+.sw-bz__no{color:var(--t) !important;}
+.sw-bz__ul li::before{background:var(--t);}
+.sw-bz__link{color:var(--t);}
+.sw-bz__price{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--t);margin-bottom:18px;}
+.sw-bz__prep{font-style:normal;font-size:11px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;margin-left:10px;vertical-align:middle;}
+.sw-phero--bz{background:linear-gradient(180deg,var(--s),transparent 82%);}
+.sw-phero--bz .sw-btn--sig{background:var(--t);box-shadow:none;}
+.sw-phero--bz .sw-btn--sig:hover{filter:brightness(.92);}
+
+/* ---- 料金プラン ---- */
+.sw-plans{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.sw-plans > .sw-rv{height:100%;display:block;}
+.sw-plan{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:16px;padding:24px 22px;height:100%;transition:transform .25s,box-shadow .25s;}
+.sw-plan:hover{transform:translateY(-3px);box-shadow:0 22px 40px -30px rgba(26,34,51,.5);}
+.sw-plan__n{font-size:15px;font-weight:900;margin-bottom:8px;}
+.sw-plan__d{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:16px;min-height:3.4em;}
+.sw-plan__p{font-family:var(--mono);font-size:19px;font-weight:700;color:var(--t);}
+.sw-plans__n{font-size:12px;line-height:1.9;color:var(--muted);margin-top:18px;}
+@media (max-width:820px){.sw-plans{grid-template-columns:1fr;}.sw-plan__d{min-height:0;}}
+
+.sw-note{display:flex;gap:12px;align-items:flex-start;background:var(--bg);border-left:3px solid var(--t);border-radius:12px;padding:18px 20px;margin-top:20px;}
+.sw-note svg{color:var(--t);margin-top:4px;}
+.sw-note p{font-size:12.5px;line-height:1.95;color:var(--muted);}
+
+/* ---- 事業セレクタ（お問い合わせ） ---- */
+.sw-svcpick__k{margin-bottom:12px;}
+.sw-svcpick{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:26px;padding-bottom:26px;border-bottom:1px solid var(--line);}
+.sw-svcpick__b{display:flex;align-items:center;gap:12px;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;background:var(--white);transition:border-color .2s,background .2s,transform .2s;}
+.sw-svcpick__b:hover{border-color:var(--t);transform:translateY(-1px);}
+.sw-svcpick__b.is-on{border-color:var(--t);background:var(--s);}
+.sw-svcpick__ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--s);color:var(--t);flex-shrink:0;}
+.sw-svcpick__b.is-on .sw-svcpick__ic{background:var(--t);color:#fff;}
+.sw-svcpick__b b{display:block;font-size:14px;font-weight:700;line-height:1.5;}
+.sw-svcpick__b em{font-style:normal;font-size:11.5px;color:var(--muted);}
+@media (max-width:640px){.sw-svcpick{grid-template-columns:1fr;}}
+
+/* ---- 2事業レイアウト・制作メニュー ---- */
+.sw-bz{grid-template-columns:repeat(2,1fr);}
+.sw-bz__sub{font-size:12.5px;font-weight:700;color:var(--t);margin-bottom:12px;}
+.sw-phero__sub{font-size:14px;font-weight:700;color:var(--t);margin-bottom:10px;}
+@media (max-width:900px){.sw-bz{grid-template-columns:1fr;}}
+
+.sw-menu{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:26px 28px;margin-bottom:16px;}
+.sw-menu__hd{display:flex;align-items:center;gap:12px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:6px;}
+.sw-menu__ic{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:13px;background:var(--s);color:var(--t);}
+.sw-menu__hd h3{font-size:18px;font-weight:900;}
+.sw-menu__en{font-size:9.5px;letter-spacing:.18em;color:var(--muted);margin-left:auto;}
+.sw-menu__i{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:16px 0;}
+.sw-menu__i + .sw-menu__i{border-top:1px solid var(--line);}
+.sw-menu__n{font-size:15px;font-weight:700;line-height:1.6;margin-bottom:4px;}
+.sw-menu__d{font-size:12.5px;line-height:1.85;color:var(--muted);}
+.sw-menu__p{font-size:15px;font-weight:700;color:var(--t);white-space:nowrap;padding-top:2px;}
+@media (max-width:600px){
+  .sw-menu{padding:20px 18px;}
+  .sw-menu__i{flex-direction:column;gap:6px;}
+  .sw-menu__p{padding-top:0;}
+}
 `;
