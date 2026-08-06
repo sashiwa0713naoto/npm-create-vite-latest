@@ -32,6 +32,7 @@ const LIVE_COMMAND = true;
 const SERVICES = [
   { code: "AGENT", name: "AI社員構築代行", theme: "#E0402F", soft: "#FDECEA" },
   { code: "STUDIO", name: "文書・動画 自動制作", theme: "#2456C8", soft: "#E8EEFB" },
+  { code: "SOCIAL", name: "SNSアカウント運用", theme: "#7C5CD6", soft: "#F1EDFC" },
 ];
 
 const DEPARTMENTS = [
@@ -144,6 +145,24 @@ const DEPARTMENTS = [
 
 /* デモ用の処理履歴。SHEET_CSV_URL を設定すると実データに置き換わります。 */
 const DEMO_TASKS = [
+  {
+    service: "SOCIAL",
+    timestamp: "2026-08-06 22:00",
+    run_id: "s-260806",
+    client_name: "自社アカウント",
+    agent: "Creative_PR_AI",
+    status: "完了",
+    summary: "翌日分の投稿5本を生成し、予約配信を設定",
+  },
+  {
+    service: "SOCIAL",
+    timestamp: "2026-08-06 05:30",
+    run_id: "s-260806a",
+    client_name: "自社アカウント",
+    agent: "CEO_AI",
+    status: "完了",
+    summary: "業界ニュースを収集し、投稿テーマ12件を抽出",
+  },
   {
     service: "STUDIO",
     timestamp: "2026-08-06 22:00",
@@ -368,9 +387,14 @@ function Gate({ onPass }) {
   return (
     <div className="dbGate">
       <div className="dbGate__c">
-        <span className="dbGate__ic">
-          <Ico name="lock" size={26} />
-        </span>
+        <svg viewBox="0 0 128 152" className="dbGateRing" aria-hidden="true">
+          <path d="M64 8 L80 27 L64 46 L48 27 Z" fill="#FFE3DF" stroke="#E0402F" strokeWidth="3.4" strokeLinejoin="round" />
+          <circle cx="64" cy="98" r="38" fill="none" stroke="#E0402F" strokeWidth="17" />
+          <circle cx="64" cy="98" r="29.5" fill="#FFFFFF" />
+          <circle cx="53" cy="94" r="4.2" fill="#1A2233" />
+          <circle cx="75" cy="94" r="4.2" fill="#1A2233" />
+          <path d="M56 106 q8 8 16 0" stroke="#1A2233" strokeWidth="3.4" fill="none" strokeLinecap="round" />
+        </svg>
         <h1>SASHIWA CONTROL</h1>
         <p>社長専用のコントロールダッシュボードです。</p>
         <input
@@ -1032,6 +1056,8 @@ const CSS = `
 .dbGate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   background:radial-gradient(60% 50% at 50% 0%,rgba(224,64,47,.12),transparent 70%),var(--bg);}
 .dbGate__c{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:44px 36px;width:100%;max-width:400px;text-align:center;box-shadow:0 30px 60px -40px rgba(26,34,51,.5);}
+.dbGateRing{width:104px;height:auto;display:block;margin:0 auto 14px;animation:dbFloat 4.6s ease-in-out infinite;}
+@keyframes dbFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
 .dbGate__ic{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:19px;background:var(--s);color:var(--sig);margin-bottom:18px;}
 .dbGate__c h1{font-size:19px;font-weight:900;letter-spacing:.1em;margin-bottom:8px;}
 .dbGate__c > p{font-size:13px;color:var(--muted);margin-bottom:24px;}
@@ -1221,7 +1247,7 @@ const CSS = `
 }
 
 /* 事業別 */
-.dbSvcs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.dbSvcs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .dbSvc{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:20px 22px;}
 .dbSvc__hd{display:flex;align-items:center;gap:9px;margin-bottom:14px;}
 .dbSvc__dot{width:8px;height:8px;border-radius:50%;background:var(--t);}
