@@ -105,6 +105,58 @@ const BUSINESSES = [
         "AIが生成した文章・映像には、事実の誤りが含まれる可能性があります。公開前の最終確認はお客様側で行っていただく前提です。検査工程は一次スクリーニングであり、内容の正確性を保証するものではありません。なお動画制作は、使用する音源・音声合成の商用利用条件を確認中のため、現在は事前相談のみ承っています。",
     },
   },
+  {
+    slug: "social",
+    code: "SOCIAL",
+    no: "BUSINESS 03",
+    en: "24/365 SOCIAL",
+    title: "SNSアカウント運用代行",
+    sub: "24時間365日、止まらずに発信する",
+    theme: "#7C5CD6",
+    soft: "#F1EDFC",
+    lede: "ネタ集めから執筆、画像、予約投稿まで。人が手を動かさなくても、毎日発信が続く状態をつくります。",
+    price: "月額 6万円〜",
+    icon: "social",
+    detail: {
+      what:
+        "SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。担当者が休んでも、繁忙期でも、投稿は止まりません。SASHIWA自身のアカウントも、同じ仕組みで運用しています。",
+      points: [
+        { t: "毎日、決まった時刻に出る", d: "深夜でも休日でも、設定した時刻に投稿が予約配信されます。" },
+        { t: "ネタ切れが起きない", d: "業界の動向を毎日収集し、投稿テーマの候補を自動で積み上げます。" },
+        { t: "複数アカウントを並行運用", d: "1人では回せない本数を、アカウント数を増やしても同じ手間で回せます。" },
+      ],
+      menus: [
+        {
+          label: "運用対象",
+          en: "PLATFORM",
+          icon: "social",
+          items: [
+            { n: "X（旧Twitter）運用", d: "1日1〜5投稿。ネタ収集・執筆・予約投稿まで自動", p: "60,000円／月" },
+            { n: "Instagram運用", d: "フィード・ストーリーズの企画から画像生成、予約投稿まで", p: "80,000円／月" },
+            { n: "note・ブログ連携", d: "SNS投稿と連動した長文記事を定期公開", p: "40,000円／月" },
+          ],
+        },
+        {
+          label: "オプション",
+          en: "OPTION",
+          icon: "pen",
+          items: [
+            { n: "返信の下書き生成", d: "受信したコメントへの返信案を毎朝まとめてお渡しします", p: "20,000円／月" },
+            { n: "月次分析レポート", d: "伸びた投稿の傾向を分析し、翌月の方針を提案", p: "20,000円／月" },
+          ],
+        },
+      ],
+      plans: [
+        { n: "シングル", d: "1アカウント・毎日1投稿。まず1つ止めずに回したい方向け。", p: "60,000円／月" },
+        { n: "マルチ", d: "3アカウント同時運用。プラットフォームをまたいで展開します。", p: "108,000円／月" },
+        { n: "フル", d: "5アカウント＋返信下書き＋月次分析レポート。", p: "168,000円／月" },
+      ],
+      deliver: ["投稿カレンダー", "投稿本文・画像データ", "返信の下書き（オプション）", "月次の分析レポート"],
+      span: "初期設計 約1週間 ／ 以降は毎日の自動投稿",
+      note:
+        "各SNSの利用規約は随時変更されます。自動投稿が規約に抵触しないかは運用開始前に確認し、変更があった場合は運用方法を見直します。フォロワーの購入は一切行いません。また、投稿の伸びは内容以外の要因にも左右されるため、フォロワー数や表示回数を保証するものではありません。アカウントの最終的な管理権限はお客様が保持します。",
+    },
+  },
 ];
 
 const TASKS = [
@@ -117,10 +169,23 @@ const TASKS = [
 ];
 
 const STATS = [
-  { v: "100", u: "%", label: "自社業務のAI稼働" },
-  { v: "0", u: "名", label: "人間の従業員" },
-  { v: "5", u: "体", label: "稼働中のAI社員" },
-  { v: "24", u: "/365", label: "依頼の受付・処理" },
+  { v: 365, u: "日", label: "止まらない稼働", suffix: "" },
+  { v: 24, u: "時間", label: "依頼の受付・処理" },
+  { v: 0, u: "名", label: "人間の従業員" },
+  { v: 5, u: "体", label: "稼働中のAI社員" },
+];
+
+const MARQUEE = [
+  "SNSアカウント運用",
+  "SEO記事制作",
+  "営業資料・提案書",
+  "マニュアル作成",
+  "動画の企画・台本",
+  "問い合わせ一次対応",
+  "定例レポート生成",
+  "AI社員の設計・実装",
+  "工数とコストの試算",
+  "品質・倫理の検査",
 ];
 
 const BEFORE_AFTER = [
@@ -343,6 +408,13 @@ function Icon({ name, size = 28 }) {
         <path d="m15 5.2 3.3 3.3" {...s} />
       </>
     ),
+    social: (
+      <>
+        <circle cx="12" cy="7.4" r="3.4" {...s} />
+        <path d="M5.2 20.2a6.8 6.8 0 0 1 13.6 0" {...s} />
+        <path d="M19.4 4.6a4 4 0 0 1 0 5.6M4.6 4.6a4 4 0 0 0 0 5.6" {...s} opacity=".5" />
+      </>
+    ),
     studio: (
       <>
         <path d="M4 3.2h7.5l3.2 3.2v9.4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4.2a1 1 0 0 1 1-1Z" {...s} />
@@ -369,55 +441,55 @@ function Icon({ name, size = 28 }) {
 
 /* ---------------------------------------------------------------- マスコット */
 
-function Mascot() {
+function RingChara({ tone = "#E0402F", gem = "#FFE3DF", id = "a", delay = "0s", scale = 1 }) {
   return (
-    <svg viewBox="0 0 320 260" className="sw-mascot" aria-hidden="true">
-      <ellipse cx="160" cy="238" rx="118" ry="12" fill="#111A2B" opacity=".07" />
-      {/* 後ろの小さいAI社員 */}
-      <g className="sw-mascot__bot" style={{ animationDelay: "0s" }}>
-        <rect x="120" y="150" width="34" height="30" rx="9" fill="#FFFFFF" stroke="#1A2233" strokeWidth="2" />
-        <circle cx="130" cy="164" r="2.6" fill="#1A2233" />
-        <circle cx="144" cy="164" r="2.6" fill="#1A2233" />
-        <path d="M137 150v-7" stroke="#1A2233" strokeWidth="2" />
-        <circle cx="137" cy="141" r="3" fill="#E0402F" />
+    <svg
+      viewBox="0 0 128 152"
+      className="sw-ring"
+      style={{ animationDelay: delay, transform: `scale(${scale})` }}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={`rg-${id}`} x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0%" stopColor={tone} />
+          <stop offset="100%" stopColor={tone} stopOpacity="0.72" />
+        </linearGradient>
+      </defs>
+      {/* 宝石＝AIコア */}
+      <g className="sw-ring__gem">
+        <path d="M64 8 L80 27 L64 46 L48 27 Z" fill={gem} stroke={tone} strokeWidth="3.4" strokeLinejoin="round" />
+        <path d="M48 27 H80 M64 8 L64 46" stroke={tone} strokeWidth="1.8" opacity=".45" />
       </g>
-      <g className="sw-mascot__bot" style={{ animationDelay: ".4s" }}>
-        <rect x="166" y="150" width="34" height="30" rx="9" fill="#FFFFFF" stroke="#1A2233" strokeWidth="2" />
-        <circle cx="176" cy="164" r="2.6" fill="#1A2233" />
-        <circle cx="190" cy="164" r="2.6" fill="#1A2233" />
-        <path d="M183 150v-7" stroke="#1A2233" strokeWidth="2" />
-        <circle cx="183" cy="141" r="3" fill="#E0402F" />
-      </g>
-      {/* 大きい2体 */}
-      <g className="sw-mascot__big">
-        <path
-          d="M62 118c0-30 20-52 46-52s46 22 46 52c0 34-18 58-46 58s-46-24-46-58Z"
-          fill="#E0402F"
-        />
-        <circle cx="94" cy="118" r="5.6" fill="#fff" />
-        <circle cx="122" cy="118" r="5.6" fill="#fff" />
-        <circle cx="95.5" cy="119.5" r="2.6" fill="#1A2233" />
-        <circle cx="123.5" cy="119.5" r="2.6" fill="#1A2233" />
-        <path d="M100 136q8 7 16 0" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" />
-        <path d="M108 66c-4-12 2-20 8-22-2 8 2 14 6 16" fill="#3E5C4B" />
-      </g>
-      <g className="sw-mascot__big" style={{ animationDelay: ".8s" }}>
-        <path
-          d="M166 122c0-28 19-49 43-49s43 21 43 49c0 32-17 55-43 55s-43-23-43-55Z"
-          fill="#1F3358"
-        />
-        <circle cx="196" cy="122" r="5.4" fill="#fff" />
-        <circle cx="222" cy="122" r="5.4" fill="#fff" />
-        <circle cx="197.5" cy="123.5" r="2.5" fill="#1A2233" />
-        <circle cx="223.5" cy="123.5" r="2.5" fill="#1A2233" />
-        <path d="M202 139q7 6 14 0" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" />
-        <path d="M209 73c-4-11 2-19 8-21-2 8 2 13 6 15" fill="#3E5C4B" />
-        {/* クリップボード */}
-        <rect x="238" y="120" width="30" height="38" rx="4" fill="#fff" stroke="#1A2233" strokeWidth="2" />
-        <rect x="246" y="114" width="14" height="9" rx="3" fill="#E0402F" />
-        <path d="M245 134h16M245 141h16M245 148h10" stroke="#C3CAD6" strokeWidth="2.4" strokeLinecap="round" />
-      </g>
+      {/* 輪＝人と人をつなぐ */}
+      <circle cx="64" cy="98" r="38" fill="none" stroke={`url(#rg-${id})`} strokeWidth="17" strokeLinecap="round" />
+      {/* 顔 */}
+      <circle cx="64" cy="98" r="29.5" fill="#FFFFFF" opacity=".96" />
+      <circle cx="53" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
+      <circle cx="75" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
+      <circle cx="45" cy="105" r="4.6" fill={tone} opacity=".28" />
+      <circle cx="83" cy="105" r="4.6" fill={tone} opacity=".28" />
+      <path d="M56 106 q8 8 16 0" stroke="#1A2233" strokeWidth="3.4" fill="none" strokeLinecap="round" />
+      {/* 手 */}
+      <path d="M20 100 q-9 -5 -11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
+      <path d="M108 100 q9 -5 11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/* 3体が輪でつながる＝人と人をつなげる */
+function RingTrio() {
+  return (
+    <div className="sw-trio">
+      <span className="sw-trio__i sw-trio__i--l">
+        <RingChara tone="#2456C8" gem="#DCE6FB" id="b" delay=".5s" scale={0.82} />
+      </span>
+      <span className="sw-trio__i sw-trio__i--c">
+        <RingChara tone="#E0402F" gem="#FFE3DF" id="a" delay="0s" />
+      </span>
+      <span className="sw-trio__i sw-trio__i--r">
+        <RingChara tone="#7C5CD6" gem="#EDE6FC" id="c" delay="1s" scale={0.82} />
+      </span>
+    </div>
   );
 }
 
@@ -451,6 +523,58 @@ function Reveal({ children, delay = 0, className = "" }) {
   return (
     <div ref={ref} className={`sw-rv ${shown ? "is-in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
       {children}
+    </div>
+  );
+}
+
+function useCountUp(target, dur = 1400) {
+  const [n, setN] = useState(0);
+  const [ref, shown] = useReveal();
+  useEffect(() => {
+    if (!shown) return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || target === 0) return setN(target);
+    let raf;
+    const t0 = performance.now();
+    const tick = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      setN(Math.round(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [shown, target, dur]);
+  return [ref, n];
+}
+
+function Counter({ value, unit, label }) {
+  const [ref, n] = useCountUp(value);
+  return (
+    <div className="sw-stat" ref={ref}>
+      <p className="sw-mono sw-stat__v">
+        {n}
+        <span>{unit}</span>
+      </p>
+      <p className="sw-stat__l">{label}</p>
+    </div>
+  );
+}
+
+function Marquee({ items, reverse }) {
+  const row = [...items, ...items];
+  return (
+    <div className="sw-mq" aria-hidden="true">
+      <div className={`sw-mq__t ${reverse ? "is-rev" : ""}`}>
+        {row.map((t, i) => (
+          <span key={i}>
+            {t}
+            <em>◆</em>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -629,68 +753,160 @@ function Header({ page, go }) {
 function HomePage({ go }) {
   return (
     <>
-      {/* ヒーロー */}
+      {/* ヒーロー：全画面グラデーション＋巨大ロゴタイプ */}
       <section className="sw-hero">
         <div className="sw-hero__bg" aria-hidden="true" />
-        <div className="sw-wrap sw-hero__in">
-          <div className="sw-hero__l">
-            <p className="sw-mono sw-hero__eb">
-              AI EMPLOYEE <span className="sw-hero__bar" /> 社員は、全員AI。
-            </p>
-            <h1 className="sw-hero__h1">
-              いまの手作業を、
-              <br />
-              <span className="sw-hero__em">AI社員</span>に任せる。
-            </h1>
-            <p className="sw-hero__lede">
-              御社にAI社員を置く。あるいは、記事や資料や動画そのものをつくって納品する。
-              人がくり返している仕事を、24時間止まらないAIエージェントが引き受けます。
-              <b>SASHIWAには人間の従業員が0名。すべてAI社員が処理しています。</b>
-            </p>
-
-            <div className="sw-hero__cta">
-              <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("contact")}>
-                30分の無料相談へ
-              </button>
-              <button className="sw-btn sw-btn--line sw-btn--lg" onClick={() => go("business")}>
-                2つの事業を見る
-              </button>
-            </div>
-
-            <ul className="sw-hero__chips">
-              {BUSINESSES.map((b) => (
-                <li
-                  key={b.slug}
-                  className="sw-hero__chip is-biz"
-                  style={{ "--t": b.theme }}
-                  onClick={() => go("business", b.slug)}
-                >
-                  <span className="sw-hero__chipd" />
-                  {b.title}
-                  <em>{b.price}</em>
-                </li>
-              ))}
-            </ul>
+        <div className="sw-hero__glow" aria-hidden="true" />
+        <div className="sw-hero__in">
+          <p className="sw-mono sw-hero__eb">AI EMPLOYEE COMPANY</p>
+          <h1 className="sw-hero__word" aria-label="SASHIWA">
+            {"SASHIWA".split("").map((c, i) => (
+              <span key={i} style={{ animationDelay: `${0.06 * i + 0.15}s` }}>
+                {c}
+              </span>
+            ))}
+          </h1>
+          <p className="sw-hero__cap">
+            社員は、全員AI。<span className="sw-hero__slash">／</span>
+            <b>24時間365日</b>、止まらない会社。
+          </p>
+          <p className="sw-hero__note">
+            銀行振込と最終承認以外のすべての業務を、AI社員が処理できる状態を実際につくっています。
+          </p>
+          <div className="sw-hero__cta">
+            <button className="sw-btn sw-btn--white sw-btn--lg" onClick={() => go("contact")}>
+              無料相談を申し込む <em aria-hidden="true">→</em>
+            </button>
           </div>
+          <RingTrio />
+          <span className="sw-hero__scroll" aria-hidden="true">
+            <em />
+          </span>
+        </div>
+      </section>
 
-          <div className="sw-hero__r">
-            <Mascot />
+      {/* ステートメント */}
+      <section className="sw-state">
+        <div className="sw-wrap">
+          <Reveal>
+            <h2 className="sw-state__h">
+              人がくり返している仕事は、
+              <br />
+              全部<span className="sw-sig">AI社員</span>にやらせる。
+            </h2>
+            <p className="sw-state__b">
+              SNSの毎日投稿も、記事も、資料も、問い合わせの一次対応も。
+              株式会社SASHIWAには人間の従業員が0名で、5体のAIエージェントが受注から制作、検査、原価計算までを処理しています。
+              <b>その運用の仕組みそのものを、御社にご提供します。</b>
+            </p>
+            <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("business")}>
+              3つの事業を見る <em aria-hidden="true">→</em>
+            </button>
+          </Reveal>
+        </div>
+      </section>
+
+      <Marquee items={MARQUEE} />
+
+      {/* 指標（カウントアップ） */}
+      <section className="sw-nums">
+        <div className="sw-wrap">
+          <Reveal>
+            <p className="sw-mono sw-nums__en">ALWAYS RUNNING</p>
+            <h2 className="sw-nums__h">
+              担当者が寝ている間も、<span className="sw-sig">動き続けています。</span>
+            </h2>
+          </Reveal>
+          <div className="sw-nums__g">
+            {STATS.map((st) => (
+              <Counter key={st.label} value={st.v} unit={st.u} label={st.label} />
+            ))}
           </div>
         </div>
       </section>
 
-      {/* 何をする会社か（1行で説明） */}
-      <section className="sw-oneline">
+      {/* 3事業 */}
+      <section className="sw-sec">
         <div className="sw-wrap">
-          <Reveal>
-            <p className="sw-oneline__t">
-              株式会社SASHIWAは、<b>AI社員だけで運営されている</b>会社です。
-            </p>
-            <p className="sw-oneline__b">
-              5体のAIエージェントが、受注から制作、検査、原価計算までを人の介在なしで処理しています。
-              事業は2つ。<b>仕組みをつくって御社に置く「AI社員構築代行」</b>と、
-              <b>成果物そのものをつくって納品する「文書・動画 自動制作」</b>です。
-            </p>
+          <Head
+            center
+            en="BUSINESS"
+            jp="3つの事業"
+            note="仕組みを買うか、成果物を買うか、運用ごと任せるか。目的に合わせてお選びいただけます。"
+          />
+          <div className="sw-bz">
+            {BUSINESSES.map((b, i) => (
+              <Reveal key={b.slug} delay={i * 90}>
+                <article
+                  className="sw-bz__c"
+                  style={{ "--t": b.theme, "--s": b.soft }}
+                  onClick={() => go("business", b.slug)}
+                >
+                  <span className="sw-bz__ic">
+                    <Icon name={b.icon} size={30} />
+                  </span>
+                  <p className="sw-mono sw-bz__no">
+                    {b.no} <span>{b.en}</span>
+                  </p>
+                  <h3>{b.title}</h3>
+                  <p className="sw-bz__sub">{b.sub}</p>
+                  <p className="sw-bz__l">{b.lede}</p>
+                  <p className="sw-bz__price">{b.price}</p>
+                  <span className="sw-bz__link">
+                    詳しく見る <em aria-hidden="true">→</em>
+                  </span>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* SNS 24/365 特集 */}
+      <section className="sw-always">
+        <div className="sw-always__bg" aria-hidden="true" />
+        <div className="sw-wrap sw-always__in">
+          <div className="sw-always__l">
+            <Reveal>
+              <p className="sw-mono sw-always__eb">BUSINESS 03 ｜ 24/365 SOCIAL</p>
+              <h2 className="sw-always__h">
+                <span className="sw-always__big">24時間365日</span>
+                <br />
+                発信が止まらない状態を、
+                <br />
+                つくります。
+              </h2>
+              <p className="sw-always__b">
+                SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、
+                投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。
+                担当者が休んでも、繁忙期でも、投稿は止まりません。
+              </p>
+              <div className="sw-always__cta">
+                <button className="sw-btn sw-btn--soc sw-btn--lg" onClick={() => go("business", "social")}>
+                  SNS運用代行を見る <em aria-hidden="true">→</em>
+                </button>
+              </div>
+            </Reveal>
+          </div>
+
+          <Reveal delay={120} className="sw-always__r">
+            <div className="sw-tl">
+              <p className="sw-mono sw-tl__k">1日の稼働ログ（例）</p>
+              {[
+                { t: "05:30", d: "業界ニュースを収集し、投稿テーマを抽出" },
+                { t: "07:00", d: "朝の投稿を配信（X／1本目）" },
+                { t: "12:00", d: "昼の投稿を配信（Instagram）" },
+                { t: "18:30", d: "夕方の投稿を配信（X／2本目）" },
+                { t: "22:00", d: "翌日分の下書きを生成し、検査を通過" },
+                { t: "02:14", d: "受信コメントの返信案をまとめる" },
+              ].map((r, i) => (
+                <div className="sw-tl__r" key={r.t} style={{ animationDelay: `${i * 0.12}s` }}>
+                  <span className="sw-mono sw-tl__t">{r.t}</span>
+                  <span className="sw-tl__dot" />
+                  <span className="sw-tl__d">{r.d}</span>
+                </div>
+              ))}
+            </div>
           </Reveal>
         </div>
       </section>
@@ -745,38 +961,6 @@ function HomePage({ go }) {
         </div>
       </section>
 
-      {/* 事業内容 → 別ページへ */}
-      <section className="sw-sec">
-        <div className="sw-wrap">
-          <Head en="BUSINESS" jp="事業内容" note="仕組みを買うか、成果物を買うか。目的に合わせてお選びいただけます。" />
-          <div className="sw-bz">
-            {BUSINESSES.map((b, i) => (
-              <Reveal key={b.slug} delay={i * 70}>
-                <article
-                  className="sw-bz__c"
-                  style={{ "--t": b.theme, "--s": b.soft }}
-                  onClick={() => go("business", b.slug)}
-                >
-                  <span className="sw-bz__ic">
-                    <Icon name={b.icon} size={30} />
-                  </span>
-                  <p className="sw-mono sw-bz__no">
-                    {b.no} <span>{b.en}</span>
-                  </p>
-                  <h3>{b.title}</h3>
-                  <p className="sw-bz__sub">{b.sub}</p>
-                  <p className="sw-bz__l">{b.lede}</p>
-                  <p className="sw-bz__price">{b.price}</p>
-                  <span className="sw-bz__link">
-                    詳しく見る <em aria-hidden="true">→</em>
-                  </span>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* 自社実証 */}
       <section className="sw-proof">
         <div className="sw-wrap">
@@ -798,18 +982,6 @@ function HomePage({ go }) {
               品質・倫理担当が成果物を検査し、原価担当が工数を算出します。人が行うのは、方針の決定と最終承認だけです。
             </p>
           </Reveal>
-
-          <div className="sw-stats">
-            {STATS.map((s, i) => (
-              <Reveal key={s.label} delay={i * 60} className="sw-stat">
-                <p className="sw-mono sw-stat__v">
-                  {s.v}
-                  <span>{s.u}</span>
-                </p>
-                <p className="sw-stat__l">{s.label}</p>
-              </Reveal>
-            ))}
-          </div>
 
           <div className="sw-roster">
             <p className="sw-mono sw-roster__k">ROSTER — 稼働中のAI社員</p>
@@ -1965,4 +2137,113 @@ const CSS = `
   .sw-menu__i{flex-direction:column;gap:6px;}
   .sw-menu__p{padding-top:0;}
 }
+
+/* ============ ヒーロー全面刷新 ============ */
+.sw-hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:110px 24px 70px;overflow:hidden;text-align:center;}
+.sw-hero__bg{position:absolute;inset:0;background:
+  linear-gradient(155deg,#E0402F 0%,#C22C55 34%,#7C3F9E 66%,#3B3A8F 100%);}
+.sw-hero__bg::after{content:"";position:absolute;inset:0;
+  background-image:radial-gradient(rgba(255,255,255,.16) 1px,transparent 1px);background-size:26px 26px;opacity:.5;
+  mask-image:radial-gradient(80% 70% at 50% 45%,#000,transparent 78%);
+  -webkit-mask-image:radial-gradient(80% 70% at 50% 45%,#000,transparent 78%);}
+.sw-hero__glow{position:absolute;left:50%;top:38%;width:min(1100px,120vw);height:min(1100px,120vw);transform:translate(-50%,-50%);
+  background:radial-gradient(circle,rgba(255,255,255,.30),transparent 62%);animation:swBreath 7s ease-in-out infinite;}
+@keyframes swBreath{0%,100%{opacity:.75;transform:translate(-50%,-50%) scale(1);}50%{opacity:1;transform:translate(-50%,-50%) scale(1.08);}}
+.sw-hero__in{position:relative;width:100%;max-width:1100px;}
+.sw-hero__eb{font-size:11px;letter-spacing:.34em;color:rgba(255,255,255,.75);margin-bottom:18px;animation:swUp .8s .05s both cubic-bezier(.22,1,.36,1);}
+.sw-hero__word{display:flex;justify-content:center;gap:.02em;font-weight:900;color:#fff;line-height:.92;letter-spacing:.02em;
+  font-size:clamp(56px,15vw,178px);margin-bottom:26px;}
+.sw-hero__word span{display:inline-block;animation:swDrop .9s both cubic-bezier(.2,1.1,.35,1);}
+@keyframes swDrop{from{opacity:0;transform:translateY(-38px) rotate(-6deg);}to{opacity:1;transform:none;}}
+@keyframes swUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:none;}}
+.sw-hero__cap{font-size:clamp(19px,3.2vw,34px);font-weight:900;color:#fff;line-height:1.55;margin-bottom:18px;animation:swUp .9s .55s both cubic-bezier(.22,1,.36,1);}
+.sw-hero__cap b{color:#FFE27A;font-weight:900;}
+.sw-hero__slash{opacity:.5;margin:0 .25em;font-weight:400;}
+.sw-hero__note{font-size:13.5px;line-height:2;color:rgba(255,255,255,.86);max-width:36em;margin:0 auto 34px;animation:swUp .9s .7s both cubic-bezier(.22,1,.36,1);}
+.sw-hero__cta{animation:swUp .9s .85s both cubic-bezier(.22,1,.36,1);}
+.sw-btn--white{background:#fff;color:#1A2233;box-shadow:0 16px 34px -18px rgba(0,0,0,.55);}
+.sw-btn--white:hover{transform:translateY(-2px);background:#1A2233;color:#fff;}
+.sw-btn em{font-style:normal;transition:transform .25s;display:inline-block;}
+.sw-btn:hover em{transform:translateX(4px);}
+.sw-hero__scroll{position:absolute;left:50%;bottom:-46px;transform:translateX(-50%);width:26px;height:42px;border:1.5px solid rgba(255,255,255,.55);border-radius:999px;display:flex;justify-content:center;padding-top:8px;}
+.sw-hero__scroll em{width:3px;height:8px;border-radius:2px;background:#fff;animation:swScroll 1.8s ease-in-out infinite;}
+@keyframes swScroll{0%{opacity:0;transform:translateY(0);}30%{opacity:1;}100%{opacity:0;transform:translateY(16px);}}
+@media (max-width:760px){.sw-hero{min-height:auto;padding:104px 20px 90px;}.sw-hero__scroll{display:none;}}
+
+/* キャラクター：指輪 */
+.sw-trio{display:flex;align-items:flex-end;justify-content:center;margin-top:46px;animation:swUp 1s 1s both cubic-bezier(.22,1,.36,1);}
+.sw-trio__i{display:block;}
+.sw-trio__i--c{width:min(190px,32vw);z-index:2;}
+.sw-trio__i--l,.sw-trio__i--r{width:min(150px,26vw);}
+.sw-trio__i--l{margin-right:-26px;}
+.sw-trio__i--r{margin-left:-26px;}
+.sw-ring{width:100%;height:auto;display:block;animation:swFloatY 4.6s ease-in-out infinite;filter:drop-shadow(0 14px 22px rgba(0,0,0,.22));}
+@keyframes swFloatY{0%,100%{transform:translateY(0);}50%{transform:translateY(-11px);}}
+.sw-ring__gem{transform-origin:64px 27px;animation:swGem 3s ease-in-out infinite;}
+@keyframes swGem{0%,100%{opacity:1;}50%{opacity:.62;}}
+
+/* ============ ステートメント ============ */
+.sw-state{padding:110px 0;text-align:center;background:var(--white);}
+.sw-state__h{font-size:clamp(26px,4.6vw,48px);font-weight:900;line-height:1.55;margin-bottom:24px;}
+.sw-state__b{font-size:15px;line-height:2.2;color:var(--muted);max-width:40em;margin:0 auto 34px;}
+.sw-state__b b{color:var(--ink);font-weight:700;}
+@media (max-width:760px){.sw-state{padding:72px 0;}}
+
+/* ============ マーキー ============ */
+.sw-mq{overflow:hidden;background:var(--ink);padding:16px 0;border-top:1px solid var(--ink);}
+.sw-mq__t{display:flex;width:max-content;animation:swMq 38s linear infinite;}
+.sw-mq__t.is-rev{animation-direction:reverse;}
+.sw-mq__t span{display:flex;align-items:center;gap:22px;font-size:15px;font-weight:700;color:#fff;padding-right:22px;white-space:nowrap;}
+.sw-mq__t em{font-style:normal;font-size:9px;color:var(--sig);}
+@keyframes swMq{to{transform:translateX(-50%);}}
+
+/* ============ 指標カウントアップ ============ */
+.sw-nums{padding:104px 0;background:var(--bg);}
+.sw-nums__en{font-size:10.5px;letter-spacing:.26em;color:var(--sig);font-weight:700;margin-bottom:12px;}
+.sw-nums__h{font-size:clamp(23px,3.4vw,36px);font-weight:900;line-height:1.5;margin-bottom:40px;}
+.sw-nums__g{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.sw-nums__g .sw-stat{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:30px 24px;transition:transform .3s,box-shadow .3s;}
+.sw-nums__g .sw-stat:hover{transform:translateY(-4px);box-shadow:0 26px 46px -32px rgba(26,34,51,.5);}
+.sw-nums__g .sw-stat__v{font-size:clamp(38px,5vw,54px);font-weight:700;line-height:1;color:var(--ink);letter-spacing:-.03em;margin-bottom:10px;}
+.sw-nums__g .sw-stat__v span{font-family:var(--sans);font-size:14px;color:var(--sig);margin-left:5px;letter-spacing:0;}
+.sw-nums__g .sw-stat__l{font-size:12.5px;color:var(--muted);}
+@media (max-width:820px){.sw-nums{padding:70px 0;}.sw-nums__g{grid-template-columns:repeat(2,1fr);}}
+
+/* ============ 3事業グリッド ============ */
+.sw-bz{grid-template-columns:repeat(3,1fr);}
+@media (max-width:1000px){.sw-bz{grid-template-columns:1fr;}}
+
+/* ============ SNS 24/365 特集 ============ */
+.sw-always{position:relative;padding:110px 0;overflow:hidden;background:#151A2B;color:#D9DEEA;}
+.sw-always__bg{position:absolute;inset:0;background:
+  radial-gradient(50% 60% at 12% 20%,rgba(124,92,214,.34),transparent 66%),
+  radial-gradient(46% 56% at 88% 84%,rgba(224,64,47,.22),transparent 68%);}
+.sw-always__in{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center;}
+.sw-always__eb{font-size:10.5px;letter-spacing:.22em;color:#B9A6F0;font-weight:700;margin-bottom:18px;}
+.sw-always__h{font-size:clamp(24px,3.4vw,38px);font-weight:900;line-height:1.5;color:#fff;margin-bottom:22px;}
+.sw-always__big{display:inline-block;font-size:clamp(38px,6.4vw,74px);line-height:1.05;letter-spacing:-.02em;
+  background:linear-gradient(92deg,#fff,#C9B6FF 55%,#FF9C8F);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.sw-always__b{font-size:14.5px;line-height:2.15;color:#98A3B8;margin-bottom:30px;max-width:34em;}
+.sw-btn--soc{background:#7C5CD6;color:#fff;box-shadow:0 16px 30px -18px rgba(124,92,214,.9);}
+.sw-btn--soc:hover{background:#6A4BC4;transform:translateY(-2px);}
+@media (max-width:940px){.sw-always{padding:72px 0;}.sw-always__in{grid-template-columns:1fr;gap:34px;}}
+
+/* 稼働タイムライン */
+.sw-tl{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:24px 26px;backdrop-filter:blur(6px);}
+.sw-tl__k{font-size:9.5px;letter-spacing:.2em;color:#8B93AB;margin-bottom:16px;}
+.sw-tl__r{display:grid;grid-template-columns:56px 20px 1fr;align-items:center;gap:10px;padding:11px 0;animation:swSlide .7s both cubic-bezier(.22,1,.36,1);}
+.sw-tl__r + .sw-tl__r{border-top:1px solid rgba(255,255,255,.07);}
+@keyframes swSlide{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:none;}}
+.sw-tl__t{font-size:12px;color:#C9B6FF;font-weight:700;}
+.sw-tl__dot{position:relative;width:8px;height:8px;border-radius:50%;background:#7C5CD6;justify-self:center;}
+.sw-tl__dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid rgba(124,92,214,.5);animation:swPing 2.4s ease-out infinite;}
+@keyframes swPing{0%{transform:scale(.7);opacity:1;}100%{transform:scale(1.7);opacity:0;}}
+.sw-tl__d{font-size:12.5px;line-height:1.75;color:#A9B2C6;}
+@media (max-width:520px){.sw-tl__r{grid-template-columns:50px 16px 1fr;}.sw-tl__d{font-size:11.5px;}}
+
+/* ヘッダーをヒーロー上で白抜きに */
+.sw-hd:not(.is-on) .sw-logo__t{color:#fff;}
+.sw-hd:not(.is-on) .sw-logo__t span{color:rgba(255,255,255,.7);}
+.sw-hd:not(.is-on) .sw-logo__m{color:#fff;}
+.sw-hd:not(.is-on) .sw-burger span{background:#fff;}
 `;
