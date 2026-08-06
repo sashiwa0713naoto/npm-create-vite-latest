@@ -28,6 +28,12 @@ const LIVE_COMMAND = true;
 
 /* ================================ データ ================================ */
 
+/* 3事業ブランド。Webhook の message 先頭 【事業】XXX と対応します。 */
+const SERVICES = [
+  { code: "AGENT", name: "AI社員構築代行", theme: "#E0402F", soft: "#FDECEA" },
+  { code: "STUDIO", name: "文書・動画 自動制作", theme: "#2456C8", soft: "#E8EEFB" },
+];
+
 const DEPARTMENTS = [
   {
     id: "exec",
@@ -139,6 +145,25 @@ const DEPARTMENTS = [
 /* デモ用の処理履歴。SHEET_CSV_URL を設定すると実データに置き換わります。 */
 const DEMO_TASKS = [
   {
+    service: "STUDIO",
+    timestamp: "2026-08-06 22:00",
+    run_id: "w-260806",
+    client_name: "サンプル商事",
+    agent: "Creative_PR_AI",
+    status: "完了",
+    summary: "SEO記事「業務自動化の始め方」2,800字を納品",
+  },
+  {
+    service: "STUDIO",
+    timestamp: "2026-08-06 22:00",
+    run_id: "w-260806",
+    client_name: "サンプル商事",
+    agent: "QA_Ethics_AI",
+    status: "完了",
+    summary: "表現検査を通過（薬機法・景表法の抵触なし）",
+  },
+  {
+    service: "AGENT",
     timestamp: "2026-08-05 21:00",
     run_id: "32753b2c",
     client_name: "指輪 直人",
@@ -147,6 +172,7 @@ const DEMO_TASKS = [
     summary: "問い合わせの要件を構造化し、4体へ展開",
   },
   {
+    service: "AGENT",
     timestamp: "2026-08-05 21:00",
     run_id: "32753b2c",
     client_name: "指輪 直人",
@@ -155,6 +181,7 @@ const DEMO_TASKS = [
     summary: "サイト改稿の構成案を出力",
   },
   {
+    service: "AGENT",
     timestamp: "2026-08-05 21:00",
     run_id: "32753b2c",
     client_name: "指輪 直人",
@@ -163,6 +190,7 @@ const DEMO_TASKS = [
     summary: "実装方針とタイムアウト設定を提案",
   },
   {
+    service: "AGENT",
     timestamp: "2026-08-05 21:00",
     run_id: "32753b2c",
     client_name: "指輪 直人",
@@ -171,6 +199,7 @@ const DEMO_TASKS = [
     summary: "表現リスクなし。通過判定",
   },
   {
+    service: "AGENT",
     timestamp: "2026-08-05 21:00",
     run_id: "32753b2c",
     client_name: "指輪 直人",
@@ -179,6 +208,7 @@ const DEMO_TASKS = [
     summary: "想定工数 3.5h / 概算 ¥4,200",
   },
   {
+    service: "AGENT",
     timestamp: "2026-08-04 14:22",
     run_id: "a91c4de0",
     client_name: "テスト送信",
@@ -471,6 +501,7 @@ export default function Dashboard() {
 
       setTasks((prev) => [
         {
+          service: "AGENT",
           timestamp: new Date().toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
           run_id: "manual",
           client_name: "社長",
@@ -646,6 +677,33 @@ function ViewAll({ company, kpi, tasks, logs, goDept, goAgent }) {
         <Kpi icon="check" label="完了" value={kpi.done} unit="件" />
         <Kpi icon="clock" label="高負荷" value={kpi.high} unit="体" tone={kpi.high ? "warn" : ""} />
       </div>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">事業別の稼働</h2>
+        <div className="dbSvcs">
+          {SERVICES.map((sv) => {
+            const rows = tasks.filter((t) => (t.service || "AGENT") === sv.code);
+            const done = rows.filter((t) => (t.status || "").includes("完了")).length;
+            return (
+              <article key={sv.code} className="dbSvc" style={{ "--t": sv.theme, "--s": sv.soft }}>
+                <div className="dbSvc__hd">
+                  <span className="dbSvc__dot" />
+                  <p className="dbSvc__n">{sv.name}</p>
+                  <span className="dbMono dbSvc__c">{sv.code}</span>
+                </div>
+                <p className="dbMono dbSvc__v">
+                  {rows.length}
+                  <span>件</span>
+                </p>
+                <p className="dbSvc__l">うち完了 {done} 件</p>
+                <div className="dbSvc__bar">
+                  <span style={{ width: rows.length ? `${(done / rows.length) * 100}%` : "0%" }} />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="dbSec">
         <h2 className="dbSecT">部署の稼働状況</h2>
@@ -895,6 +953,7 @@ function TaskTable({ tasks }) {
     <div className="dbTable">
       <div className="dbTable__h">
         <span>日時</span>
+        <span>事業</span>
         <span>担当</span>
         <span>内容</span>
         <span>状態</span>
@@ -902,6 +961,19 @@ function TaskTable({ tasks }) {
       {tasks.map((t, i) => (
         <div className="dbTable__r" key={`${t.run_id}-${t.agent}-${i}`}>
           <span className="dbMono dbTable__t">{t.timestamp}</span>
+          <span>
+            <em
+              className="dbSvcTag"
+              style={{
+                "--t":
+                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).theme,
+                "--s":
+                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).soft,
+              }}
+            >
+              {t.service || "AGENT"}
+            </em>
+          </span>
           <span className="dbTable__a">{t.agent}</span>
           <span className="dbTable__s">{t.summary}</span>
           <span>
@@ -1131,7 +1203,7 @@ const CSS = `
 
 /* table */
 .dbTable{background:var(--white);border:1px solid var(--line);border-radius:18px;overflow:hidden;}
-.dbTable__h,.dbTable__r{display:grid;grid-template-columns:120px 148px 1fr 84px;gap:14px;padding:12px 20px;align-items:center;}
+.dbTable__h,.dbTable__r{display:grid;grid-template-columns:112px 74px 148px 1fr 78px;gap:14px;padding:12px 20px;align-items:center;}
 .dbTable__h{font-size:10.5px;letter-spacing:.1em;color:var(--muted);background:var(--bg);}
 .dbTable__r{border-top:1px solid var(--line);font-size:12.5px;}
 .dbTable__t{font-size:10.5px;color:var(--muted);}
@@ -1147,4 +1219,19 @@ const CSS = `
   .dbTable__a{grid-column:1;}
   .dbTable__s{grid-column:1/-1;white-space:normal;}
 }
+
+/* 事業別 */
+.dbSvcs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.dbSvc{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:20px 22px;}
+.dbSvc__hd{display:flex;align-items:center;gap:9px;margin-bottom:14px;}
+.dbSvc__dot{width:8px;height:8px;border-radius:50%;background:var(--t);}
+.dbSvc__n{font-size:14px;font-weight:700;flex:1;}
+.dbSvc__c{font-size:9.5px;letter-spacing:.14em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;}
+.dbSvc__v{font-size:30px;font-weight:500;line-height:1.1;}
+.dbSvc__v span{font-family:var(--sans);font-size:12px;color:var(--muted);margin-left:5px;}
+.dbSvc__l{font-size:12px;color:var(--muted);margin-bottom:12px;}
+.dbSvc__bar{height:5px;border-radius:999px;background:var(--bg);overflow:hidden;}
+.dbSvc__bar span{display:block;height:100%;background:var(--t);border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1);}
+@media (max-width:900px){.dbSvcs{grid-template-columns:1fr;}}
+.dbSvcTag{font-style:normal;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;white-space:nowrap;}
 `;
