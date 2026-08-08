@@ -616,7 +616,7 @@ function CtaBand({ go }) {
             御社にも、24時間はたらく<span className="sw-sig">AI社員</span>を。
           </h2>
           <p className="sw-cta__b">
-            まずは30分の無料相談から。どの業務をAIに渡せるか、実際の構成をお見せしながらご案内します。
+まずは30分の無料相談から。どの業務をAIに渡せるか、実際に動いている構成をお見せしながらご案内します。
           </p>
           <div className="sw-cta__btns">
             <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("contact")}>
@@ -1648,7 +1648,7 @@ function Footer({ go }) {
             <p className="sw-ft__logo">
               SASHIWA<span>Inc.</span>
             </p>
-            <p className="sw-ft__tag">AI社員と、事業をつくる。</p>
+            <p className="sw-ft__tag">社員は、全員AI。</p>
             <p className="sw-ft__sub">株式会社SASHIWA｜オンライン相談 全国対応</p>
           </div>
           <div className="sw-ft__cols">
@@ -1837,9 +1837,6 @@ const CSS = `
 .sw-hero__lede{font-size:15.5px;line-height:2.15;color:var(--muted);max-width:32em;margin-bottom:32px;}
 .sw-hero__lede b{color:var(--ink);font-weight:700;}
 .sw-hero__cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;}
-.sw-hero__chips{display:flex;gap:10px;flex-wrap:wrap;}
-.sw-hero__chips li{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:7px 15px;}
-.sw-hero__chips svg{color:var(--sig);}
 .sw-hero__r{display:flex;justify-content:center;}
 .sw-mascot{width:100%;max-width:400px;height:auto;}
 .sw-mascot__big{animation:swFloat 5s ease-in-out infinite;transform-origin:center;}
@@ -1853,12 +1850,6 @@ const CSS = `
 }
 
 /* oneline */
-.sw-oneline{padding:0 0 80px;}
-.sw-oneline .sw-wrap > div{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:38px 40px;box-shadow:0 20px 40px -34px rgba(26,34,51,.5);}
-.sw-oneline__t{font-size:clamp(19px,2.6vw,25px);font-weight:700;line-height:1.75;margin-bottom:14px;}
-.sw-oneline__t b{color:var(--sig);font-weight:900;}
-.sw-oneline__b{font-size:14.5px;line-height:2.1;color:var(--muted);}
-@media (max-width:700px){.sw-oneline .sw-wrap > div{padding:26px 22px;}}
 
 /* section shells */
 .sw-sec{padding:86px 0;}
@@ -2102,10 +2093,6 @@ const CSS = `
 @media (max-width:700px){.sw-ft__cols{gap:32px;}}
 
 /* ---- 事業ブランド ---- */
-.sw-hero__chip.is-biz{cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s;padding:8px 16px 8px 12px;}
-.sw-hero__chip.is-biz:hover{border-color:var(--t);transform:translateY(-2px);box-shadow:0 14px 26px -20px rgba(26,34,51,.6);}
-.sw-hero__chipd{width:8px;height:8px;border-radius:50%;background:var(--t);flex-shrink:0;}
-.sw-hero__chip.is-biz em{font-style:normal;font-size:11px;color:var(--t);font-weight:700;margin-left:2px;}
 .sw-bz__c{--t:var(--sig);--s:var(--sig-s);}
 .sw-bz__c:hover{border-color:var(--t);}
 .sw-bz__ic{background:var(--t) !important;}
