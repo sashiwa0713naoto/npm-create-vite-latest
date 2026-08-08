@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import Studio from "./Studio.jsx";
 
 /* ============================================================================
    株式会社SASHIWA — コントロールダッシュボード（社長専用）
@@ -428,6 +429,7 @@ export default function Dashboard() {
   const [live, setLive] = useState(false); // 実データ取得成功フラグ
   const [loadingData, setLoadingData] = useState(false);
 
+  const [view, setView] = useState("org"); // org | studio
   const [deptId, setDeptId] = useState(null);
   const [agentId, setAgentId] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
@@ -561,11 +563,13 @@ export default function Dashboard() {
   );
 
   const goDept = (id) => {
+    setView("org");
     setDeptId(id);
     setAgentId(null);
     setNavOpen(false);
   };
   const goAgent = (dId, aId) => {
+    setView("org");
     setDeptId(dId);
     setAgentId(aId);
     setNavOpen(false);
@@ -593,9 +597,26 @@ export default function Dashboard() {
           </div>
 
           <nav className="dbSide__nav">
-            <button className={`dbNavAll ${!deptId ? "is-cur" : ""}`} onClick={() => goDept(null)}>
+            <button
+              className={`dbNavAll ${view === "org" && !deptId ? "is-cur" : ""}`}
+              onClick={() => {
+                setView("org");
+                goDept(null);
+              }}
+            >
               <Ico name="grid" size={17} />
               全社ダッシュボード
+            </button>
+            <button
+              className={`dbNavAll dbNavStudio ${view === "studio" ? "is-cur" : ""}`}
+              onClick={() => {
+                setView("studio");
+                setNavOpen(false);
+              }}
+            >
+              <Ico name="send" size={16} />
+              制作スタジオ
+              <em>NEW</em>
             </button>
 
             <p className="dbSide__k">部署 / DEPARTMENTS</p>
@@ -647,14 +668,18 @@ export default function Dashboard() {
               <span />
             </button>
             <div className="dbTop__bc">
-              <button onClick={() => goDept(null)}>全社</button>
-              {dept && (
+              {view === "studio" ? (
+                <span>制作スタジオ</span>
+              ) : (
+                <button onClick={() => goDept(null)}>全社</button>
+              )}
+              {view === "org" && dept && (
                 <>
                   <em>/</em>
                   <button onClick={() => goDept(dept.id)}>{dept.name}</button>
                 </>
               )}
-              {agent && (
+              {view === "org" && agent && (
                 <>
                   <em>/</em>
                   <span>{agent.name}</span>
@@ -670,9 +695,12 @@ export default function Dashboard() {
           </div>
 
           <div className="dbBody">
-            {!dept && <ViewAll company={company} kpi={kpi} tasks={tasks} logs={logs} goDept={goDept} goAgent={goAgent} />}
-            {dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} />}
-            {dept && agent && (
+            {view === "studio" && <Studio pushLog={pushLog} />}
+            {view === "org" && !dept && (
+              <ViewAll company={company} kpi={kpi} tasks={tasks} logs={logs} goDept={goDept} goAgent={goAgent} />
+            )}
+            {view === "org" && dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} />}
+            {view === "org" && dept && agent && (
               <ViewAgent dept={dept} agent={agent} tasks={tasks} logs={logs} assign={assign} />
             )}
           </div>
@@ -1079,6 +1107,8 @@ const CSS = `
 .dbNavAll{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border-radius:11px;font-size:13.5px;font-weight:500;color:#B6C0CE;transition:background .2s,color .2s;}
 .dbNavAll:hover{background:#182133;color:#fff;}
 .dbNavAll.is-cur{background:#1D283C;color:#fff;}
+.dbNavStudio{margin-top:6px;}
+.dbNavStudio em{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:#fff;background:var(--sig);border-radius:999px;padding:2px 7px;margin-left:auto;}
 .dbSide__k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:#5D6779;padding:20px 14px 8px;}
 .dbNavGroup{margin-bottom:2px;}
 .dbNavD{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;border-radius:11px;font-size:13.5px;transition:background .2s,color .2s;}
