@@ -119,11 +119,17 @@ const BUSINESSES = [
     icon: "social",
     detail: {
       what:
-        "SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。担当者が休んでも、繁忙期でも、投稿は止まりません。SASHIWA自身のアカウントも、同じ仕組みで運用しています。",
+        "SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。加えて「どの媒体に何をどれだけ出すべきか」という設計そのものもAIが提案するため、方針を一から決める必要がありません。SASHIWA自身のアカウントも、同じ仕組みで運用しています。",
       points: [
-        { t: "毎日、決まった時刻に出る", d: "深夜でも休日でも、設定した時刻に投稿が予約配信されます。" },
-        { t: "ネタ切れが起きない", d: "業界の動向を毎日収集し、投稿テーマの候補を自動で積み上げます。" },
-        { t: "複数アカウントを並行運用", d: "1人では回せない本数を、アカウント数を増やしても同じ手間で回せます。" },
+        { t: "運用プランをAIが設計する", d: "業種・目的・使える時間から、どの媒体にどの形式で何本出すかをAIが提案します。ゼロから決める必要はありません。" },
+        { t: "媒体ごとの仕様に沿って作る", d: "リールは冒頭1秒、TikTokは2秒、Xは1行目。媒体ごとの勝ち筋を制作条件に落とし込みます。" },
+        { t: "毎日、決まった時刻に出る", d: "深夜でも休日でも、設定した時刻に投稿が予約配信されます。ネタ切れも起きません。" },
+      ],
+      steps: [
+        { n: "01", t: "運用設計", d: "業種・目的・使える時間をうかがい、AIが媒体・形式・頻度・投稿時間・コンテンツの柱を提案します。ご一緒に調整して確定します。", s: "初回 約1週間" },
+        { n: "02", t: "アカウント設定", d: "プロフィール文、固定投稿、リンク導線を整えます。何を発信するアカウントなのかが一目で伝わる状態にします。", s: "同上" },
+        { n: "03", t: "制作と検査", d: "媒体ごとの仕様に沿って本文・画像を制作し、別のAIが表現と法令上のリスクを検査します。", s: "毎日" },
+        { n: "04", t: "配信と改善", d: "決まった時刻に自動配信。月次で伸びた投稿の傾向を分析し、翌月の方針に反映します。", s: "毎日／月次" },
       ],
       menus: [
         {
@@ -1192,6 +1198,29 @@ function BusinessDetailPage({ slug, go }) {
         </div>
       </section>
 
+      {b.detail.steps && (
+        <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
+          <div className="sw-wrap sw-narrow">
+            <Head en="OPERATION" jp="運用の流れ" note="最初の設計から、毎日の配信、月次の改善まで一貫してお引き受けします。" />
+            <div className="sw-ops">
+              {b.detail.steps.map((st, i) => (
+                <Reveal key={st.n} delay={i * 70} className="sw-op">
+                  <div className="sw-op__l">
+                    <span className="sw-mono sw-op__n">{st.n}</span>
+                    <span className="sw-op__line" />
+                  </div>
+                  <div className="sw-op__m">
+                    <h3>{st.t}</h3>
+                    <p className="sw-mono sw-op__s">{st.s}</p>
+                    <p className="sw-op__d">{st.d}</p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {b.detail.menus && (
         <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
           <div className="sw-wrap sw-narrow">
@@ -2246,4 +2275,17 @@ const CSS = `
 .sw-hd:not(.is-on) .sw-logo__t span{color:rgba(255,255,255,.7);}
 .sw-hd:not(.is-on) .sw-logo__m{color:#fff;}
 .sw-hd:not(.is-on) .sw-burger span{background:#fff;}
+
+/* 運用の流れ */
+.sw-ops{display:grid;gap:0;}
+.sw-op{display:grid;grid-template-columns:64px 1fr;gap:20px;padding-bottom:28px;}
+.sw-op__l{position:relative;display:flex;flex-direction:column;align-items:center;}
+.sw-op__n{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:var(--t);color:#fff;font-size:13px;font-weight:700;flex-shrink:0;}
+.sw-op__line{position:absolute;top:48px;bottom:-28px;width:2px;background:var(--s);}
+.sw-op:last-child .sw-op__line{display:none;}
+.sw-op__m{background:var(--bg);border-radius:16px;padding:20px 24px;}
+.sw-op__m h3{font-size:18px;font-weight:900;margin-bottom:5px;}
+.sw-op__s{font-size:11px;color:var(--t);font-weight:700;margin-bottom:10px;}
+.sw-op__d{font-size:13.5px;line-height:2.05;color:var(--muted);}
+@media (max-width:600px){.sw-op{grid-template-columns:44px 1fr;gap:14px;}.sw-op__n{width:36px;height:36px;font-size:11px;}.sw-op__line{top:40px;}}
 `;
