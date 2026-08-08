@@ -335,6 +335,7 @@ export default function Studio({ pushLog }) {
   const [sending, setSending] = useState(false);
   const [flash, setFlash] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [copied, setCopied] = useState(false);
 
   const pf = useMemo(() => PLATFORMS.find((p) => p.id === pfId) || PLATFORMS[0], [pfId]);
   const fmt = useMemo(() => pf.formats.find((f) => f.id === fmtId) || pf.formats[0], [pf, fmtId]);
@@ -375,7 +376,7 @@ export default function Studio({ pushLog }) {
       if (plan) {
         L.push(`【一次案（社内エンジン）】媒体=${plan.platforms.map((p) => `${p.label}:${p.formatLabel}`).join(" / ")}／頻度=${plan.cadence}／時間帯=${plan.times.join(",")}／柱=${plan.pillars.join(" / ")}`);
       }
-      L.push(`【出力してほしいも】媒体ごとの運用方針・プロフィール文案・固定投稿案・30日分の投稿テーマ案・KPIと計測方法・法令上の注意点`);
+      L.push(`【出力してほしいもの】媒体ごとの運用方針・プロフィール文案・固定投稿案・30日分の投稿テーマ案・KPIと計測方法・法令上の注意点`);
       if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
       if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
       return L.join("／");
@@ -598,9 +599,24 @@ export default function Studio({ pushLog }) {
                     <textarea rows={3} value={plan.pillars.join("\n")} onChange={(e) => { setPlan({ ...plan, pillars: e.target.value.split("\n") }); mark("pillars"); }} />
                   </Field>
 
-                  <Field label="プロフィール文案" hint="そのままコピーして使えます">
+                  <Field label="プロフィール文案" hint="そのままコピーして各SNSのプロフィール欄に貼れます">
                     <textarea rows={4} value={profileText} readOnly />
                   </Field>
+                  <button
+                    className="stCopy"
+                    onClick={() => {
+                      try {
+                        navigator.clipboard.writeText(profileText);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      } catch (e) {
+                        setFlash({ ok: false, msg: "コピーできませんでした。手動で選択してください。" });
+                      }
+                    }}
+                  >
+                    <Sic name={copied ? "check" : "copy"} size={14} />
+                    {copied ? "コピーしました" : "プロフィール文をコピー"}
+                  </button>
 
                   {plan.legal && (
                     <div className="stWarn">
@@ -624,6 +640,16 @@ export default function Studio({ pushLog }) {
           {/* ============== STEP 2 ============== */}
           {step === 2 && (
             <>
+              {!plan && (
+                <div className="stHint">
+                  <Sic name="spark" size={16} />
+                  <p>
+                    先に<b>STEP1「運用設計」</b>でAIに提案させると、媒体・トーン・構成・検査レベルが自動で設定されます。
+                    このまま手動で指定して進めることもできます。
+                  </p>
+                  <button onClick={() => setStep(1)}>設計する →</button>
+                </div>
+              )}
               <div className="stPf">
                 {PLATFORMS.map((p) => (
                   <button key={p.id} className={`stPf__b ${pfId === p.id ? "is-on" : ""}`} style={{ "--t": p.tone, "--s": p.soft }}
@@ -711,7 +737,10 @@ export default function Studio({ pushLog }) {
               </div>
 
               <div className="stFoot">
-                <p className="stFoot__c"><span>納品前</span>{qa === "strict" ? "QA_Ethics_AIが二重検査します" : "QA_Ethics_AIが一次検査します"}</p>
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(1)}>← 運用設計に戻る</button>
+                  <span>納品前</span>{qa === "strict" ? "QA_Ethics_AIが二重検査します" : "QA_Ethics_AIが一次検査します"}
+                </p>
                 <button className="stSend" onClick={() => send(subTab === "content" ? "CONTENT" : "IMAGE", subTab === "content" ? `${fmt.label}・${variants}案` : "画像")} disabled={sending}>
                   <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "send"} size={16} /></span>
                   {sending ? "送信中..." : subTab === "content" ? `${variants}案の制作を依頼` : "画像の制作を依頼"}
@@ -747,7 +776,10 @@ export default function Studio({ pushLog }) {
                 <p>各SNSの自動投稿に関する規約は変更されることがあります。運用開始前と規約改定時には必ずご確認ください。</p>
               </div>
               <div className="stFoot">
-                <p className="stFoot__c"><span>配信</span>指定時刻の直近の配信タイミングで投稿されます</p>
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(2)}>← 制作に戻る</button>
+                  <span>配信</span>指定時刻の直近の配信タイミングで投稿されます
+                </p>
                 <button className="stSend" onClick={() => send("POST", "予約投稿")} disabled={sending}>
                   <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "clock"} size={16} /></span>
                   {sending ? "送信中..." : "予約する"}
@@ -993,4 +1025,14 @@ const CSS = `
 .stJobs__t{font-size:12.5px;line-height:1.65;margin-bottom:4px;}
 .stJobs__m{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;gap:8px;align-items:center;}
 .stJobs__m span{border:1px solid var(--line);border-radius:999px;padding:1px 7px;}
+
+.stCopy{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ai);border:1.5px solid var(--ai);border-radius:999px;padding:8px 16px;margin:-8px 0 18px;transition:all .2s;}
+.stCopy:hover{background:var(--ai);color:#fff;}
+.stBack{font-size:12px;font-weight:700;color:var(--muted);padding:6px 12px;border:1px solid var(--line);border-radius:999px;transition:all .2s;}
+.stBack:hover{border-color:var(--ink);color:var(--ink);}
+.stHint{display:flex;align-items:center;gap:12px;background:#F5F1FE;border:1px solid #DCD0F7;border-radius:14px;padding:14px 16px;margin-bottom:16px;flex-wrap:wrap;}
+.stHint svg{color:var(--ai);flex-shrink:0;}
+.stHint p{flex:1;min-width:200px;font-size:12.5px;line-height:1.85;color:#4A3A75;}
+.stHint b{font-weight:700;}
+.stHint button{font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;white-space:nowrap;}
 `;
