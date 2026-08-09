@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
+import { useAccounts, useSettings, resolveEndpoint, PLATFORM_META } from "./Accounts.jsx";
 
 /* ============================================================================
    株式会社SASHIWA — 制作スタジオ v3
@@ -20,8 +21,7 @@ import React, { useState, useMemo, useCallback } from "react";
    APIキーはフロントに置きません。生成は必ず Make Webhook 経由です。
    ============================================================================ */
 
-const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv";
-const LIVE_SUBMIT = true;
+/* 送信先は「接続設定」画面で切り替えます。コードを書き換える必要はありません。 */
 const OWNER = { name: "OWNER（指輪直人）", email: "owner@sashiwa.local" };
 
 /* =========================== プラットフォーム定義 ======================== */
@@ -299,8 +299,13 @@ function Chips({ options, value, onChange, multi }) {
 
 export default function Studio({ pushLog }) {
   const [step, setStep] = useState(1);
-  const [mode, setMode] = useState("OWNER");
-  const [client, setClient] = useState({ name: "", email: "", account: "" });
+  const { accounts } = useAccounts();
+  const { settings } = useSettings();
+  const endpoint = resolveEndpoint(settings);
+  const live = accounts.filter((a) => a.status === "運用中");
+  const [acctId, setAcctId] = useState("");
+  const acct = live.find((a) => a.id === acctId) || live[0] || null;
+  const mode = acct && acct.ownerType === "client" ? "CLIENT" : "OWNER";
 
   /* STEP1 前提 */
   const [ctx, setCtx] = useState({
@@ -377,6 +382,7 @@ export default function Studio({ pushLog }) {
         L.push(`【一次案（社内エンジン）】媒体=${plan.platforms.map((p) => `${p.label}:${p.formatLabel}`).join(" / ")}／頻度=${plan.cadence}／時間帯=${plan.times.join(",")}／柱=${plan.pillars.join(" / ")}`);
       }
       L.push(`【出力してほしいもの】媒体ごとの運用方針・プロフィール文案・固定投稿案・30日分の投稿テーマ案・KPIと計測方法・法令上の注意点`);
+      if (acct) L.push(`【対象アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}）／【現在の方針】${acct.note || "未設定"}`);
       if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
       if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
       return L.join("／");
@@ -406,14 +412,14 @@ export default function Studio({ pushLog }) {
     if (job === "POST") {
       L.push(`【投稿日時】${schedule.at}／【繰り返し】${schedule.repeat}／【本文】${theme}`);
     }
-    if (mode === "CLIENT" && client.account) L.push(`【運用アカウント】${client.account}`);
+    if (acct) L.push(`【投稿先アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}${acct.handle ? " @" + acct.handle : ""}）／【持ち主】${acct.owner}／【アカウント方針】${acct.note || "指定なし"}`);
     if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
     return L.join("／");
   };
 
   const send = async (job, label) => {
     if (sending) return;
-    if (mode === "CLIENT" && !client.name.trim()) return setFlash({ ok: false, msg: "お客様名を入力してください。" });
+    if (!acct) return setFlash({ ok: false, msg: "先にアカウント管理でアカウントを登録してください。" });
     if (job === "CONTENT" && !theme.trim()) return setFlash({ ok: false, msg: "テーマを入力してください。" });
     if (job === "IMAGE" && !imgDesc.trim()) return setFlash({ ok: false, msg: "画像の内容を入力してください。" });
     if (job === "POST") {
@@ -426,16 +432,22 @@ export default function Studio({ pushLog }) {
     setSending(true); setFlash(null);
     const t0 = Date.now();
     const payload = {
-      client_name: mode === "OWNER" ? OWNER.name : client.name,
-      client_email: mode === "OWNER" ? OWNER.email : client.email || OWNER.email,
+      client_name: acct ? (acct.ownerType === "own" ? `${OWNER.name}／${acct.name}` : `${acct.owner}／${acct.name}`) : OWNER.name,
+      client_email: acct && acct.email ? acct.email : OWNER.email,
       message: buildMessage(job),
     };
     let ok = true;
-    if (LIVE_SUBMIT) {
+    if (settings.liveSubmit !== false) {
       try {
-        const r = await fetch(WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const r = await fetch(endpoint.url, {
+          method: "POST",
+          headers: { "Content-Type": endpoint.contentType },
+          body: JSON.stringify(payload),
+        });
         ok = r.ok;
-      } catch (e) { ok = false; }
+      } catch (e) {
+        ok = false;
+      }
     }
     await new Promise((r) => setTimeout(r, Math.max(0, 1100 - (Date.now() - t0))));
 
@@ -446,7 +458,7 @@ export default function Studio({ pushLog }) {
       title: (job === "IMAGE" ? imgDesc : job === "PLAN" ? ctx.company || "自社" : theme).slice(0, 40),
       at: job === "POST" ? schedule.at.replace("T", " ") : now.toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
       status: ok ? (job === "POST" ? "予約済み" : "制作中") : "送信失敗",
-      billing: mode === "OWNER" ? "無料" : "課金", isPost: job === "POST",
+      billing: acct && acct.ownerType === "client" ? "課金" : "無料", isPost: job === "POST",
     }, ...j].slice(0, 40));
 
     note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}`);
@@ -471,20 +483,40 @@ export default function Studio({ pushLog }) {
         <p className="stHead__s">最適な条件をAIが提案し、そこから調整して制作します。</p>
       </header>
 
-      {/* モード */}
-      <div className="stMode">
-        <div className="stMode__l">
-          <button className={mode === "OWNER" ? "is-on" : ""} onClick={() => setMode("OWNER")}>社内利用（無料）</button>
-          <button className={mode === "CLIENT" ? "is-on" : ""} onClick={() => setMode("CLIENT")}>お客様の案件</button>
+      {!endpoint.isGas && (
+        <div className="stAlert">
+          <Sic name="warn" size={17} />
+          <p>
+            バックエンドが未接続です。このまま送信しても<b>成果物は保存・納品されません</b>。
+            左メニューの「接続設定」からGoogle Apps Scriptを接続してください。
+          </p>
         </div>
-        {mode === "OWNER" ? (
-          <p className="stMode__n">自社アカウントの運用モードです。案件計上・請求の対象になりません。</p>
-        ) : (
-          <div className="stMode__c">
-            <input type="text" placeholder="お客様名" value={client.name} onChange={(e) => setClient({ ...client, name: e.target.value })} />
-            <input type="text" placeholder="運用アカウント名" value={client.account} onChange={(e) => setClient({ ...client, account: e.target.value })} />
-            <input type="email" placeholder="納品先メール" value={client.email} onChange={(e) => setClient({ ...client, email: e.target.value })} />
+      )}
+
+      {/* 投稿先アカウント */}
+      <div className="stAcct">
+        {live.length === 0 ? (
+          <div className="stAcct__none">
+            <Sic name="warn" size={17} />
+            <p>運用中のアカウントがありません。左メニューの<b>「アカウント管理」</b>から登録してください。</p>
           </div>
+        ) : (
+          <>
+            <span className="stAcct__k">投稿先</span>
+            <select className="stAcct__s" value={acct ? acct.id : ""} onChange={(e) => setAcctId(e.target.value)}>
+              {live.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.owner}／{a.name}（{(PLATFORM_META[a.platform] || {}).label || a.platform}）
+                </option>
+              ))}
+            </select>
+            {acct && (
+              <span className={`stAcct__b ${acct.ownerType === "own" ? "is-own" : ""}`}>
+                {acct.ownerType === "own" ? "社内利用（無料）" : "お客様案件（課金）"}
+              </span>
+            )}
+            {acct && acct.handle && <span className="stAcct__h">@{acct.handle}</span>}
+          </>
         )}
       </div>
 
@@ -1035,4 +1067,20 @@ const CSS = `
 .stHint p{flex:1;min-width:200px;font-size:12.5px;line-height:1.85;color:#4A3A75;}
 .stHint b{font-weight:700;}
 .stHint button{font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;white-space:nowrap;}
+
+.stAcct{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:16px;padding:13px 16px;margin-bottom:14px;flex-wrap:wrap;}
+.stAcct__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;}
+.stAcct__s{flex:1;min-width:220px;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:10px 13px;font:inherit;font-size:13.5px;font-weight:700;}
+.stAcct__s:focus{outline:none;background:var(--white);border-color:var(--ai);}
+.stAcct__b{font-size:11.5px;font-weight:700;color:#fff;background:var(--sig);border-radius:999px;padding:5px 13px;}
+.stAcct__b.is-own{background:#0E9F73;}
+.stAcct__h{font-family:var(--mono);font-size:12px;color:var(--muted);}
+.stAcct__none{display:flex;align-items:center;gap:11px;width:100%;}
+.stAcct__none svg{color:#B47C10;flex-shrink:0;}
+.stAcct__none p{font-size:12.5px;line-height:1.85;color:#7A5A12;}
+
+.stAlert{display:flex;align-items:center;gap:11px;background:#FDECEA;border:1px solid #F5C4BF;border-radius:14px;padding:13px 16px;margin-bottom:14px;}
+.stAlert svg{color:var(--sig);flex-shrink:0;}
+.stAlert p{font-size:12.5px;line-height:1.85;color:#8C2A22;}
+.stAlert b{font-weight:700;}
 `;
