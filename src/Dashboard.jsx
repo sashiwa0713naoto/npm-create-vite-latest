@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Studio from "./Studio.jsx";
-import AccountsView, { SettingsView } from "./Accounts.jsx";
+import AccountsView, { SettingsView, useSettings } from "./Accounts.jsx";
+import LibraryView, { JobDetail, jobTitle } from "./Library.jsx";
 
 /* ============================================================================
    株式会社SASHIWA — コントロールダッシュボード（社長専用）
@@ -374,6 +375,28 @@ function parseCsv(text) {
   });
 }
 
+/** 「【キー】値」からタグを取り出します */
+/** デモ行を詳細表示できる形に変換します */
+function toJob(t) {
+  return {
+    job_id: t.run_id || "-",
+    受信日時: t.timestamp,
+    種別: t.agent,
+    投稿先アカウント: t.client_name,
+    持ち主: t.client_name,
+    媒体: "-",
+    状態: t.status,
+    指示内容: `【事業】${t.service || "AGENT"}／【内容】${t.summary}`,
+    成果物URL: "",
+    完了日時: t.timestamp,
+  };
+}
+
+function pickTag(text, key) {
+  const m = String(text || "").match(new RegExp("【" + key + "】([^／]*)"));
+  return m ? m[1].trim() : "";
+}
+
 /* ================================ 認証ゲート ============================ */
 
 function Gate({ onPass }) {
@@ -427,10 +450,14 @@ export default function Dashboard() {
   const [company, setCompany] = useState(DEPARTMENTS);
   const [tasks, setTasks] = useState(DEMO_TASKS);
   const [logs, setLogs] = useState(SEED_LOG);
+  const { settings } = useSettings();
+  const gasUrl = settings.gasUrl;
   const [live, setLive] = useState(false); // 実データ取得成功フラグ
   const [loadingData, setLoadingData] = useState(false);
 
-  const [view, setView] = useState("org"); // org | studio
+  const [view, setView] = useState("org"); // org | studio | accounts | settings | library
+  const [libFilter, setLibFilter] = useState("all");
+  const [detail, setDetail] = useState(null);
   const [deptId, setDeptId] = useState(null);
   const [agentId, setAgentId] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
@@ -447,24 +474,32 @@ export default function Dashboard() {
 
   /* --- 実データ取得 --- */
   const loadData = useCallback(async () => {
-    if (!SHEET_CSV_URL) return;
+    if (!gasUrl) return;
     setLoadingData(true);
     try {
-      const r = await fetch(SHEET_CSV_URL);
-      if (!r.ok) throw new Error(String(r.status));
-      const rows = parseCsv(await r.text());
-      if (rows.length) {
-        setTasks(rows.reverse());
-        setLive(true);
-        pushLog(`[${new Date().toLocaleTimeString()}] DATA SYNCED: ${rows.length} records`);
-      }
+      const r = await fetch(`${gasUrl}?action=jobs`);
+      const data = await r.json();
+      if (!data || !data.ok || !Array.isArray(data.jobs)) throw new Error("形式が違います");
+      const rows = data.jobs.map((j) => ({
+        service: pickTag(j.指示内容, "事業") || "AGENT",
+        timestamp: j.受信日時,
+        run_id: j.job_id,
+        client_name: j.持ち主,
+        agent: j.種別,
+        status: j.状態,
+        summary: jobTitle(j),
+        raw: j,
+      }));
+      setTasks(rows);
+      setLive(true);
+      pushLog(`[${new Date().toLocaleTimeString()}] DATA SYNCED: ${rows.length} records`);
     } catch (e) {
       setLive(false);
       pushLog(`[${new Date().toLocaleTimeString()}] SYNC FAILED — デモデータを表示中`);
     } finally {
       setLoadingData(false);
     }
-  }, [pushLog]);
+  }, [gasUrl, pushLog]);
 
   useEffect(() => {
     if (authed) loadData();
@@ -616,6 +651,13 @@ export default function Dashboard() {
               アカウント管理
             </button>
             <button
+              className={`dbNavAll ${view === "library" ? "is-cur" : ""}`}
+              onClick={() => { setView("library"); setLibFilter("all"); setNavOpen(false); }}
+            >
+              <Ico name="check" size={16} />
+              成果物ライブラリ
+            </button>
+            <button
               className={`dbNavAll ${view === "settings" ? "is-cur" : ""}`}
               onClick={() => { setView("settings"); setNavOpen(false); }}
             >
@@ -695,6 +737,8 @@ export default function Dashboard() {
                 <span>アカウント管理</span>
               ) : view === "settings" ? (
                 <span>接続設定</span>
+              ) : view === "library" ? (
+                <span>成果物ライブラリ</span>
               ) : (
                 <button onClick={() => goDept(null)}>全社</button>
               )}
@@ -722,18 +766,29 @@ export default function Dashboard() {
           <div className="dbBody">
             {view === "accounts" && <AccountsView pushLog={pushLog} />}
             {view === "settings" && <SettingsView pushLog={pushLog} />}
+            {view === "library" && <LibraryView pushLog={pushLog} initialFilter={libFilter} />}
             {view === "studio" && <Studio pushLog={pushLog} />}
             {view === "org" && !dept && (
-              <ViewAll company={company} kpi={kpi} tasks={tasks} logs={logs} goDept={goDept} goAgent={goAgent} />
+              <ViewAll
+                company={company}
+                kpi={kpi}
+                tasks={tasks}
+                logs={logs}
+                goDept={goDept}
+                goAgent={goAgent}
+                openLibrary={(f) => { setLibFilter(f); setView("library"); }}
+                onSelect={setDetail}
+              />
             )}
-            {view === "org" && dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} />}
+            {view === "org" && dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} onSelect={setDetail} />}
             {view === "org" && dept && agent && (
-              <ViewAgent dept={dept} agent={agent} tasks={tasks} logs={logs} assign={assign} />
+              <ViewAgent dept={dept} agent={agent} tasks={tasks} logs={logs} assign={assign} onSelect={setDetail} />
             )}
           </div>
         </div>
       </div>
 
+      {detail && <JobDetail job={detail.raw || toJob(detail)} onClose={() => setDetail(null)} />}
       {navOpen && <div className="dbScrim" onClick={() => setNavOpen(false)} />}
     </div>
   );
@@ -741,7 +796,7 @@ export default function Dashboard() {
 
 /* ============================ View A：全社 ============================== */
 
-function ViewAll({ company, kpi, tasks, logs, goDept, goAgent }) {
+function ViewAll({ company, kpi, tasks, logs, goDept, goAgent, openLibrary, onSelect }) {
   return (
     <>
       <header className="dbHead">
@@ -764,7 +819,12 @@ function ViewAll({ company, kpi, tasks, logs, goDept, goAgent }) {
             const rows = tasks.filter((t) => (t.service || "AGENT") === sv.code);
             const done = rows.filter((t) => (t.status || "").includes("完了")).length;
             return (
-              <article key={sv.code} className="dbSvc" style={{ "--t": sv.theme, "--s": sv.soft }}>
+              <article
+                key={sv.code}
+                className="dbSvc is-click"
+                style={{ "--t": sv.theme, "--s": sv.soft }}
+                onClick={() => openLibrary && openLibrary(sv.code)}
+              >
                 <div className="dbSvc__hd">
                   <span className="dbSvc__dot" />
                   <p className="dbSvc__n">{sv.name}</p>
@@ -778,6 +838,7 @@ function ViewAll({ company, kpi, tasks, logs, goDept, goAgent }) {
                 <div className="dbSvc__bar">
                   <span style={{ width: rows.length ? `${(done / rows.length) * 100}%` : "0%" }} />
                 </div>
+                <p className="dbSvc__more">成果物を見る →</p>
               </article>
             );
           })}
@@ -821,7 +882,7 @@ function ViewAll({ company, kpi, tasks, logs, goDept, goAgent }) {
       <div className="dbSplit">
         <section className="dbSec">
           <h2 className="dbSecT">直近の処理履歴</h2>
-          <TaskTable tasks={tasks.slice(0, 8)} />
+          <TaskTable tasks={tasks.slice(0, 8)} onSelect={onSelect} />
         </section>
         <section className="dbSec">
           <h2 className="dbSecT">システムログ</h2>
@@ -849,7 +910,7 @@ function Kpi({ icon, label, value, unit, tone }) {
 
 /* ============================ View B：部署 ============================== */
 
-function ViewDept({ dept, tasks, goAgent }) {
+function ViewDept({ dept, tasks, goAgent, onSelect }) {
   const rel = tasks.filter((t) => dept.agents.some((a) => a.name === t.agent));
   return (
     <div style={{ "--t": dept.theme, "--s": dept.soft }}>
@@ -890,7 +951,7 @@ function ViewDept({ dept, tasks, goAgent }) {
 
       <section className="dbSec">
         <h2 className="dbSecT">この部署の処理履歴</h2>
-        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} /> : <p className="dbEmpty">まだ記録がありません。</p>}
+        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
       </section>
     </div>
   );
@@ -898,7 +959,7 @@ function ViewDept({ dept, tasks, goAgent }) {
 
 /* ============================ View C：個別 ============================== */
 
-function ViewAgent({ dept, agent, tasks, logs, assign }) {
+function ViewAgent({ dept, agent, tasks, logs, assign, onSelect }) {
   const rel = tasks.filter((t) => t.agent === agent.name);
   return (
     <div style={{ "--t": dept.theme, "--s": dept.soft }}>
@@ -954,7 +1015,7 @@ function ViewAgent({ dept, agent, tasks, logs, assign }) {
 
       <section className="dbSec">
         <h2 className="dbSecT">このAI社員の処理履歴</h2>
-        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} /> : <p className="dbEmpty">まだ記録がありません。</p>}
+        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
       </section>
     </div>
   );
@@ -1027,7 +1088,7 @@ function AssignConsole({ dept, agent, assign }) {
 
 /* ---------------------------- 共通パーツ ------------------------------- */
 
-function TaskTable({ tasks }) {
+function TaskTable({ tasks, onSelect }) {
   return (
     <div className="dbTable">
       <div className="dbTable__h">
@@ -1038,7 +1099,14 @@ function TaskTable({ tasks }) {
         <span>状態</span>
       </div>
       {tasks.map((t, i) => (
-        <div className="dbTable__r" key={`${t.run_id}-${t.agent}-${i}`}>
+        <div
+          className={`dbTable__r ${onSelect ? "is-click" : ""}`}
+          key={`${t.run_id}-${t.agent}-${i}`}
+          onClick={() => onSelect && onSelect(t)}
+          role={onSelect ? "button" : undefined}
+          tabIndex={onSelect ? 0 : undefined}
+          onKeyDown={(e) => { if (onSelect && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onSelect(t); } }}
+        >
           <span className="dbMono dbTable__t">{t.timestamp}</span>
           <span>
             <em
@@ -1056,7 +1124,8 @@ function TaskTable({ tasks }) {
           <span className="dbTable__a">{t.agent}</span>
           <span className="dbTable__s">{t.summary}</span>
           <span>
-            <em className={`dbTag dbTag--${(t.status || "").includes("失敗") ? "ng" : "ok"}`}>{t.status}</em>
+            <em className={`dbTag dbTag--${(t.status || "").includes("失敗") || (t.status || "").includes("エラー") ? "ng" : "ok"}`}>{t.status}</em>
+            {onSelect && <em className="dbTable__go">›</em>}
           </span>
         </div>
       ))}
@@ -1320,4 +1389,11 @@ const CSS = `
 .dbSvc__bar span{display:block;height:100%;background:var(--t);border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1);}
 @media (max-width:900px){.dbSvcs{grid-template-columns:1fr;}}
 .dbSvcTag{font-style:normal;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;white-space:nowrap;}
+
+.dbSvc.is-click{cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.dbSvc.is-click:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);border-color:var(--t);}
+.dbSvc__more{font-size:11.5px;font-weight:700;color:var(--t);margin-top:11px;}
+.dbTable__r.is-click{cursor:pointer;transition:background .18s;}
+.dbTable__r.is-click:hover{background:var(--bg);}
+.dbTable__go{font-style:normal;color:#B9C0CB;margin-left:7px;font-weight:700;}
 `;
