@@ -1,0 +1,446 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useSettings, PLATFORM_META } from "./Accounts.jsx";
+
+/* ============================================================================
+   株式会社SASHIWA — 成果物ライブラリ
+   配置：src/Library.jsx
+
+   ■ 役割
+   作った文章・画像・動画・運用設計を、あとから探して開ける場所です。
+   Google Apps Script から直接取得するため、スプレッドシートを一般公開する
+   必要がありません（顧客名が含まれるため、公開は避ける設計にしています）。
+   ============================================================================ */
+
+const SERVICE_META = {
+  AGENT: { label: "AI社員構築代行", tone: "#E0402F", soft: "#FDECEA" },
+  STUDIO: { label: "文書・動画 自動制作", tone: "#2456C8", soft: "#E8EEFB" },
+  SOCIAL: { label: "SNSアカウント運用", tone: "#7C5CD6", soft: "#F1EDFC" },
+};
+
+const KIND_META = {
+  コンテンツ: { icon: "doc", tone: "#2456C8", soft: "#E8EEFB" },
+  画像: { icon: "image", tone: "#0E9F73", soft: "#E7F6F1" },
+  動画: { icon: "film", tone: "#E08A1F", soft: "#FBF2E1" },
+  運用設計: { icon: "map", tone: "#7C5CD6", soft: "#F1EDFC" },
+  予約投稿: { icon: "clock", tone: "#7C5CD6", soft: "#F1EDFC" },
+  問い合わせ: { icon: "mail", tone: "#E0402F", soft: "#FDECEA" },
+};
+
+/* デモ用。GAS未接続のときに表示します。 */
+const DEMO_JOBS = [
+  {
+    job_id: "J1786200000001",
+    受信日時: "2026-08-06 22:00",
+    種別: "コンテンツ",
+    投稿先アカウント: "SASHIWA 公式X（X（旧Twitter） @sashiwa_ai）",
+    持ち主: "自社",
+    媒体: "X（旧Twitter）",
+    状態: "完了",
+    指示内容:
+      "【事業】STUDIO／【JOB】CONTENT／【課金】無料（社内利用）／【媒体】X（旧Twitter）／【形式】単発投稿／【文字数上限】140／【媒体仕様】1行目で完結。改行で余白を作る。／【勝ち筋】1行目だけで価値が伝わること。／【目的】見込み客／【ターゲット】従業員10〜50名の中小企業の経営者／【トーン】丁寧・ですます／【構成】PREP法／【フックの型】数字を出す／【案数】3案／【検査】厳格／【テーマ】問い合わせ対応を自動化したら何時間浮いたか",
+    成果物URL: "",
+    完了日時: "2026-08-06 22:03",
+  },
+  {
+    job_id: "J1786200000002",
+    受信日時: "2026-08-06 05:30",
+    種別: "運用設計",
+    投稿先アカウント: "SASHIWA 公式X",
+    持ち主: "自社",
+    媒体: "X（旧Twitter）",
+    状態: "完了",
+    指示内容:
+      "【事業】STUDIO／【JOB】PLAN／【依頼】SNS運用設計書の作成／【会社】株式会社SASHIWA／【業種】BtoBサービス／【目的】見込み客／【使える時間】週2〜3時間／【ターゲット】中小企業の経営者",
+    成果物URL: "",
+    完了日時: "2026-08-06 05:34",
+  },
+];
+
+/* ------------------------------------------------------------- 解析 */
+
+/** 「【キー】値／【キー】値」の形を配列に分解します */
+export function parseInstruction(text) {
+  const out = [];
+  String(text || "")
+    .split("／")
+    .forEach((chunk) => {
+      const m = chunk.match(/^\s*【([^】]+)】([\s\S]*)$/);
+      if (m) out.push({ k: m[1].trim(), v: m[2].trim() });
+      else if (chunk.trim()) {
+        if (out.length) out[out.length - 1].v += "／" + chunk.trim();
+      }
+    });
+  return out;
+}
+
+/** 一覧に出す短いタイトルを作ります */
+export function jobTitle(job) {
+  const p = parseInstruction(job.指示内容);
+  const find = (k) => (p.find((x) => x.k === k) || {}).v;
+  return (
+    find("テーマ") ||
+    find("本文") ||
+    find("描画内容") ||
+    find("依頼") ||
+    find("内容") ||
+    job.種別 ||
+    "（内容なし）"
+  );
+}
+
+/* ------------------------------------------------------------- 部品 */
+
+function Li({ name, size = 18 }) {
+  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
+  const p = {
+    doc: (<><path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} /><path d="M14 2.8V7h4M8.5 12h7M8.5 16h5" {...s} /></>),
+    image: (<><rect x="3" y="4.5" width="18" height="15" rx="2.6" {...s} /><circle cx="8.6" cy="10" r="1.9" {...s} /><path d="m4 17 4.6-4.4 3.4 3.2 3.4-3.6L20 17" {...s} /></>),
+    film: (<><rect x="2.5" y="4.5" width="19" height="15" rx="2.6" {...s} /><path d="M7.5 4.5v15M16.5 4.5v15" {...s} opacity=".4" /><path d="m10.8 9.4 3.4 2.1-3.4 2.1z" {...s} /></>),
+    map: (<><path d="M9 3.5 3.5 6v14.5L9 18l6 2.5 5.5-2.5V3.5L15 6Z" {...s} /><path d="M9 3.5V18M15 6v14.5" {...s} /></>),
+    clock: (<><circle cx="12" cy="12" r="9" {...s} /><path d="M12 7v5.3l3.4 2" {...s} /></>),
+    mail: (<><rect x="2.5" y="5" width="19" height="14" rx="2.4" {...s} /><path d="m3.5 7 8.5 6 8.5-6" {...s} /></>),
+    open: (<><path d="M14 4.5h5.5V10" {...s} /><path d="M19.5 4.5 11 13" {...s} /><path d="M18 14.5v4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" {...s} /></>),
+    x: <path d="M6 6l12 12M18 6L6 18" {...s} />,
+    search: (<><circle cx="10.8" cy="10.8" r="6.8" {...s} /><path d="m15.8 15.8 4.4 4.4" {...s} /></>),
+    refresh: (<><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" {...s} /><path d="M20.5 4.5V10H15" {...s} /></>),
+    copy: (<><rect x="8.5" y="8.5" width="12" height="12" rx="2.4" {...s} /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" {...s} /></>),
+    box: (<><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5Z" {...s} /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" {...s} /></>),
+  };
+  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.doc}</svg>;
+}
+
+/* ------------------------------------------------------------- 詳細 */
+
+export function JobDetail({ job, onClose }) {
+  const [copied, setCopied] = useState(false);
+  if (!job) return null;
+  const pairs = parseInstruction(job.指示内容);
+  const km = KIND_META[job.種別] || KIND_META.コンテンツ;
+  const svc = (pairs.find((x) => x.k === "事業") || {}).v;
+  const sm = SERVICE_META[svc] || null;
+
+  const HIDE = ["事業", "JOB"];
+  const shown = pairs.filter((p) => HIDE.indexOf(p.k) < 0);
+
+  return (
+    <div className="lbModal" onClick={onClose}>
+      <style>{CSS}</style>
+      <div className="lbModal__b" onClick={(e) => e.stopPropagation()} style={{ "--t": km.tone, "--s": km.soft }}>
+        <div className="lbModal__h">
+          <span className="lbModal__ic"><Li name={km.icon} size={20} /></span>
+          <div className="lbModal__ht">
+            <p className="lbModal__k">
+              {job.種別}
+              {sm && <em style={{ background: sm.soft, color: sm.tone }}>{sm.label}</em>}
+              <span className={`lbSt lbSt--${job.状態}`}>{job.状態}</span>
+            </p>
+            <h2>{jobTitle(job)}</h2>
+          </div>
+          <button className="lbModal__x" onClick={onClose} aria-label="閉じる"><Li name="x" size={18} /></button>
+        </div>
+
+        <div className="lbModal__body">
+          <dl className="lbMeta">
+            <div><dt>受信日時</dt><dd className="lbMono">{job.受信日時 || "—"}</dd></div>
+            <div><dt>完了日時</dt><dd className="lbMono">{job.完了日時 || "—"}</dd></div>
+            <div><dt>投稿先</dt><dd>{job.投稿先アカウント || "—"}</dd></div>
+            <div><dt>持ち主</dt><dd>{job.持ち主 || "—"}</dd></div>
+            <div><dt>媒体</dt><dd>{job.媒体 || "—"}</dd></div>
+            <div><dt>ジョブID</dt><dd className="lbMono">{job.job_id}</dd></div>
+          </dl>
+
+          {job.成果物URL && String(job.成果物URL).indexOf("http") === 0 ? (
+            <a className="lbOpen" href={job.成果物URL} target="_blank" rel="noopener noreferrer">
+              <Li name="open" size={17} />
+              成果物を開く
+            </a>
+          ) : (
+            <p className="lbNone">
+              {job.状態 === "完了"
+                ? "この案件には成果物ファイルが紐づいていません。"
+                : job.状態 === "エラー"
+                ? "処理中にエラーが発生しました。理由は下記のとおりです。"
+                : "処理が完了すると、ここに成果物へのリンクが表示されます。"}
+              {job.状態 === "エラー" && job.成果物URL && <span className="lbErr">{job.成果物URL}</span>}
+            </p>
+          )}
+
+          <div className="lbSpecH">
+            <h3>制作条件</h3>
+            <button
+              className="lbCopy"
+              onClick={() => {
+                try {
+                  navigator.clipboard.writeText(String(job.指示内容 || ""));
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch (e) {}
+              }}
+            >
+              <Li name="copy" size={13} />
+              {copied ? "コピーしました" : "条件をコピー"}
+            </button>
+          </div>
+
+          {shown.length === 0 ? (
+            <p className="lbNone">条件の記録がありません。</p>
+          ) : (
+            <dl className="lbSpec">
+              {shown.map((p, i) => (
+                <div key={`${p.k}-${i}`}>
+                  <dt>{p.k}</dt>
+                  <dd>{p.v || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- 本体 */
+
+export default function LibraryView({ pushLog, initialFilter }) {
+  const { settings } = useSettings();
+  const [jobs, setJobs] = useState(DEMO_JOBS);
+  const [live, setLive] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [svc, setSvc] = useState(initialFilter || "all");
+  const [kind, setKind] = useState("all");
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => { if (initialFilter) setSvc(initialFilter); }, [initialFilter]);
+
+  const load = useCallback(async () => {
+    if (!settings.gasUrl) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=jobs`);
+      const data = await r.json();
+      if (data && data.ok && Array.isArray(data.jobs)) {
+        setJobs(data.jobs);
+        setLive(true);
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] LIBRARY SYNCED: ${data.jobs.length} records`);
+      } else {
+        throw new Error("形式が違います");
+      }
+    } catch (e) {
+      setLive(false);
+      setErr("取得できませんでした。接続設定をご確認ください。デモデータを表示しています。");
+    } finally {
+      setLoading(false);
+    }
+  }, [settings.gasUrl, pushLog]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    return jobs.filter((j) => {
+      if (kind !== "all" && j.種別 !== kind) return false;
+      if (svc !== "all") {
+        const p = parseInstruction(j.指示内容);
+        const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
+        if (s !== svc) return false;
+      }
+      if (q.trim()) {
+        const hay = `${j.投稿先アカウント} ${j.持ち主} ${j.媒体} ${j.指示内容}`.toLowerCase();
+        if (hay.indexOf(q.trim().toLowerCase()) < 0) return false;
+      }
+      return true;
+    });
+  }, [jobs, kind, svc, q]);
+
+  const kinds = useMemo(() => {
+    const set = {};
+    jobs.forEach((j) => { set[j.種別] = (set[j.種別] || 0) + 1; });
+    return set;
+  }, [jobs]);
+
+  return (
+    <div className="lbRoot">
+      <style>{CSS}</style>
+
+      <header className="lbHead">
+        <div>
+          <p className="lbHead__en">LIBRARY</p>
+          <h1>成果物ライブラリ</h1>
+          <p className="lbHead__s">これまでに作ったものを、条件つきで探して開けます。</p>
+        </div>
+        <button className="lbRe" onClick={load} disabled={loading || !settings.gasUrl}>
+          <span className={loading ? "lbSpin" : ""}><Li name="refresh" size={15} /></span>
+          {settings.gasUrl ? (loading ? "取得中..." : "再取得") : "未接続"}
+        </button>
+      </header>
+
+      <div className={`lbSync ${live ? "is-live" : ""}`}>
+        <span className="lbSync__d" />
+        {live ? `実データを表示中（${jobs.length}件）` : "デモデータを表示中｜接続設定でGoogle Apps Scriptを接続すると実データになります"}
+      </div>
+      {err && <p className="lbErrBar">{err}</p>}
+
+      <div className="lbFilters">
+        <div className="lbSeg">
+          {[["all", "すべて"], ["AGENT", "AI社員構築"], ["STUDIO", "文書・動画"], ["SOCIAL", "SNS運用"]].map(([id, label]) => (
+            <button key={id} className={svc === id ? "is-on" : ""} onClick={() => setSvc(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="lbSeg lbSeg--sub">
+          <button className={kind === "all" ? "is-on" : ""} onClick={() => setKind("all")}>全種別</button>
+          {Object.keys(kinds).map((k) => (
+            <button key={k} className={kind === k ? "is-on" : ""} onClick={() => setKind(k)}>{k} {kinds[k]}</button>
+          ))}
+        </div>
+        <label className="lbSearch">
+          <Li name="search" size={15} />
+          <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="アカウント名・内容で検索" />
+        </label>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="lbEmpty">
+          <Li name="box" size={30} />
+          <h2>該当する成果物がありません</h2>
+          <p>条件を変えるか、制作スタジオから新しく作ってみてください。</p>
+        </div>
+      ) : (
+        <div className="lbGrid">
+          {filtered.map((j) => {
+            const km = KIND_META[j.種別] || KIND_META.コンテンツ;
+            const p = parseInstruction(j.指示内容);
+            const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
+            const sm = SERVICE_META[s];
+            const hasFile = j.成果物URL && String(j.成果物URL).indexOf("http") === 0;
+            return (
+              <article key={j.job_id} className="lbCard" style={{ "--t": km.tone, "--s": km.soft }} onClick={() => setSel(j)}>
+                <div className="lbCard__h">
+                  <span className="lbCard__ic"><Li name={km.icon} size={17} /></span>
+                  <span className="lbCard__k">{j.種別}</span>
+                  {sm && <span className="lbCard__s" style={{ background: sm.soft, color: sm.tone }}>{s}</span>}
+                  <span className={`lbSt lbSt--${j.状態}`}>{j.状態}</span>
+                </div>
+                <p className="lbCard__t">{jobTitle(j)}</p>
+                <p className="lbCard__m">
+                  <span className="lbMono">{j.受信日時}</span>
+                  {j.媒体 && j.媒体 !== "-" && <em>{j.媒体}</em>}
+                </p>
+                <p className="lbCard__a">{j.投稿先アカウント || j.持ち主 || "—"}</p>
+                <div className="lbCard__f">
+                  <span className="lbCard__more">詳細を見る →</span>
+                  {hasFile && (
+                    <a href={j.成果物URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                      <Li name="open" size={14} />開く
+                    </a>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <JobDetail job={sel} onClose={() => setSel(null)} />
+    </div>
+  );
+}
+
+/* ================================ CSS ================================== */
+
+const CSS = `
+.lbRoot,.lbModal{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;--t:#2456C8;--s:#E8EEFB;
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
+.lbRoot *,.lbRoot *::before,.lbRoot *::after,.lbModal *,.lbModal *::before,.lbModal *::after{box-sizing:border-box;}
+.lbRoot h1,.lbRoot h2,.lbRoot p,.lbRoot dl,.lbRoot dd,.lbRoot dt,.lbModal h2,.lbModal h3,.lbModal p,.lbModal dl,.lbModal dd,.lbModal dt{margin:0;padding:0;}
+.lbRoot button,.lbModal button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.lbRoot a,.lbModal a{color:inherit;text-decoration:none;}
+.lbMono{font-family:var(--mono);}
+.lbSpin{display:inline-flex;animation:lbSpin 1s linear infinite;}
+@keyframes lbSpin{to{transform:rotate(360deg);}}
+
+.lbHead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+.lbHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai);font-weight:700;margin-bottom:8px;}
+.lbHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.lbHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
+.lbRe{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:10px 18px;transition:all .2s;}
+.lbRe:hover:not(:disabled){border-color:var(--ink);color:var(--ink);}
+.lbRe:disabled{opacity:.5;cursor:default;}
+
+.lbSync{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 15px;margin-bottom:12px;}
+.lbSync__d{width:8px;height:8px;border-radius:50%;background:#9BA3B1;flex-shrink:0;}
+.lbSync.is-live .lbSync__d{background:#0E9F73;box-shadow:0 0 0 3px rgba(14,159,115,.2);}
+.lbErrBar{font-size:12px;color:var(--sig);background:#FDECEA;border-radius:11px;padding:11px 15px;margin-bottom:12px;line-height:1.8;}
+
+.lbFilters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+.lbSeg{display:flex;gap:4px;background:var(--bg);border-radius:999px;padding:4px;flex-wrap:wrap;}
+.lbSeg button{font-size:12.5px;font-weight:700;padding:8px 16px;border-radius:999px;color:var(--muted);transition:all .2s;white-space:nowrap;}
+.lbSeg button.is-on{background:var(--ink);color:#fff;}
+.lbSeg--sub button.is-on{background:var(--ai);}
+.lbSearch{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;flex:1;min-width:200px;}
+.lbSearch svg{color:var(--muted);}
+.lbSearch input{flex:1;border:none;background:none;font:inherit;font-size:13px;outline:none;color:var(--ink);}
+
+.lbGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:13px;}
+.lbCard{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:18px 20px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.lbCard:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);}
+.lbCard__h{display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap;}
+.lbCard__ic{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--s);color:var(--t);}
+.lbCard__k{font-size:11.5px;font-weight:700;}
+.lbCard__s{font-family:var(--mono);font-size:9px;font-weight:700;border-radius:999px;padding:3px 8px;letter-spacing:.06em;}
+.lbSt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;white-space:nowrap;}
+.lbSt--完了{color:#0E9F73;background:#E6F7F0;}
+.lbSt--制作中{color:#B47C10;background:#FFF4DE;}
+.lbSt--エラー{color:var(--sig);background:#FDECEA;}
+.lbCard__t{font-size:14px;font-weight:700;line-height:1.65;margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.lbCard__m{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--muted);margin-bottom:5px;}
+.lbCard__m em{font-style:normal;border:1px solid var(--line);border-radius:999px;padding:2px 8px;}
+.lbCard__a{font-size:11.5px;color:var(--muted);margin-bottom:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lbCard__f{display:flex;align-items:center;gap:10px;padding-top:11px;border-top:1px solid var(--line);}
+.lbCard__more{font-size:12px;font-weight:700;color:var(--t);}
+.lbCard__f a{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px;transition:all .2s;}
+.lbCard__f a:hover{border-color:var(--t);color:var(--t);}
+
+.lbEmpty{background:var(--white);border:1px dashed var(--line);border-radius:20px;padding:52px 28px;text-align:center;color:var(--muted);}
+.lbEmpty svg{margin:0 auto 16px;color:var(--ai);}
+.lbEmpty h2{font-size:17px;font-weight:900;color:var(--ink);margin-bottom:8px;}
+.lbEmpty p{font-size:13px;}
+
+/* 詳細モーダル */
+.lbModal{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:220;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+.lbModal__b{background:var(--white);border-radius:22px;width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 80px -40px rgba(0,0,0,.5);}
+.lbModal__h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px;border-bottom:1px solid var(--line);}
+.lbModal__ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--s);color:var(--t);flex-shrink:0;}
+.lbModal__ht{flex:1;min-width:0;}
+.lbModal__k{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px;flex-wrap:wrap;}
+.lbModal__k em{font-style:normal;font-size:9.5px;border-radius:999px;padding:2px 8px;}
+.lbModal__ht h2{font-size:17px;font-weight:900;line-height:1.55;}
+.lbModal__x{color:var(--muted);padding:6px;border-radius:8px;flex-shrink:0;}
+.lbModal__x:hover{background:var(--bg);color:var(--ink);}
+.lbModal__body{padding:20px 22px;overflow-y:auto;}
+
+.lbMeta{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px;}
+.lbMeta > div{background:var(--white);padding:11px 14px;}
+.lbMeta dt{font-size:10px;color:var(--muted);margin-bottom:3px;}
+.lbMeta dd{font-size:12.5px;font-weight:500;line-height:1.6;word-break:break-all;}
+@media (max-width:560px){.lbMeta{grid-template-columns:1fr;}}
+
+.lbOpen{display:flex;align-items:center;justify-content:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:14px;margin-bottom:18px;transition:filter .2s,transform .2s;}
+.lbOpen:hover{filter:brightness(.92);transform:translateY(-1px);}
+.lbNone{font-size:12.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
+.lbErr{display:block;font-family:var(--mono);font-size:11px;color:var(--sig);margin-top:8px;word-break:break-all;}
+
+.lbSpecH{display:flex;align-items:center;gap:10px;margin-bottom:11px;}
+.lbSpecH h3{font-size:13px;font-weight:700;}
+.lbCopy{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 13px;transition:all .2s;}
+.lbCopy:hover{border-color:var(--t);color:var(--t);}
+.lbSpec{display:grid;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.lbSpec > div{display:grid;grid-template-columns:130px 1fr;gap:12px;padding:10px 14px;align-items:baseline;}
+.lbSpec > div:nth-child(odd){background:var(--bg);}
+.lbSpec dt{font-size:11px;font-weight:700;color:var(--muted);}
+.lbSpec dd{font-size:12.5px;line-height:1.85;word-break:break-word;}
+@media (max-width:560px){.lbSpec > div{grid-template-columns:1fr;gap:3px;}}
+`;
