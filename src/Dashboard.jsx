@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Studio from "./Studio.jsx";
+import AccountsView, { SettingsView } from "./Accounts.jsx";
 
 /* ============================================================================
    株式会社SASHIWA — コントロールダッシュボード（社長専用）
@@ -608,6 +609,20 @@ export default function Dashboard() {
               全社ダッシュボード
             </button>
             <button
+              className={`dbNavAll dbNavStudio ${view === "accounts" ? "is-cur" : ""}`}
+              onClick={() => { setView("accounts"); setNavOpen(false); }}
+            >
+              <Ico name="bot" size={16} />
+              アカウント管理
+            </button>
+            <button
+              className={`dbNavAll ${view === "settings" ? "is-cur" : ""}`}
+              onClick={() => { setView("settings"); setNavOpen(false); }}
+            >
+              <Ico name="refresh" size={16} />
+              接続設定
+            </button>
+            <button
               className={`dbNavAll dbNavStudio ${view === "studio" ? "is-cur" : ""}`}
               onClick={() => {
                 setView("studio");
@@ -676,6 +691,10 @@ export default function Dashboard() {
             <div className="dbTop__bc">
               {view === "studio" ? (
                 <span>制作スタジオ</span>
+              ) : view === "accounts" ? (
+                <span>アカウント管理</span>
+              ) : view === "settings" ? (
+                <span>接続設定</span>
               ) : (
                 <button onClick={() => goDept(null)}>全社</button>
               )}
@@ -701,6 +720,8 @@ export default function Dashboard() {
           </div>
 
           <div className="dbBody">
+            {view === "accounts" && <AccountsView pushLog={pushLog} />}
+            {view === "settings" && <SettingsView pushLog={pushLog} />}
             {view === "studio" && <Studio pushLog={pushLog} />}
             {view === "org" && !dept && (
               <ViewAll company={company} kpi={kpi} tasks={tasks} logs={logs} goDept={goDept} goAgent={goAgent} />
