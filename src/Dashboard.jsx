@@ -482,6 +482,26 @@ const CSS_ACCOUNTS = `
 .acSteps li::before{content:counter(s);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;background:var(--ai);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
 .acSteps b{color:var(--ink);font-weight:700;}
 .acNote{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-top:16px;}
+
+.acDiagBar{display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line);flex-wrap:wrap;}
+.acDiagBar span{font-size:11.5px;color:var(--muted);line-height:1.75;}
+.acDiag{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;}
+.acDiag__v{font-size:12px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.acDiag__v b{font-family:var(--mono);color:var(--ink);}
+.acDiag__v em{font-style:normal;font-size:11px;color:#fff;background:var(--sig);border-radius:999px;padding:3px 10px;}
+.acDiag__l{display:grid;gap:7px;list-style:none;padding:0;margin:0;}
+.acDiag__l li{display:flex;align-items:center;gap:10px;font-size:12.5px;flex-wrap:wrap;background:var(--white);border-radius:10px;padding:10px 13px;}
+.acDiag__m{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;flex-shrink:0;}
+.acDiag__l li.is-ok .acDiag__m{color:#0E9F73;background:#E6F7F0;}
+.acDiag__l li.is-ng .acDiag__m{color:var(--sig);background:#FDECEA;}
+.acDiag__l li em{font-style:normal;font-size:11.5px;color:var(--muted);flex:1;min-width:160px;}
+.acDiag__n{font-size:11.5px;color:var(--muted);margin-top:12px;}
+.acDiag__n b{color:var(--ink);}
+.acDiag__w{margin-top:12px;background:#FDECEA;border-radius:11px;padding:12px 14px;}
+.acDiag__w > p:first-child{font-size:11.5px;font-weight:700;color:var(--sig);margin-bottom:7px;}
+.acDiag__job{font-size:11.5px;line-height:1.8;color:#8C2A22;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px;}
+.acDiag__job em{font-style:normal;font-size:10px;font-weight:700;background:var(--sig);color:#fff;border-radius:999px;padding:2px 8px;}
+.acDiag__job span{width:100%;font-family:var(--mono);font-size:10.5px;opacity:.85;}
 `;
 
 
@@ -566,6 +586,26 @@ function SettingsView({ pushLog }) {
     }
   };
 
+  const [diag, setDiag] = useState(null);
+  const [diagging, setDiagging] = useState(false);
+
+  const runDiag = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setDiagging(true);
+    setDiag(null);
+    try {
+      const r = await fetch(`${u}?action=diag`);
+      const d = await r.json();
+      if (d && d.diag) setDiag(d.diag);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直したあと、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "状態を取得できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
+    } finally {
+      setDiagging(false);
+    }
+  };
+
   const disconnect = () => {
     save({ gasUrl: "", useGas: false });
     setGasUrl("");
@@ -618,6 +658,52 @@ function SettingsView({ pushLog }) {
         </div>
 
         {result && <p className={`acResult ${result.ok ? "is-ok" : "is-ng"}`}>{result.msg}</p>}
+
+        <div className="acDiagBar">
+          <button className="acGhost" onClick={runDiag} disabled={diagging}>
+            {diagging ? "確認中..." : "バックエンドの状態を確認"}
+          </button>
+          <span>生成されない・メールが来ないときは、まずここを押してください。</span>
+        </div>
+
+        {diag && (
+          <div className="acDiag">
+            <p className="acDiag__v">
+              バージョン <b>{diag.version || "不明"}</b>
+              {diag.version !== "3.0" && <em>古いデプロイが公開されています</em>}
+            </p>
+            <ul className="acDiag__l">
+              {[
+                ["制作キー（Dify）", diag["キー"] && diag["キー"]["制作"], "setup を実行して Creative_PR_AI のキーを登録してください"],
+                ["検査キー（Dify）", diag["キー"] && diag["キー"]["検査"], "任意です。無くても文章は作られます"],
+                ["画像キー（OpenAI）", diag["キー"] && diag["キー"]["画像"], "任意です。画像を使うなら setup で登録してください"],
+                ["自動実行トリガー", diag["トリガー"] && diag["トリガー"].length > 0, "setup を実行するとトリガーが登録されます"],
+                ["シートの準備", diag["シート"] && diag["シート"]["ジョブ"], "setup を実行するとシートが作られます"],
+              ].map(([label, ok2, hint]) => (
+                <li key={label} className={ok2 ? "is-ok" : "is-ng"}>
+                  <span className="acDiag__m">{ok2 ? "OK" : "要対応"}</span>
+                  <b>{label}</b>
+                  {!ok2 && <em>{hint}</em>}
+                </li>
+              ))}
+            </ul>
+            <p className="acDiag__n">
+              通知先：<b>{diag["通知先"] || "未設定"}</b> ／ 記録件数：{(diag["シート"] && diag["シート"]["件数"]) || 0} 件
+            </p>
+            {diag["未処理"] && diag["未処理"].length > 0 && (
+              <div className="acDiag__w">
+                <p>未処理・エラーの案件</p>
+                {diag["未処理"].map((w) => (
+                  <p key={w.id} className="acDiag__job">
+                    <em>{w["状態"]}</em>
+                    {w.id}
+                    <span>{w["備考"]}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="acPanel acPanel--guide">
@@ -1689,6 +1775,7 @@ function Studio({ pushLog }) {
       message: buildMessage(job),
     };
     let ok = true;
+    let detail = "";
     if (settings.liveSubmit !== false) {
       try {
         const r = await fetch(endpoint.url, {
@@ -1697,8 +1784,21 @@ function Studio({ pushLog }) {
           body: JSON.stringify(payload),
         });
         ok = r.ok;
+        if (ok && endpoint.isGas) {
+          // GASはエラーでもHTTP 200を返すため、中身を確認します
+          try {
+            const d = JSON.parse(await r.text());
+            if (d && d.ok === false) {
+              ok = false;
+              detail = String(d.error || "").slice(0, 200);
+            }
+          } catch (e2) {
+            /* 応答が読めなくても、送信自体は届いているとみなします */
+          }
+        }
       } catch (e) {
         ok = false;
+        detail = "通信に失敗しました";
       }
     }
     await new Promise((r) => setTimeout(r, Math.max(0, 1100 - (Date.now() - t0))));
@@ -1714,7 +1814,14 @@ function Studio({ pushLog }) {
     }, ...j].slice(0, 40));
 
     note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}`);
-    setFlash({ ok, msg: ok ? (job === "POST" ? "予約しました。" : "依頼を送信しました。完成するとメールとGoogle Driveに届きます。") : "送信できませんでした。" });
+    setFlash({
+      ok,
+      msg: ok
+        ? job === "POST"
+          ? "予約しました。予約投稿タブで確認できます。"
+          : "依頼を受け付けました。5分以内に処理が始まり、完成するとメールとGoogle Driveに届きます。"
+        : "送信できませんでした。" + (detail ? "（" + detail + "）" : "接続設定で状態を確認してください。"),
+    });
     if (job === "CONTENT") { setTheme(""); setPoints(""); }
     if (job === "IMAGE") setImgDesc("");
     if (job === "POST") { setTheme(""); setSchedule({ at: "", repeat: "なし" }); }
