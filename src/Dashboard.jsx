@@ -606,6 +606,30 @@ function SettingsView({ pushLog }) {
     }
   };
 
+  const [running, setRunning] = useState(false);
+
+  const runNow = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await fetch(`${u}?action=run`);
+      const d = await r.json();
+      if (d && d.ran) {
+        if (d.diag) setDiag(d.diag);
+        setResult({ ok: true, msg: "処理を実行しました。数十秒後にメールが届きます。届かない場合は下の状態表示をご確認ください。" });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] MANUAL RUN EXECUTED`);
+      } else {
+        setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直し、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "実行できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const disconnect = () => {
     save({ gasUrl: "", useGas: false });
     setGasUrl("");
@@ -662,6 +686,9 @@ function SettingsView({ pushLog }) {
         <div className="acDiagBar">
           <button className="acGhost" onClick={runDiag} disabled={diagging}>
             {diagging ? "確認中..." : "バックエンドの状態を確認"}
+          </button>
+          <button className="acAdd" onClick={runNow} disabled={running}>
+            {running ? "処理中..." : "今すぐ処理する"}
           </button>
           <span>生成されない・メールが来ないときは、まずここを押してください。</span>
         </div>
