@@ -1587,6 +1587,20 @@ function inferSettings(texts) {
   };
 }
 
+
+/* ============ 投稿スケジュール ============ */
+const DAYS = ["月", "火", "水", "木", "金", "土", "日"];
+
+function emptySlot(time) {
+  return { id: "s" + Math.random().toString(36).slice(2, 8), time: time || "07:00", brief: "", images: [], video: "", videoNote: "" };
+}
+
+function defaultSchedule(pfId2) {
+  const P = PLATFORMS.find((x) => x.id === pfId2);
+  const times = (P && P.times) || ["07:00"];
+  return { days: ["月", "火", "水", "木", "金"], slots: times.slice(0, 2).map((t) => emptySlot(t)) };
+}
+
 /* ============ 媒体ごとの「制作パーツ」定義 ============ */
 const PART_DEFS = {
   x: [
@@ -1994,6 +2008,10 @@ function Studio({ pushLog }) {
   const [autoSet, setAutoSet] = useState(null);
   const [tweak, setTweak] = useState(false);
   const [moreCtx, setMoreCtx] = useState(false);
+  const [sched, setSched] = useState({});
+  const [schedPf, setSchedPf] = useState("x");
+  const [refSlot, setRefSlot] = useState("common");
+  const [prodSlot, setProdSlot] = useState("common");
   const [refAcct, setRefAcct] = useState("");
   const [samples, setSamples] = useState(["", ""]);
   const [refPoints, setRefPoints] = useState(["文体・語り口", "テンポ・改行"]);
@@ -2068,17 +2086,26 @@ function Studio({ pushLog }) {
     if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
 
     if (job === "CONTENT") {
+      // 投稿スケジュール
+      const sc2 = getSched(pfId);
+      const slot2 = prodSlot !== "common" ? sc2.slots.find((x) => x.id === prodSlot) : null;
+      L.push(`【投稿予定】${sc2.days.join("・")}／${sc2.slots.map((x) => x.time).join("・")}（週${sc2.days.length * sc2.slots.length}投稿）`);
+      if (slot2) {
+        L.push(`【この投稿の時間】${slot2.time}` + (slot2.brief ? `／【この時間に出したい内容】${slot2.brief}` : ""));
+        if (slot2.video) L.push(`【この時間の参考動画】${slot2.video}`);
+      }
+
       // お手本（パーツごと）
       const acct2 = (refs[pfId] && refs[pfId].account) || "";
       const parts = PART_DEFS[pfId] || PART_DEFS.other;
-      const used = parts.filter((pt) => partFilled(getPartRef(pfId, pt.id)));
+      const used = parts.filter((pt) => partFilled(getPartRef(pfId, pt.id, prodSlot)));
       if (acct2 || used.length) {
         L.push(
           `【お手本】${acct2 || "（貼り付けた内容）"}／【お手本の扱い】文体・構成・リズム・見せ方の型のみを抽出して適用すること。` +
             `表現・文章・固有名詞・画像をそのまま流用しないこと。`
         );
         used.forEach((pt) => {
-          const r = getPartRef(pfId, pt.id);
+          const r = getPartRef(pfId, pt.id, prodSlot);
           const texts = r.texts.filter((t) => t.trim().length > 5);
           const st2 = analyzeStyle(texts);
           const bits = [];
@@ -2132,6 +2159,54 @@ function Studio({ pushLog }) {
   };
 
 
+
+  /* ── 投稿スケジュール ── */
+  const getSched = useCallback((pf2) => sched[pf2] || defaultSchedule(pf2), [sched]);
+
+  const setSchedField = useCallback((pf2, key, val) => {
+    setSched((prev) => ({ ...prev, [pf2]: { ...(prev[pf2] || defaultSchedule(pf2)), [key]: val } }));
+  }, []);
+
+  const toggleDay = useCallback((pf2, d) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      const days = cur.days.indexOf(d) >= 0 ? cur.days.filter((x) => x !== d) : [...cur.days, d];
+      return { ...prev, [pf2]: { ...cur, days: DAYS.filter((x) => days.indexOf(x) >= 0) } };
+    });
+  }, []);
+
+  const updateSlot = useCallback((pf2, slotId, fn) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      return { ...prev, [pf2]: { ...cur, slots: cur.slots.map((sl) => (sl.id === slotId ? fn({ ...sl }) : sl)) } };
+    });
+  }, []);
+
+  const addSlot = useCallback((pf2) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      if (cur.slots.length >= 5) return prev;
+      return { ...prev, [pf2]: { ...cur, slots: [...cur.slots, emptySlot("12:00")] } };
+    });
+  }, []);
+
+  const removeSlot = useCallback((pf2, slotId) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      if (cur.slots.length <= 1) return prev;
+      return { ...prev, [pf2]: { ...cur, slots: cur.slots.filter((sl) => sl.id !== slotId) } };
+    });
+  }, []);
+
+  const attachSlotImages = useCallback((pf2, slotId, files, done) => {
+    Array.from(files || []).slice(0, 2).forEach((f) => {
+      readImageSmall(f, (data) => {
+        updateSlot(pf2, slotId, (sl) => ({ ...sl, images: [...sl.images, { name: f.name, data: data, note: "" }].slice(0, 2) }));
+      });
+    });
+    if (done) done();
+  }, [updateSlot]);
+
   /* ── お手本（媒体×パーツ）の操作 ── */
   const refTargets = useMemo(() => {
     if (plan && plan.platforms && plan.platforms.length) return plan.platforms.map((p) => p.id);
@@ -2144,17 +2219,30 @@ function Studio({ pushLog }) {
   }, [refTargets, refPf]);
 
   const getPartRef = useCallback(
-    (pf2, partId) => (refs[pf2] && refs[pf2][partId]) || emptyPartRef(),
-    [refs]
+    (pf2, partId, slotKey) => {
+      const k = slotKey || refSlot;
+      const bs = (refs[pf2] && refs[pf2].bySlot) || {};
+      const own = (bs[k] && bs[k][partId]) || null;
+      if (own && partFilled(own)) return own;
+      // 時間ごとの設定が無ければ、共通の設定を使います
+      const com = (bs.common && bs.common[partId]) || null;
+      return own || com || emptyPartRef();
+    },
+    [refs, refSlot]
   );
 
   const updatePart = useCallback((pf2, partId, fn) => {
     setRefs((prev) => {
       const cur = prev[pf2] || {};
-      const part = cur[partId] || emptyPartRef();
-      return { ...prev, [pf2]: { ...cur, [partId]: fn({ ...part }) } };
+      const bs = cur.bySlot || {};
+      const slot = bs[refSlot] || {};
+      const part = slot[partId] || emptyPartRef();
+      return {
+        ...prev,
+        [pf2]: { ...cur, bySlot: { ...bs, [refSlot]: { ...slot, [partId]: fn({ ...part }) } } },
+      };
     });
-  }, []);
+  }, [refSlot]);
 
   const setRefField = useCallback((pf2, key, val) => {
     setRefs((prev) => ({ ...prev, [pf2]: { ...(prev[pf2] || {}), [key]: val } }));
@@ -2202,12 +2290,44 @@ function Studio({ pushLog }) {
   }, [updatePart]);
 
   const platformRefStatus = useCallback(
-    (pf2) => {
+    (pf2, slotKey) => {
       const parts = PART_DEFS[pf2] || PART_DEFS.other;
-      const done = parts.filter((pt) => partFilled(getPartRef(pf2, pt.id))).length;
+      const done = parts.filter((pt) => partFilled(getPartRef(pf2, pt.id, slotKey))).length;
       return { done: done, total: parts.length };
     },
     [getPartRef]
+  );
+
+  /** 選んだ時間のお手本・投稿内容を、制作条件に反映します */
+  const applySlot = useCallback(
+    (pf2, slotKey) => {
+      const parts = PART_DEFS[pf2] || PART_DEFS.other;
+      const bs = (refs[pf2] && refs[pf2].bySlot) || {};
+      const pick = (partId) => {
+        const own = (bs[slotKey] && bs[slotKey][partId]) || null;
+        const com = (bs.common && bs.common[partId]) || null;
+        return own && partFilled(own) ? own : com || emptyPartRef();
+      };
+      const texts = parts.flatMap((pt) => pick(pt.id).texts).filter((t) => String(t).trim().length > 5);
+      const inf = inferSettings(texts);
+      if (inf) {
+        setTone(inf.tone);
+        setStruct(inf.struct);
+        setHook(inf.hook);
+        setPerson(inf.person);
+        setEmoji(inf.emoji);
+        setCta(inf.cta);
+        setLen(inf.len);
+        setAutoSet(inf);
+        setTweak(false);
+      }
+      // その時間に投稿したい内容を、テーマの下書きとして入れます
+      if (slotKey !== "common") {
+        const sl = getSched(pf2).slots.find((x) => x.id === slotKey);
+        if (sl && sl.brief && !theme.trim()) setTheme(sl.brief);
+      }
+    },
+    [refs, getSched, theme]
   );
 
   /** 依頼したあと、完成するまで状態を追いかけます */
@@ -2258,7 +2378,7 @@ function Studio({ pushLog }) {
     const t0 = Date.now();
     const refImagesPayload = [];
     (PART_DEFS[pfId] || PART_DEFS.other).forEach((pt) => {
-      const r = getPartRef(pfId, pt.id);
+      const r = getPartRef(pfId, pt.id, prodSlot);
       (r.images || []).slice(0, 2).forEach((im) => {
         if (refImagesPayload.length < 3) {
           refImagesPayload.push({ part: pt.label, note: im.note || "", data: im.data });
@@ -2428,16 +2548,6 @@ function Studio({ pushLog }) {
                 </Field>
               </div>
 
-              <Field label="いちばんの目的">
-                <div className="stCards">
-                  {GOALS.map((g) => (
-                    <button key={g.id} type="button" className={ctx.goal === g.id ? "is-on" : ""} onClick={() => setCtx({ ...ctx, goal: g.id })}>
-                      <b>{g.label}</b><em>{g.note}</em>
-                    </button>
-                  ))}
-                </div>
-              </Field>
-
               <Field label="運用したいSNS" hint="決まっていなければ選ばなくて構いません。AIが業種と目的から提案します" ai>
                 <div className="stChips">
                   {PLATFORMS.map((pf2) => (
@@ -2534,13 +2644,124 @@ function Studio({ pushLog }) {
                     })}
                   </div>
 
-                  <div className="stPlan__g">
-                    <Field label="投稿頻度" ai={!touched.cad}>
-                      <input type="text" value={plan.cadence} onChange={(e) => { setPlan({ ...plan, cadence: e.target.value }); mark("cad"); }} />
-                    </Field>
-                    <Field label="投稿する時間帯" ai={!touched.times}>
-                      <input type="text" value={plan.times.join(", ")} onChange={(e) => { setPlan({ ...plan, times: e.target.value.split(",").map((x) => x.trim()) }); mark("times"); }} />
-                    </Field>
+                  {/* 投稿スケジュール（媒体ごと） */}
+                  <div className="stSched">
+                    <div className="stRefTabs">
+                      {plan.platforms.map((pp) => {
+                        const P = PLATFORMS.find((x) => x.id === pp.id);
+                        const sc = getSched(pp.id);
+                        return (
+                          <button
+                            key={pp.id}
+                            className={`stRefTab ${schedPf === pp.id ? "is-on" : ""}`}
+                            style={{ "--t": P.tone, "--s": P.soft }}
+                            onClick={() => setSchedPf(pp.id)}
+                          >
+                            <span className="stRefTab__d" />
+                            <b>{P.label}</b>
+                            <em>週{sc.days.length}日 × {sc.slots.length}回</em>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {(() => {
+                      const sc = getSched(schedPf);
+                      return (
+                        <>
+                          <Field label="投稿する曜日" hint="クリックで選び直せます。複数選択できます">
+                            <div className="stDays">
+                              {DAYS.map((d) => (
+                                <button
+                                  key={d}
+                                  type="button"
+                                  className={`stDay ${sc.days.indexOf(d) >= 0 ? "is-on" : ""} ${d === "土" || d === "日" ? "is-we" : ""}`}
+                                  onClick={() => toggleDay(schedPf, d)}
+                                >
+                                  {d}
+                                </button>
+                              ))}
+                            </div>
+                          </Field>
+
+                          <p className="stSlots__k">
+                            1日の投稿回数と時刻
+                            <em>{sc.slots.length}回／日</em>
+                          </p>
+
+                          <div className="stSlots">
+                            {sc.slots.map((sl, i) => (
+                              <div className="stSlot" key={sl.id}>
+                                <div className="stSlot__h">
+                                  <input
+                                    className="stSlot__time"
+                                    type="time"
+                                    value={sl.time}
+                                    onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, time: e.target.value }))}
+                                  />
+                                  <span className="stSlot__n">{i + 1}回目</span>
+                                  {sc.slots.length > 1 && (
+                                    <button className="stSlot__x" onClick={() => removeSlot(schedPf, sl.id)} aria-label="削除">×</button>
+                                  )}
+                                </div>
+                                <textarea
+                                  rows={2}
+                                  value={sl.brief}
+                                  onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, brief: e.target.value }))}
+                                  placeholder={`この時間に投稿したい内容（例：朝は挨拶と今日の注目、夜は解説）`}
+                                />
+                                <div className="stSlot__media">
+                                  <label className="stMedia__add">
+                                    <Sic name="image" size={14} />
+                                    画像
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      hidden
+                                      onChange={(e) => attachSlotImages(schedPf, sl.id, e.target.files, () => (e.target.value = ""))}
+                                    />
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={sl.video}
+                                    onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, video: e.target.value }))}
+                                    placeholder="参考動画のURL（任意）"
+                                  />
+                                </div>
+                                {sl.images.length > 0 && (
+                                  <div className="stSlot__imgs">
+                                    {sl.images.map((im, k) => (
+                                      <span key={k}>
+                                        <img src={im.data} alt="" />
+                                        <button
+                                          onClick={() =>
+                                            updateSlot(schedPf, sl.id, (x) => ({ ...x, images: x.images.filter((_, j) => j !== k) }))
+                                          }
+                                          aria-label="削除"
+                                        >×</button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {sc.slots.length < 5 && (
+                            <button className="stPart__add" onClick={() => addSlot(schedPf)}>
+                              ＋ 投稿する時間を追加する
+                            </button>
+                          )}
+
+                          <p className="stSched__sum">
+                            {PLATFORMS.find((x) => x.id === schedPf).label}：
+                            <b>{sc.days.join("・")}</b> の <b>{sc.slots.map((x) => x.time).join(" / ")}</b>
+                            　＝ 週 {sc.days.length * sc.slots.length} 投稿
+                          </p>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <Field label="コンテンツの柱" ai={!touched.pillars} hint="この3本を軸に投稿を作り分けます。書き換えられます">
@@ -2600,7 +2821,7 @@ function Studio({ pushLog }) {
               <div className="stRefTabs">
                 {refTargets.map((id) => {
                   const P = PLATFORMS.find((x) => x.id === id);
-                  const st = platformRefStatus(id);
+                  const st = platformRefStatus(id, "common");
                   return (
                     <button
                       key={id}
@@ -2626,6 +2847,32 @@ function Studio({ pushLog }) {
                   placeholder="@example ／ https://note.com/example"
                 />
               </Field>
+
+              {/* 時間ごとのお手本 */}
+              <Field label="どの時間の投稿に使うお手本か" hint="共通のまま進めても構いません。時間ごとに変えたいときだけ切り替えてください">
+                <div className="stSlotTabs">
+                  <button className={refSlot === "common" ? "is-on" : ""} onClick={() => setRefSlot("common")}>
+                    すべての時間に共通
+                  </button>
+                  {getSched(refPf).slots.map((sl) => {
+                    const st2 = platformRefStatus(refPf, sl.id);
+                    return (
+                      <button key={sl.id} className={refSlot === sl.id ? "is-on" : ""} onClick={() => setRefSlot(sl.id)}>
+                        {sl.time}
+                        <em>{st2.done}/{st2.total}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {refSlot !== "common" && (
+                <p className="stSlotNote">
+                  {getSched(refPf).slots.find((x) => x.id === refSlot)
+                    ? `${getSched(refPf).slots.find((x) => x.id === refSlot).time} の投稿に使うお手本です。設定しなかったパーツは、共通のお手本が使われます。`
+                    : ""}
+                </p>
+              )}
 
               {/* パーツごとの設定 */}
               <div className="stParts">
@@ -2766,19 +3013,20 @@ function Studio({ pushLog }) {
                 <button
                   className="stSend"
                   onClick={() => {
-                    const st = platformRefStatus(refPf);
+                    const st = platformRefStatus(refPf, "common");
                     if (st.done < st.total) {
-                      setFlash({ ok: false, msg: `${(PLATFORMS.find((x) => x.id === refPf) || {}).label} のお手本が未設定のパーツがあります（${st.done}/${st.total}）。` });
+                      setFlash({ ok: false, msg: `${(PLATFORMS.find((x) => x.id === refPf) || {}).label} の「すべての時間に共通」で未設定のパーツがあります（${st.done}/${st.total}）。` });
                       setTimeout(() => setFlash(null), 5000);
                       return;
                     }
                     setPfId(refPf);
+                    setProdSlot("common");
                     const P = PLATFORMS.find((x) => x.id === refPf);
                     if (P) setFmtId(P.formats[0].id);
 
                     // お手本から制作条件を自動で決めます
                     const allTexts = (PART_DEFS[refPf] || PART_DEFS.other)
-                      .flatMap((pt) => getPartRef(refPf, pt.id).texts)
+                      .flatMap((pt) => getPartRef(refPf, pt.id, "common").texts)
                       .filter((t) => String(t).trim().length > 5);
                     const inf = inferSettings(allTexts);
                     if (inf) {
@@ -2819,14 +3067,29 @@ function Studio({ pushLog }) {
                 </div>
               )}
               <div className="stPf">
-                {PLATFORMS.map((p) => (
+                {PLATFORMS.filter((p) => refTargets.indexOf(p.id) >= 0).map((p) => (
                   <button key={p.id} className={`stPf__b ${pfId === p.id ? "is-on" : ""}`} style={{ "--t": p.tone, "--s": p.soft }}
-                    onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); }}>
+                    onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); setProdSlot("common"); }}>
                     <span className="stPf__d" /><b>{p.label}</b>
-                    {plan && plan.platforms.some((x) => x.id === p.id) && <em className="stAiTag">推奨</em>}
                   </button>
                 ))}
               </div>
+
+              {getSched(pfId).slots.length > 0 && (
+                <Field label="どの時間の投稿をつくるか" hint="時間ごとにお手本や投稿内容を設定していれば、それが反映されます">
+                  <div className="stSlotTabs">
+                    <button className={prodSlot === "common" ? "is-on" : ""} onClick={() => { setProdSlot("common"); applySlot(pfId, "common"); }}>
+                      指定しない
+                    </button>
+                    {getSched(pfId).slots.map((sl) => (
+                      <button key={sl.id} className={prodSlot === sl.id ? "is-on" : ""} onClick={() => { setProdSlot(sl.id); applySlot(pfId, sl.id); }}>
+                        {sl.time}
+                        {sl.brief && <em>設定あり</em>}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              )}
 
               <Field label="形式">
                 <div className="stChips">
@@ -4949,4 +5212,38 @@ const CSS_DASHBOARD = `
 
 .stMore{display:block;width:100%;text-align:center;font-size:12.5px;font-weight:700;color:var(--ai);border:1.5px dashed #DCD0F7;border-radius:12px;padding:12px;margin-bottom:16px;transition:all .2s;}
 .stMore:hover{background:#F5F1FE;}
+
+/* ==== 投稿スケジュール ==== */
+.stSched{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:16px;}
+.stDays{display:flex;gap:6px;flex-wrap:wrap;}
+.stDay{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);background:var(--white);font-size:14px;font-weight:700;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.stDay:hover{border-color:var(--ai);}
+.stDay.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
+.stDay.is-we{color:#C4342A;}
+.stDay.is-we.is-on{background:#C4342A;border-color:#C4342A;color:#fff;}
+.stSlots__k{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;margin:16px 0 10px;}
+.stSlots__k em{font-style:normal;font-size:10.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:2px 10px;}
+.stSlots{display:grid;gap:10px;}
+.stSlot{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+.stSlot__h{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
+.stSlot__time{width:118px !important;font-family:var(--mono);font-weight:700;font-size:15px !important;padding:8px 10px !important;}
+.stSlot__n{font-size:11px;color:var(--muted);}
+.stSlot__x{margin-left:auto;color:#B9C0CB;font-size:16px;padding:3px 8px;border-radius:6px;}
+.stSlot__x:hover{color:var(--sig);background:#FDECEA;}
+.stSlot__media{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;}
+.stSlot__media input{flex:1;min-width:170px;font-size:12px !important;padding:9px 12px !important;}
+.stSlot__imgs{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;}
+.stSlot__imgs span{position:relative;}
+.stSlot__imgs img{width:52px;height:52px;object-fit:cover;border-radius:8px;display:block;}
+.stSlot__imgs button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;}
+.stSched__sum{font-size:12px;line-height:1.9;color:var(--muted);background:var(--white);border-radius:10px;padding:11px 14px;margin-top:12px;}
+.stSched__sum b{color:var(--ink);}
+
+/* ==== 時間スロットのタブ ==== */
+.stSlotTabs{display:flex;gap:6px;flex-wrap:wrap;}
+.stSlotTabs button{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12.5px;font-weight:700;border:1.5px solid var(--line);background:var(--white);border-radius:999px;padding:8px 16px;color:var(--muted);transition:all .2s;}
+.stSlotTabs button:hover{border-color:var(--ai);}
+.stSlotTabs button.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
+.stSlotTabs em{font-style:normal;font-family:var(--sans);font-size:10px;font-weight:400;opacity:.75;}
+.stSlotNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 14px;margin-bottom:16px;}
 `;
