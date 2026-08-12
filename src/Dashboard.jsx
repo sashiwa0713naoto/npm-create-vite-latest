@@ -1647,12 +1647,14 @@ function suggestImagePrompts(ctx, style, ratio, theme, seed) {
 
 /* ========================= AI推奨エンジン（内蔵） ======================== */
 
-function recommend({ industry, goal, resource, budgetVideo }) {
+function recommend({ industry, goal, resource, budgetVideo, want }) {
   const ind = INDUSTRIES.find((i) => i.id === industry) || INDUSTRIES[9];
   const res = RESOURCES.find((r) => r.id === resource) || RESOURCES[1];
 
+  const wish = want && want.length ? want : null;
   const scored = PLATFORMS.map((p) => {
     let s = (p.strength[goal] || 2) * 10;
+    if (wish) s += wish.indexOf(p.id) >= 0 ? 60 : -40;
     const bi = ind.bias.indexOf(p.id);
     if (bi >= 0) s += 18 - bi * 5;
     if (p.effort > res.eff) s -= (p.effort - res.eff) * 9;
@@ -1660,7 +1662,8 @@ function recommend({ industry, goal, resource, budgetVideo }) {
     return { ...p, score: s };
   }).sort((a, b) => b.score - a.score);
 
-  const picked = scored.slice(0, res.max).map((p, i) => {
+  const limit = wish ? Math.max(res.max, Math.min(wish.length, 4)) : res.max;
+  const picked = scored.slice(0, limit).map((p, i) => {
     const fmt = pickFormat(p, goal, res);
     return {
       id: p.id,
@@ -1815,6 +1818,11 @@ function Studio({ pushLog }) {
   const [imgStyle, setImgStyle] = useState("写真風");
   const [ideas, setIdeas] = useState([]);
   const [seed, setSeed] = useState(1);
+  const [wantPlatforms, setWantPlatforms] = useState([]);
+  const [refImages, setRefImages] = useState([]);
+  const [refVideo, setRefVideo] = useState("");
+  const [refVideoNote, setRefVideoNote] = useState("");
+  const [wantImages, setWantImages] = useState(true);
   const [deliverBest, setDeliverBest] = useState(true);
   const [notePaid, setNotePaid] = useState(true);
   const [noteToX, setNoteToX] = useState(true);
@@ -1841,7 +1849,7 @@ function Studio({ pushLog }) {
 
   /* ---- AI推奨を実行 ---- */
   const runPlan = () => {
-    const r = recommend(ctx);
+    const r = recommend({ ...ctx, want: wantPlatforms });
     setPlan(r);
     setTouched({});
     const p0 = r.platforms[0];
@@ -1863,6 +1871,7 @@ function Studio({ pushLog }) {
 
     if (job === "PLAN") {
       L.push(`【依頼】SNS運用設計書の作成`);
+      if (wantPlatforms.length) L.push(`【運用したい媒体】${wantPlatforms.map((id) => (PLATFORMS.find((x) => x.id === id) || {}).label).join("・")}`);
       L.push(`【会社】${ctx.company}／【業種】${ind.label}／【目的】${ctx.goal}／【使える時間】${RESOURCES.find((r) => r.id === ctx.resource).note}`);
       L.push(`【商品・サービス】${ctx.service}／【価格帯】${ctx.price}`);
       L.push(`【ターゲット】${ctx.target}／【顧客の悩み】${ctx.pain}／【自社の強み】${ctx.strength}`);
@@ -1909,6 +1918,15 @@ function Studio({ pushLog }) {
       L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
       L.push(`【テーマ】${theme}`);
       if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
+      L.push(`【納品パッケージ】${pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}`);
+      L.push(`【画像生成】${wantImages ? "あり" : "なし"}`);
+      if (refImages.length) {
+        L.push(
+          `【参考画像】${refImages.length}枚（${refImages.map((im) => im.note || "指定なし").join("／")}）` +
+            `／【参考画像の扱い】構図・配色・文字の置き方などの型のみ参考にし、複製しないこと`
+        );
+      }
+      if (refVideo) L.push(`【参考動画】${refVideo}／【参考点】${refVideoNote || "指定なし"}`);
       if (deliverBest && variants !== "1") L.push(`【納品形式】ベスト1案（全案を作ったうえで、最も反応が取れる1案を選んで納品）`);
       if (pfId === "note" && notePaid) {
         L.push(
@@ -2105,9 +2123,22 @@ function Studio({ pushLog }) {
           { n: 3, l: "制作", s: "条件を詰めて生成" },
           { n: 4, l: "投稿予約", s: "キューに積む" },
         ].map((s) => (
-          <button key={s.n} className={`stStep ${step === s.n ? "is-on" : ""} ${step > s.n ? "is-done" : ""}`} onClick={() => setStep(s.n)}>
+          <button
+            key={s.n}
+            className={`stStep ${step === s.n ? "is-on" : ""} ${step > s.n ? "is-done" : ""} ${!plan && s.n > 1 ? "is-lock" : ""}`}
+            onClick={() => {
+              if (!plan && s.n > 1) {
+                setStep(1);
+                setFlash({ ok: false, msg: "先にSTEP1でAIに運用プランを提案させてください。" });
+                setTimeout(() => setFlash(null), 4000);
+                return;
+              }
+              setStep(s.n);
+            }}
+          >
             <span className="stStep__n">{step > s.n ? <Sic name="check" size={15} /> : s.n}</span>
             <span><b>{s.l}</b><em>{s.s}</em></span>
+            {!plan && s.n > 1 && <span className="stStep__lock">未</span>}
           </button>
         ))}
       </div>
@@ -2133,6 +2164,27 @@ function Studio({ pushLog }) {
                   {GOALS.map((g) => (
                     <button key={g.id} type="button" className={ctx.goal === g.id ? "is-on" : ""} onClick={() => setCtx({ ...ctx, goal: g.id })}>
                       <b>{g.label}</b><em>{g.note}</em>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="運用したいSNS" hint="決まっていなければ選ばなくて構いません。AIが業種と目的から提案します" ai>
+                <div className="stChips">
+                  {PLATFORMS.map((pf2) => (
+                    <button
+                      key={pf2.id}
+                      type="button"
+                      className={wantPlatforms.indexOf(pf2.id) >= 0 ? "is-on" : ""}
+                      onClick={() =>
+                        setWantPlatforms(
+                          wantPlatforms.indexOf(pf2.id) >= 0
+                            ? wantPlatforms.filter((x) => x !== pf2.id)
+                            : [...wantPlatforms, pf2.id]
+                        )
+                      }
+                    >
+                      {pf2.label}
                     </button>
                   ))}
                 </div>
@@ -2169,8 +2221,18 @@ function Studio({ pushLog }) {
 
               <button className="stBig" onClick={runPlan}>
                 <Sic name="spark" size={17} />
-                AIに最適な運用プランを提案させる
+                {plan ? "条件を変えて、もう一度提案させる" : "AIに最適な運用プランを提案させる"}
               </button>
+
+              {!plan && (
+                <p className="stGate">
+                  <Sic name="warn" size={15} />
+                  上のボタンでAIに提案させると、次のステップに進めます。
+                  {wantPlatforms.length > 0
+                    ? `選んだ${wantPlatforms.length}媒体を優先して、形式・頻度・時間帯・トーンを設計します。`
+                    : "媒体が未選択の場合は、業種と目的から最適な媒体をAIが選びます。"}
+                </p>
+              )}
 
               {plan && (
                 <div className="stPlan">
@@ -2350,6 +2412,71 @@ function Studio({ pushLog }) {
               <div className="stFoot">
                 <p className="stFoot__c">
                   <button className="stBack" onClick={() => setStep(1)}>← 運用設計に戻る</button>
+              <div className="stMedia">
+                <p className="stMedia__k">
+                  参考にする画像・動画
+                  <em>任意</em>
+                </p>
+                <p className="stMedia__n">
+                  お手本の見た目を参考にしたいときに使います。画像は内容をAIが読み取り、制作条件に反映します。
+                  動画は現在URLの記録のみで、内容の解析はできません。
+                </p>
+
+                <label className="stMedia__add">
+                  <Sic name="image" size={16} />
+                  画像を選ぶ（複数可）
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []).slice(0, 4);
+                      files.forEach((f) => {
+                        if (f.size > 3 * 1024 * 1024) {
+                          setFlash({ ok: false, msg: `${f.name} は3MBを超えています。小さい画像をお選びください。` });
+                          return;
+                        }
+                        const r = new FileReader();
+                        r.onload = () =>
+                          setRefImages((v) => [...v, { name: f.name, data: String(r.result), note: "" }].slice(0, 4));
+                        r.readAsDataURL(f);
+                      });
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+
+                {refImages.length > 0 && (
+                  <div className="stMedia__l">
+                    {refImages.map((im, i) => (
+                      <div className="stMedia__i" key={im.name + i}>
+                        <img src={im.data} alt="" />
+                        <div>
+                          <p>{im.name}</p>
+                          <input
+                            type="text"
+                            value={im.note}
+                            onChange={(e) =>
+                              setRefImages((v) => v.map((x, k) => (k === i ? { ...x, note: e.target.value } : x)))
+                            }
+                            placeholder="この画像のどこを参考にするか（例：文字の配置、色数の少なさ）"
+                          />
+                        </div>
+                        <button onClick={() => setRefImages((v) => v.filter((_, k) => k !== i))} aria-label="削除">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <Field label="参考にする動画のURL" hint="任意。内容の解析はできないため、下の欄で特徴をご記入ください">
+                  <input type="text" value={refVideo} onChange={(e) => setRefVideo(e.target.value)} placeholder="https://..." />
+                </Field>
+                <Field label="その動画の、どこを参考にするか">
+                  <input type="text" value={refVideoNote} onChange={(e) => setRefVideoNote(e.target.value)} placeholder="冒頭2秒のテロップの出し方、カットの速さ など" />
+                </Field>
+              </div>
+
                   <span>任意</span>お手本なしでも制作に進めます
                 </p>
                 <button className="stNext" onClick={() => setStep(3)}>制作に進む →</button>
@@ -2498,6 +2625,33 @@ function Studio({ pushLog }) {
                     </span>
                   </div>
                 )}
+              </div>
+
+              <div className="stPack">
+                <p className="stPack__k">
+                  納品パッケージ
+                  <em>{pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}</em>
+                </p>
+                <ul className="stPack__l">
+                  {(pfId === "note"
+                    ? ["記事本文（無料枠・有料枠つき）", "タイトル案5つ", "サムネイル画像", "差し込み画像2枚", "X誘導投稿3案"]
+                    : pfId === "x"
+                    ? ["投稿本文", "続きのスレッド3〜5投稿", "添付画像1枚"]
+                    : ["本文", "ハッシュタグ案・フック案"]
+                  ).map((t) => (
+                    <li key={t}>
+                      <Sic name="check" size={14} />
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+                <label className="stCheck">
+                  <input type="checkbox" checked={wantImages} onChange={(e) => setWantImages(e.target.checked)} />
+                  <span>
+                    <b>画像も生成する</b>
+                    <em>1枚あたり数十円の実費がかかります。文章だけでよければ外してください</em>
+                  </span>
+                </label>
               </div>
 
               {pfId === "note" && (
@@ -4356,4 +4510,32 @@ const CSS_DASHBOARD = `
 .stWatch__t a{font-weight:700;color:#0E9F73;text-decoration:underline;}
 .stWatch__x{margin-left:auto;color:#B9C0CB;font-size:16px;padding:2px 8px;border-radius:6px;}
 .stWatch__x:hover{background:var(--white);color:var(--ink);}
+
+.stStep.is-lock{opacity:.5;}
+.stStep__lock{margin-left:auto;font-size:9.5px;font-weight:700;color:#fff;background:#9BA3B1;border-radius:999px;padding:2px 8px;}
+.stGate{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.85;color:#7A5A12;background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:12px 15px;margin-top:12px;}
+.stGate svg{color:#B47C10;margin-top:3px;flex-shrink:0;}
+.stMedia{background:var(--bg);border-radius:14px;padding:16px;margin-top:16px;}
+.stMedia__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.stMedia__k em{font-style:normal;font-size:10px;font-weight:700;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.stMedia__n{font-size:11.5px;line-height:1.85;color:var(--muted);margin-bottom:13px;}
+.stMedia__add{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--ai);background:var(--white);border:1.5px solid var(--ai);border-radius:999px;padding:9px 18px;cursor:pointer;transition:all .2s;}
+.stMedia__add:hover{background:var(--ai);color:#fff;}
+.stMedia__l{display:grid;gap:9px;margin-top:13px;}
+.stMedia__i{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+.stMedia__i img{width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;}
+.stMedia__i > div{flex:1;min-width:0;}
+.stMedia__i p{font-size:11.5px;font-weight:700;margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stMedia__i input{width:100%;background:var(--bg);border:1px solid transparent;border-radius:8px;padding:7px 10px;font:inherit;font-size:11.5px;}
+.stMedia__i > button{color:#B9C0CB;font-size:16px;padding:4px 8px;border-radius:6px;flex-shrink:0;}
+.stMedia__i > button:hover{color:var(--sig);background:#FDECEA;}
+.stPack{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.stPack__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:11px;}
+.stPack__k em{font-style:normal;font-size:10px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 10px;}
+.stPack__l{display:grid;gap:6px;margin-bottom:13px;}
+.stPack__l li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
+.stPack__l svg{color:#0E9F73;flex-shrink:0;}
+.stPack .stCheck{align-items:flex-start;margin-bottom:0;}
+.stPack .stCheck b{display:block;font-size:12.5px;}
+.stPack .stCheck em{font-style:normal;font-size:11px;color:var(--muted);}
 `;
