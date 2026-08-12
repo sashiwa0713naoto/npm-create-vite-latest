@@ -494,6 +494,8 @@ const CSS_ACCOUNTS = `
 .acDiag__m{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;flex-shrink:0;}
 .acDiag__l li.is-ok .acDiag__m{color:#0E9F73;background:#E6F7F0;}
 .acDiag__l li.is-ng .acDiag__m{color:var(--sig);background:#FDECEA;}
+.acDiag__l li.is-opt{opacity:.72;}
+.acDiag__l li.is-opt .acDiag__m{color:var(--muted);background:var(--line);}
 .acDiag__l li em{font-style:normal;font-size:11.5px;color:var(--muted);flex:1;min-width:160px;}
 .acDiag__n{font-size:11.5px;color:var(--muted);margin-top:12px;}
 .acDiag__n b{color:var(--ink);}
@@ -501,6 +503,8 @@ const CSS_ACCOUNTS = `
 .acDiag__w > p:first-child{font-size:11.5px;font-weight:700;color:var(--sig);margin-bottom:7px;}
 .acDiag__job{font-size:11.5px;line-height:1.8;color:#8C2A22;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px;}
 .acDiag__job em{font-style:normal;font-size:10px;font-weight:700;background:var(--sig);color:#fff;border-radius:999px;padding:2px 8px;}
+.acDiag__job.is-hold{color:#7A5A12;}
+.acDiag__job.is-hold em{background:#B47C10;}
 .acDiag__job span{width:100%;font-family:var(--mono);font-size:10.5px;opacity:.85;}
 `;
 
@@ -630,6 +634,34 @@ function SettingsView({ pushLog }) {
     }
   };
 
+  const runRetry = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await fetch(`${u}?action=retry`);
+      const d = await r.json();
+      if (d && typeof d.retried === "number") {
+        if (d.diag) setDiag(d.diag);
+        setResult({
+          ok: true,
+          msg:
+            d.retried > 0
+              ? `${d.retried} 件を再実行しました。数十秒後にメールが届きます。`
+              : "再実行が必要な依頼はありませんでした。",
+        });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] RETRY: ${d.retried} jobs`);
+      } else {
+        setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、デプロイを新バージョンで更新してください。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "実行できませんでした。デプロイ設定をご確認ください。" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const disconnect = () => {
     save({ gasUrl: "", useGas: false });
     setGasUrl("");
@@ -690,6 +722,9 @@ function SettingsView({ pushLog }) {
           <button className="acAdd" onClick={runNow} disabled={running}>
             {running ? "処理中..." : "今すぐ処理する"}
           </button>
+          <button className="acGhost" onClick={runRetry} disabled={running}>
+            失敗した依頼を再実行
+          </button>
           <span>生成されない・メールが来ないときは、まずここを押してください。</span>
         </div>
 
@@ -701,16 +736,22 @@ function SettingsView({ pushLog }) {
             </p>
             <ul className="acDiag__l">
               {[
-                ["制作キー（Dify）", diag["キー"] && diag["キー"]["制作"], "setup を実行して Creative_PR_AI のキーを登録してください"],
-                ["検査キー（Dify）", diag["キー"] && diag["キー"]["検査"], "任意です。無くても文章は作られます"],
-                ["画像キー（OpenAI）", diag["キー"] && diag["キー"]["画像"], "任意です。画像を使うなら setup で登録してください"],
-                ["自動実行トリガー", diag["トリガー"] && diag["トリガー"].length > 0, "setup を実行するとトリガーが登録されます"],
-                ["シートの準備", diag["シート"] && diag["シート"]["ジョブ"], "setup を実行するとシートが作られます"],
-              ].map(([label, ok2, hint]) => (
-                <li key={label} className={ok2 ? "is-ok" : "is-ng"}>
-                  <span className="acDiag__m">{ok2 ? "OK" : "要対応"}</span>
-                  <b>{label}</b>
-                  {!ok2 && <em>{hint}</em>}
+                {
+                  label: "制作キー（Dify）",
+                  ok: diag["キー"] && diag["キー"]["制作"],
+                  need: true,
+                  hint: 'Apps Scriptの冒頭 KEY_CREATIVE = "" に、Creative_PR_AI のAPIキー（app-…）を貼って保存してください',
+                },
+                { label: "検査キー（Dify）", ok: diag["キー"] && diag["キー"]["検査"], need: false, hint: "入れると品質・法令の二重検査が働きます" },
+                { label: "画像キー（OpenAI）", ok: diag["キー"] && diag["キー"]["画像"], need: false, hint: "画像を作る場合のみ必要です" },
+                { label: "動画キー（JSON2Video）", ok: diag["キー"] && diag["キー"]["動画"], need: false, hint: "動画を作る場合のみ必要です" },
+                { label: "自動実行トリガー", ok: diag["トリガー"] && diag["トリガー"].length > 0, need: true, hint: "setup を実行すると登録されます" },
+                { label: "シートの準備", ok: diag["シート"] && diag["シート"]["ジョブ"], need: true, hint: "setup を実行すると作られます" },
+              ].map((it) => (
+                <li key={it.label} className={it.ok ? "is-ok" : it.need ? "is-ng" : "is-opt"}>
+                  <span className="acDiag__m">{it.ok ? "OK" : it.need ? "要対応" : "任意"}</span>
+                  <b>{it.label}</b>
+                  {!it.ok && <em>{it.hint}</em>}
                 </li>
               ))}
             </ul>
@@ -721,7 +762,7 @@ function SettingsView({ pushLog }) {
               <div className="acDiag__w">
                 <p>未処理・エラーの案件</p>
                 {diag["未処理"].map((w) => (
-                  <p key={w.id} className="acDiag__job">
+                  <p key={w.id} className={`acDiag__job ${w["状態"] === "保留" ? "is-hold" : ""}`}>
                     <em>{w["状態"]}</em>
                     {w.id}
                     <span>{w["備考"]}</span>
