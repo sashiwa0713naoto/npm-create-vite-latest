@@ -1815,6 +1815,10 @@ function Studio({ pushLog }) {
   const [imgStyle, setImgStyle] = useState("写真風");
   const [ideas, setIdeas] = useState([]);
   const [seed, setSeed] = useState(1);
+  const [deliverBest, setDeliverBest] = useState(true);
+  const [notePaid, setNotePaid] = useState(true);
+  const [noteToX, setNoteToX] = useState(true);
+  const [watch, setWatch] = useState(null);
   const [refAcct, setRefAcct] = useState("");
   const [samples, setSamples] = useState(["", ""]);
   const [refPoints, setRefPoints] = useState(["文体・語り口", "テンポ・改行"]);
@@ -1905,6 +1909,14 @@ function Studio({ pushLog }) {
       L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
       L.push(`【テーマ】${theme}`);
       if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
+      if (deliverBest && variants !== "1") L.push(`【納品形式】ベスト1案（全案を作ったうえで、最も反応が取れる1案を選んで納品）`);
+      if (pfId === "note" && notePaid) {
+        L.push(
+          `【note形式】有料記事／【無料部分】冒頭の導入と、結論の入口まで。読む価値が伝わり切る手前で止める` +
+            `／【有料部分】具体的な手順、数値、判断基準、事例／【区切り】有料部分の直前の行に「ここから有料」とだけ書くこと`
+        );
+      }
+      if (pfId === "note" && noteToX) L.push(`【連携投稿】note→X（記事への誘導投稿も作る）`);
       L.push(
         `【出力形式】そのまま投稿できる本文だけを出力すること。講評・解説・前置きは書かない。` +
           `JSONで包まない。複数案は【案1】【案2】で区切る。` +
@@ -1921,6 +1933,38 @@ function Studio({ pushLog }) {
     if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
     return L.join("／");
   };
+
+  /** 依頼したあと、完成するまで状態を追いかけます */
+  const watchJob = useCallback(
+    (jobId, url) => {
+      setWatch({ id: jobId, status: "受付", url: "", tries: 0 });
+      let tries = 0;
+      const timer = setInterval(async () => {
+        tries++;
+        if (tries > 40) {
+          clearInterval(timer);
+          setWatch((w) => (w && w.id === jobId ? { ...w, status: "時間切れ" } : w));
+          return;
+        }
+        try {
+          const r = await fetch(`${url}?action=jobs`);
+          const d = await r.json();
+          const hit = (d.jobs || []).find((j) => j.job_id === jobId);
+          if (!hit) return;
+          setWatch({ id: jobId, status: hit["状態"], url: hit["成果物URL"] || "", tries: tries });
+          if (hit["状態"] === "完了" || hit["状態"] === "エラー") {
+            clearInterval(timer);
+            if (typeof pushLog === "function") {
+              pushLog(`[${new Date().toLocaleTimeString()}] JOB ${hit["状態"] === "完了" ? "DELIVERED" : "FAILED"}: ${jobId}`);
+            }
+          }
+        } catch (e) {
+          /* 一時的な失敗は無視して、次の巡回に任せます */
+        }
+      }, 8000);
+    },
+    [pushLog]
+  );
 
   const send = async (job, label) => {
     if (sending) return;
@@ -1943,6 +1987,7 @@ function Studio({ pushLog }) {
     };
     let ok = true;
     let detail = "";
+    let newJobId = "";
     if (settings.liveSubmit !== false) {
       try {
         const r = await fetch(endpoint.url, {
@@ -1958,6 +2003,8 @@ function Studio({ pushLog }) {
             if (d && d.ok === false) {
               ok = false;
               detail = String(d.error || "").slice(0, 200);
+            } else if (d && d.job_id) {
+              newJobId = d.job_id;
             }
           } catch (e2) {
             /* 応答が読めなくても、送信自体は届いているとみなします */
@@ -1989,6 +2036,10 @@ function Studio({ pushLog }) {
           : "依頼を受け付けました。5分以内に処理が始まり、完成するとメールとGoogle Driveに届きます。"
         : "送信できませんでした。" + (detail ? "（" + detail + "）" : "接続設定で状態を確認してください。"),
     });
+    if (ok && newJobId && endpoint.isGas && job !== "POST") {
+      watchJob(newJobId, endpoint.url);
+    }
+
     if (job === "CONTENT") { setTheme(""); setPoints(""); }
     if (job === "IMAGE") setImgDesc("");
     if (job === "POST") { setTheme(""); setSchedule({ at: "", repeat: "なし" }); }
@@ -2432,7 +2483,45 @@ function Studio({ pushLog }) {
                     <span className="stQ__n">{QA_LEVELS.find((q) => q.id === qa).note}</span>
                   </div>
                 </div>
+
+                {variants !== "1" && (
+                  <div className="stQ__row">
+                    <span className="stQ__l">納品のしかた</span>
+                    <div className="stSeg">
+                      <button className={deliverBest ? "is-on" : ""} onClick={() => setDeliverBest(true)}>AIが選んだ1案</button>
+                      <button className={!deliverBest ? "is-on" : ""} onClick={() => setDeliverBest(false)}>{variants}案すべて</button>
+                    </div>
+                    <span className="stQ__n">
+                      {deliverBest
+                        ? `${variants}案つくったうえで、最も反応が取れる1案をAIが選んで先頭に置きます。残りも参考として付きます。`
+                        : "すべての案を並べて納品します。自分で選びたいときに。"}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {pfId === "note" && (
+                <div className="stNote">
+                  <p className="stNote__k">
+                    note の書き方
+                    <em>任意</em>
+                  </p>
+                  <label className="stCheck">
+                    <input type="checkbox" checked={notePaid} onChange={(e) => setNotePaid(e.target.checked)} />
+                    <span>
+                      <b>有料記事の構成にする</b>
+                      <em>導入と結論の入口までを無料、具体的な手順・数値・事例を有料部分に。区切り位置も指定されます</em>
+                    </span>
+                  </label>
+                  <label className="stCheck">
+                    <input type="checkbox" checked={noteToX} onChange={(e) => setNoteToX(e.target.checked)} />
+                    <span>
+                      <b>X への誘導投稿もつくる</b>
+                      <em>記事公開後にXへ流すための告知文を3案。140字以内・「詳細はnoteへ」つき</em>
+                    </span>
+                  </label>
+                </div>
+              )}
 
               <div className="stFoot">
                 <p className="stFoot__c">
@@ -2490,6 +2579,43 @@ function Studio({ pushLog }) {
           )}
 
           {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
+
+          {watch && (
+            <div className={`stWatch is-${watch.status}`}>
+              <div className="stWatch__bar">
+                {["受付", "制作中", "完了"].map((st) => {
+                  const order = { 受付: 0, 保留: 0, 制作中: 1, 完了: 2, エラー: 1, 時間切れ: 1 };
+                  const cur = order[watch.status] !== undefined ? order[watch.status] : 0;
+                  const idx = { 受付: 0, 制作中: 1, 完了: 2 }[st];
+                  return (
+                    <span key={st} className={`stWatch__s ${idx <= cur ? "is-on" : ""} ${idx === cur ? "is-now" : ""}`}>
+                      <em />
+                      {st}
+                    </span>
+                  );
+                })}
+              </div>
+              <p className="stWatch__t">
+                {watch.status === "完了" ? (
+                  <>
+                    納品しました。
+                    {watch.url && (
+                      <a href={watch.url} target="_blank" rel="noopener noreferrer">
+                        成果物を開く →
+                      </a>
+                    )}
+                  </>
+                ) : watch.status === "エラー" ? (
+                  "処理に失敗しました。接続設定の「バックエンドの状態を確認」で原因をご覧ください。"
+                ) : watch.status === "時間切れ" ? (
+                  "時間内に完了しませんでした。成果物ライブラリで状態をご確認ください。"
+                ) : (
+                  "AIが制作しています。このまま少しお待ちください（1〜3分ほど）。"
+                )}
+                <button className="stWatch__x" onClick={() => setWatch(null)} aria-label="閉じる">×</button>
+              </p>
+            </div>
+          )}
         </section>
 
         {/* ---------- 右カラム ---------- */}
@@ -4203,4 +4329,31 @@ const CSS_DASHBOARD = `
 .stAn__g dd{font-size:12.5px;font-weight:700;}
 @media (max-width:760px){.stAn__g{grid-template-columns:repeat(2,1fr);}}
 .stEmptyBox{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:18px;text-align:center;margin-bottom:18px;}
+
+.stQ__row{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);}
+.stNote{background:#E9F7F1;border:1px solid #B9E4D2;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stNote__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:12px;color:#0B7A58;}
+.stNote__k em{font-style:normal;font-size:10px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.stNote .stCheck{align-items:flex-start;margin-bottom:12px;}
+.stNote .stCheck:last-child{margin-bottom:0;}
+.stNote .stCheck b{display:block;font-size:13px;font-weight:700;}
+.stNote .stCheck em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.75;}
+.stNote input{margin-top:3px;accent-color:#0E9F73;}
+
+.stWatch{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:16px;}
+.stWatch.is-完了{background:#E6F7F0;border-color:#B9E4D2;}
+.stWatch.is-エラー,.stWatch.is-時間切れ{background:#FDECEA;border-color:#F5C4BF;}
+.stWatch__bar{display:flex;align-items:center;gap:0;margin-bottom:12px;}
+.stWatch__s{flex:1;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);position:relative;}
+.stWatch__s em{width:11px;height:11px;border-radius:50%;background:var(--line);flex-shrink:0;transition:all .3s;}
+.stWatch__s.is-on{color:var(--ink);font-weight:700;}
+.stWatch__s.is-on em{background:var(--ai);}
+.stWatch__s.is-now em{animation:stPulse 1.4s ease-in-out infinite;box-shadow:0 0 0 4px rgba(124,92,214,.2);}
+@keyframes stPulse{50%{opacity:.4;}}
+.stWatch__s:not(:last-child)::after{content:"";flex:1;height:2px;background:var(--line);margin-right:8px;}
+.stWatch__s.is-on:not(:last-child)::after{background:var(--ai);}
+.stWatch__t{font-size:12.5px;line-height:1.85;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.stWatch__t a{font-weight:700;color:#0E9F73;text-decoration:underline;}
+.stWatch__x{margin-left:auto;color:#B9C0CB;font-size:16px;padding:2px 8px;border-radius:6px;}
+.stWatch__x:hover{background:var(--white);color:var(--ink);}
 `;
