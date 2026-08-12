@@ -1496,6 +1496,167 @@ const QA_LEVELS = [
   { id: "strict", label: "厳格検査", note: "薬機法・景表法・著作権まで二重確認（納品用）" },
 ];
 
+
+
+/* ============ お手本から、制作条件を自動で決める ============ */
+
+const EMOJI_RE2 = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}]/gu;
+
+/**
+ * お手本の文章から、トーン・構成・フック・一人称・絵文字・CTAを推定します。
+ * 通信は発生しません。ブラウザ内で判定します。
+ */
+function inferSettings(texts) {
+  const arr = (texts || []).filter((t) => String(t).trim().length > 5);
+  if (arr.length === 0) return null;
+  const all = arr.join("\n");
+  const firsts = arr.map((t) => (t.split("\n").find((l) => l.trim()) || "").trim());
+  const lasts = arr.map((t) => {
+    const ls = t.split("\n").filter((l) => l.trim());
+    return ls.length ? ls[ls.length - 1] : "";
+  });
+  const n = arr.length;
+  const cnt = (re) => (all.match(re) || []).length;
+
+  /* 一人称 */
+  const persons = [["私", /私(は|が|も|の|たち)/g], ["僕", /僕(は|が|も|の|ら)/g], ["弊社", /弊社/g], ["当社", /当社/g], ["うち", /うち(は|が|も|の)/g]];
+  let person = "使わない";
+  let pMax = 0;
+  persons.forEach(([label, re]) => {
+    const c = cnt(re);
+    if (c > pMax) { pMax = c; person = label === "うち" ? "私" : label; }
+  });
+
+  /* 絵文字 */
+  const emo = (all.match(EMOJI_RE2) || []).length / n;
+  const emoji = emo < 0.3 ? "使わない" : emo < 1.2 ? "控えめ" : "適度に";
+
+  /* トーン */
+  const desu = cnt(/(です|ます)[。、\n！？]/g);
+  const dearu = cnt(/(である|だ)[。\n]/g);
+  const casual = cnt(/(だよ|だね|かな|よね|しちゃ|めっちゃ|ヤバ|ね[！!]|いこう|しよう|くれてありがとう|〜|ー[！!])/g);
+  const soft = cnt(/(一緒に|大丈夫|わかります|寄り添|安心)/g);
+  const emoRate = (all.match(EMOJI_RE2) || []).length / n;
+  let tone = "丁寧・ですます";
+  // 絵文字が多い、または砕けた語尾が目立つ場合はフランクとみなします
+  if (casual >= n || emoRate >= 1.5) tone = "フランク";
+  else if (soft >= n) tone = "やわらかい・共感";
+  else if (dearu > desu) tone = "断定的・力強い";
+  else if (cnt(/[ぁ-ん]/g) / Math.max(1, all.length) < 0.32) tone = "専門的・硬め";
+
+  /* フックの型 */
+  const fj = firsts.join(" ");
+  let hook = "疑問形で問う";
+  if (/[?？]/.test(fj)) hook = "疑問形で問う";
+  else if (/\d/.test(fj)) hook = "数字を出す";
+  else if (/^(まだ|いや|違|そうじゃ|やめ|ダメ|間違)/.test(firsts[0] || "")) hook = "否定から入る";
+  else if (/(私|僕|うち|自分)/.test(fj)) hook = "実体験を語る";
+  else if (/(実は|意外|知らない|常識)/.test(fj)) hook = "常識を覆す";
+  else if (/(損|逃|もったいない|失|risk)/i.test(fj)) hook = "損失を示す";
+
+  /* 構成 */
+  const bullets = cnt(/^[\s]*[・●▪◦\-*]/gm);
+  let struct = "ストーリー型";
+  if (bullets >= n * 2) struct = "リスト型（○選）";
+  else if (cnt(/(一方|に対して|より|比べ)/g) >= n) struct = "比較型";
+  else if (cnt(/(まず|次に|最後に|手順|ステップ)/g) >= n) struct = "実演・手順型";
+  else if (cnt(/[?？]/g) >= n * 2) struct = "Q&A型";
+  else if (cnt(/(結論|つまり|要は)/g) >= n) struct = "PREP法（結論→理由→例→結論）";
+
+  /* CTA */
+  const lj = lasts.join(" ");
+  let cta = "CTAなし";
+  if (/DM/i.test(lj)) cta = "DMで相談";
+  else if (/(プロフィール|プロフ|固定)/.test(lj)) cta = "プロフィールのリンクへ";
+  else if (/保存/.test(lj)) cta = "保存を促す";
+  else if (/(コメント|教えて|どう思)/.test(lj)) cta = "コメントを促す";
+  else if (/(https?:\/\/|詳細は|続きは)/.test(lj)) cta = "LPへ誘導";
+
+  /* 文字数 */
+  const len = Math.round(arr.reduce((a, t) => a + t.replace(/\s/g, "").length, 0) / n);
+
+  return {
+    tone: tone,
+    struct: struct,
+    hook: hook,
+    person: person,
+    emoji: emoji,
+    cta: cta,
+    len: String(len),
+    from: n,
+  };
+}
+
+/* ============ 媒体ごとの「制作パーツ」定義 ============ */
+const PART_DEFS = {
+  x: [
+    { id: "post", label: "投稿本文", hint: "1投稿目。ここで止められるかが勝負", type: "text" },
+    { id: "thread", label: "ツリー（続きの投稿）", hint: "2投稿目以降の展開のしかた", type: "text" },
+    { id: "image", label: "添付画像", hint: "投稿に添える画像の雰囲気", type: "media" },
+  ],
+  note: [
+    { id: "title", label: "タイトル", hint: "クリックされる見出しの付け方", type: "text" },
+    { id: "thumb", label: "サムネイル画像", hint: "見出し画像の雰囲気・文字の置き方", type: "media" },
+    { id: "free", label: "無料枠", hint: "冒頭から有料ラインの手前まで", type: "text" },
+    { id: "paid", label: "有料枠", hint: "有料部分の書き方・情報の濃さ", type: "text" },
+    { id: "inline", label: "差し込み画像", hint: "記事中に入れる図や写真", type: "media" },
+  ],
+  instagram: [
+    { id: "caption", label: "キャプション本文", hint: "投稿文の書き方", type: "text" },
+    { id: "cover", label: "1枚目（表紙）", hint: "表紙のデザインと文字の置き方", type: "media" },
+    { id: "pages", label: "2枚目以降", hint: "情報の並べ方", type: "media" },
+  ],
+  threads: [
+    { id: "post", label: "投稿本文", hint: "会話が始まる書き方", type: "text" },
+    { id: "thread", label: "連投", hint: "分解のしかた", type: "text" },
+  ],
+  tiktok: [
+    { id: "script", label: "台本・テロップ", hint: "冒頭2秒の掴み方", type: "text" },
+    { id: "caption", label: "キャプション", hint: "投稿文の書き方", type: "text" },
+    { id: "visual", label: "映像の雰囲気", hint: "画面構成・テロップの見せ方", type: "media" },
+  ],
+  yt_shorts: [
+    { id: "script", label: "台本・テロップ", hint: "ループする構成", type: "text" },
+    { id: "visual", label: "映像の雰囲気", hint: "画面構成", type: "media" },
+  ],
+  youtube: [
+    { id: "title", label: "タイトル", hint: "クリック率を左右する見出し", type: "text" },
+    { id: "thumb", label: "サムネイル画像", hint: "文字数・配色・構図", type: "media" },
+    { id: "desc", label: "説明文", hint: "概要欄。導線とタイムスタンプ", type: "text" },
+    { id: "video", label: "動画", hint: "構成・テンポ・テロップの見せ方", type: "media" },
+  ],
+  other: [{ id: "body", label: "本文", hint: "全体の書き方", type: "text" }],
+};
+
+function emptyPartRef() {
+  return { texts: [""], images: [], video: "", videoNote: "" };
+}
+
+function partFilled(r) {
+  if (!r) return false;
+  return (r.texts || []).some((t) => String(t).trim().length > 5) || (r.images || []).length > 0 || !!String(r.video || "").trim();
+}
+
+/** 画像を縮小してから読み込みます（送信量を抑えるため） */
+function readImageSmall(file, cb) {
+  const r = new FileReader();
+  r.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 640;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => cb(String(r.result));
+    img.src = String(r.result);
+  };
+  r.readAsDataURL(file);
+}
+
 /* ===================== お手本の文体を測る（内蔵分析） ==================== */
 
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}]/gu;
@@ -1827,6 +1988,12 @@ function Studio({ pushLog }) {
   const [notePaid, setNotePaid] = useState(true);
   const [noteToX, setNoteToX] = useState(true);
   const [watch, setWatch] = useState(null);
+  const [refs, setRefs] = useState({});
+  const [refPf, setRefPf] = useState("x");
+  const [openPart, setOpenPart] = useState("");
+  const [autoSet, setAutoSet] = useState(null);
+  const [tweak, setTweak] = useState(false);
+  const [moreCtx, setMoreCtx] = useState(false);
   const [refAcct, setRefAcct] = useState("");
   const [samples, setSamples] = useState(["", ""]);
   const [refPoints, setRefPoints] = useState(["文体・語り口", "テンポ・改行"]);
@@ -1901,19 +2068,31 @@ function Studio({ pushLog }) {
     if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
 
     if (job === "CONTENT") {
-      const okSamples = samples.filter((x) => x.trim().length > 10);
-      if (refAcct || okSamples.length) {
+      // お手本（パーツごと）
+      const acct2 = (refs[pfId] && refs[pfId].account) || "";
+      const parts = PART_DEFS[pfId] || PART_DEFS.other;
+      const used = parts.filter((pt) => partFilled(getPartRef(pfId, pt.id)));
+      if (acct2 || used.length) {
         L.push(
-          `【お手本】${refAcct || "（貼り付けた投稿）"}／【真似る点】${refPoints.join("・") || "文体"}` +
-            `／【お手本の扱い】文体・構成・リズムの型のみを抽出して適用すること。表現・文章・固有名詞をそのまま流用しないこと。`
+          `【お手本】${acct2 || "（貼り付けた内容）"}／【お手本の扱い】文体・構成・リズム・見せ方の型のみを抽出して適用すること。` +
+            `表現・文章・固有名詞・画像をそのまま流用しないこと。`
         );
-        if (style) L.push(`【実測した文体】${styleToBrief(style)}`);
-        if (okSamples.length) {
-          L.push(
-            `【お手本の投稿（分析用・${okSamples.length}本）】` +
-              okSamples.map((t, i) => `〈${i + 1}〉${t.replace(/\n/g, " ⏎ ")}`).join(" ｜ ").slice(0, 2600)
-          );
-        }
+        used.forEach((pt) => {
+          const r = getPartRef(pfId, pt.id);
+          const texts = r.texts.filter((t) => t.trim().length > 5);
+          const st2 = analyzeStyle(texts);
+          const bits = [];
+          if (st2) bits.push(`実測：${styleToBrief(st2)}`);
+          if (texts.length) {
+            bits.push(
+              `見本${texts.length}本：` +
+                texts.map((t, i) => `〈${i + 1}〉${t.replace(/\n/g, " ⏎ ")}`).join(" ｜ ").slice(0, 1400)
+            );
+          }
+          if (r.images.length) bits.push(`参考画像${r.images.length}枚（${r.images.map((im) => im.note || "指定なし").join("／")}）`);
+          if (r.video) bits.push(`参考動画：${r.video}（${r.videoNote || "指定なし"}）`);
+          L.push(`【お手本・${pt.label}】${bits.join("／")}`);
+        });
       }
       L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
       L.push(`【テーマ】${theme}`);
@@ -1951,6 +2130,85 @@ function Studio({ pushLog }) {
     if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
     return L.join("／");
   };
+
+
+  /* ── お手本（媒体×パーツ）の操作 ── */
+  const refTargets = useMemo(() => {
+    if (plan && plan.platforms && plan.platforms.length) return plan.platforms.map((p) => p.id);
+    if (wantPlatforms.length) return wantPlatforms;
+    return ["x"];
+  }, [plan, wantPlatforms]);
+
+  useEffect(() => {
+    if (refTargets.length && refTargets.indexOf(refPf) < 0) setRefPf(refTargets[0]);
+  }, [refTargets, refPf]);
+
+  const getPartRef = useCallback(
+    (pf2, partId) => (refs[pf2] && refs[pf2][partId]) || emptyPartRef(),
+    [refs]
+  );
+
+  const updatePart = useCallback((pf2, partId, fn) => {
+    setRefs((prev) => {
+      const cur = prev[pf2] || {};
+      const part = cur[partId] || emptyPartRef();
+      return { ...prev, [pf2]: { ...cur, [partId]: fn({ ...part }) } };
+    });
+  }, []);
+
+  const setRefField = useCallback((pf2, key, val) => {
+    setRefs((prev) => ({ ...prev, [pf2]: { ...(prev[pf2] || {}), [key]: val } }));
+  }, []);
+
+  const setPartText = useCallback((pf2, partId, i, val) => {
+    updatePart(pf2, partId, (p) => {
+      const t = [...p.texts];
+      t[i] = val;
+      return { ...p, texts: t };
+    });
+  }, [updatePart]);
+
+  const addPartText = useCallback((pf2, partId) => {
+    updatePart(pf2, partId, (p) => ({ ...p, texts: [...p.texts, ""] }));
+  }, [updatePart]);
+
+  const removePartText = useCallback((pf2, partId, i) => {
+    updatePart(pf2, partId, (p) => ({ ...p, texts: p.texts.filter((_, k) => k !== i) }));
+  }, [updatePart]);
+
+  const setPartField = useCallback((pf2, partId, key, val) => {
+    updatePart(pf2, partId, (p) => ({ ...p, [key]: val }));
+  }, [updatePart]);
+
+  const attachImages = useCallback((pf2, partId, files, done) => {
+    Array.from(files || []).slice(0, 3).forEach((f) => {
+      if (f.size > 8 * 1024 * 1024) {
+        setFlash({ ok: false, msg: `${f.name} は大きすぎます（8MBまで）。` });
+        return;
+      }
+      readImageSmall(f, (data) => {
+        updatePart(pf2, partId, (p) => ({ ...p, images: [...p.images, { name: f.name, data: data, note: "" }].slice(0, 3) }));
+      });
+    });
+    if (done) done();
+  }, [updatePart]);
+
+  const setImageNote = useCallback((pf2, partId, i, val) => {
+    updatePart(pf2, partId, (p) => ({ ...p, images: p.images.map((x, k) => (k === i ? { ...x, note: val } : x)) }));
+  }, [updatePart]);
+
+  const removeImage = useCallback((pf2, partId, i) => {
+    updatePart(pf2, partId, (p) => ({ ...p, images: p.images.filter((_, k) => k !== i) }));
+  }, [updatePart]);
+
+  const platformRefStatus = useCallback(
+    (pf2) => {
+      const parts = PART_DEFS[pf2] || PART_DEFS.other;
+      const done = parts.filter((pt) => partFilled(getPartRef(pf2, pt.id))).length;
+      return { done: done, total: parts.length };
+    },
+    [getPartRef]
+  );
 
   /** 依頼したあと、完成するまで状態を追いかけます */
   const watchJob = useCallback(
@@ -1998,10 +2256,21 @@ function Studio({ pushLog }) {
 
     setSending(true); setFlash(null);
     const t0 = Date.now();
+    const refImagesPayload = [];
+    (PART_DEFS[pfId] || PART_DEFS.other).forEach((pt) => {
+      const r = getPartRef(pfId, pt.id);
+      (r.images || []).slice(0, 2).forEach((im) => {
+        if (refImagesPayload.length < 3) {
+          refImagesPayload.push({ part: pt.label, note: im.note || "", data: im.data });
+        }
+      });
+    });
+
     const payload = {
       client_name: acct ? (acct.ownerType === "own" ? `${OWNER.name}／${acct.name}` : `${acct.owner}／${acct.name}`) : OWNER.name,
       client_email: acct && acct.email ? acct.email : OWNER.email,
       message: buildMessage(job),
+      ref_images: job === "CONTENT" ? refImagesPayload : [],
     };
     let ok = true;
     let detail = "";
@@ -2200,6 +2469,11 @@ function Studio({ pushLog }) {
                 </div>
               </Field>
 
+              <button className="stMore" onClick={() => setMoreCtx((v) => !v)}>
+                {moreCtx ? "詳しい情報を閉じる" : "＋ 詳しく書く（任意・精度が上がります）"}
+              </button>
+
+              <div style={{ display: moreCtx ? "block" : "none" }}>
               <div className="stRow">
                 <Field label="商品・サービス"><input type="text" value={ctx.service} onChange={(e) => setCtx({ ...ctx, service: e.target.value })} placeholder="AI社員構築代行" /></Field>
                 <Field label="価格帯"><input type="text" value={ctx.price} onChange={(e) => setCtx({ ...ctx, price: e.target.value })} placeholder="30万円〜" /></Field>
@@ -2218,6 +2492,8 @@ function Studio({ pushLog }) {
               <Field label="依頼文をそのまま貼り付け" hint="任意。メールやチャットの原文をそのまま入れて構いません">
                 <textarea rows={3} value={ctx.raw} onChange={(e) => setCtx({ ...ctx, raw: e.target.value })} placeholder="お客様からいただいたご要望をそのまま貼り付けてください。" />
               </Field>
+
+              </div>
 
               <button className="stBig" onClick={runPlan}>
                 <Sic name="spark" size={17} />
@@ -2309,177 +2585,222 @@ function Studio({ pushLog }) {
             </>
           )}
 
-          {/* ============== STEP 2：お手本分析 ============== */}
+          {/* ============== STEP 2：お手本分析（媒体・パーツ別） ============== */}
           {step === 2 && (
             <>
               <div className="stHint">
                 <Sic name="spark" size={16} />
                 <p>
-                  お手本にしたい投稿を貼ると、<b>文字数・改行のリズム・一文の長さ・語尾・絵文字の量</b>を実測し、
-                  制作指示に反映します。<b>本数が多いほど再現度が上がります。</b>
+                  制作するパーツごとに、<b>お手本を1つ以上</b>設定してください。文章・画像・動画のいずれでも構いません。
+                  文章は文字数や改行のリズムを実測し、画像は内容をAIが読み取って制作条件に反映します。
                 </p>
               </div>
 
-              <Field label="お手本にするアカウント" hint="任意。名前だけでは推測になるため、下の貼り付けが本命です">
-                <input type="text" value={refAcct} onChange={(e) => setRefAcct(e.target.value)} placeholder="@example ／ https://note.com/example" />
-              </Field>
+              {/* 媒体タブ */}
+              <div className="stRefTabs">
+                {refTargets.map((id) => {
+                  const P = PLATFORMS.find((x) => x.id === id);
+                  const st = platformRefStatus(id);
+                  return (
+                    <button
+                      key={id}
+                      className={`stRefTab ${refPf === id ? "is-on" : ""} ${st.done === st.total ? "is-ok" : ""}`}
+                      style={{ "--t": P.tone, "--s": P.soft }}
+                      onClick={() => setRefPf(id)}
+                    >
+                      <span className="stRefTab__d" />
+                      <b>{P.label}</b>
+                      <em>
+                        {st.done}/{st.total}
+                      </em>
+                    </button>
+                  );
+                })}
+              </div>
 
-              <Field label="どこを真似るか">
-                <Chips
-                  options={["文体・語り口", "構成の組み立て", "テンポ・改行", "切り口の選び方", "見出しの付け方"]}
-                  value={refPoints}
-                  onChange={setRefPoints}
-                  multi
+              <Field label="お手本にするアカウント" hint="任意。名前だけでは推測になるため、下の設定が本命です">
+                <input
+                  type="text"
+                  value={(refs[refPf] && refs[refPf].account) || ""}
+                  onChange={(e) => setRefField(refPf, "account", e.target.value)}
+                  placeholder="@example ／ https://note.com/example"
                 />
               </Field>
 
-              <div className="stSam">
-                <p className="stSam__k">
-                  お手本の投稿を貼り付け
-                  <em className={samples.filter((x) => x.trim().length > 10).length >= 2 ? "is-ok" : "is-ng"}>
-                    最低2本
-                  </em>
-                </p>
-                {samples.map((v, i) => (
-                  <div className="stSam__i" key={i}>
-                    <span className="stSam__n">{i + 1}</span>
-                    <textarea
-                      rows={3}
-                      value={v}
-                      onChange={(e) => setSamples(samples.map((x, j) => (j === i ? e.target.value : x)))}
-                      placeholder={i === 0 ? "お手本にしたい投稿の本文を、そのまま貼り付けてください。" : "2本目以降を貼るほど精度が上がります。"}
-                    />
-                    {samples.length > 2 && (
-                      <button
-                        className="stSam__x"
-                        aria-label="削除"
-                        onClick={() => setSamples(samples.filter((_, j) => j !== i))}
-                      >
-                        <Sic name="trash" size={14} />
+              {/* パーツごとの設定 */}
+              <div className="stParts">
+                {(PART_DEFS[refPf] || PART_DEFS.other).map((part) => {
+                  const r = getPartRef(refPf, part.id);
+                  const filled = partFilled(r);
+                  const open = openPart === `${refPf}:${part.id}`;
+                  const st = analyzeStyle(r.texts);
+                  return (
+                    <div className={`stPart ${filled ? "is-ok" : ""} ${open ? "is-open" : ""}`} key={part.id}>
+                      <button className="stPart__h" onClick={() => setOpenPart(open ? "" : `${refPf}:${part.id}`)}>
+                        <span className="stPart__m">{filled ? <Sic name="check" size={14} /> : "必"}</span>
+                        <span className="stPart__t">
+                          <b>{part.label}</b>
+                          <em>{part.hint}</em>
+                        </span>
+                        <span className="stPart__c">
+                          {filled
+                            ? `${r.texts.filter((t) => t.trim()).length ? r.texts.filter((t) => t.trim()).length + "本" : ""}${
+                                r.images.length ? " 画像" + r.images.length : ""
+                              }${r.video ? " 動画" : ""}`
+                            : "未設定"}
+                        </span>
+                        <span className={`stPart__a ${open ? "is-up" : ""}`}><Sic name="chev" size={16} /></span>
                       </button>
-                    )}
-                  </div>
-                ))}
-                <button className="stSam__add" onClick={() => setSamples([...samples, ""])}>
-                  ＋ もう1本追加する
-                </button>
-              </div>
 
-              {style ? (
-                <div className="stAn">
-                  <div className="stAn__h">
-                    <p className="stAn__t">読み取った文体</p>
-                    <span className={`stAn__lv lv-${style.level.pct}`}>
-                      精度 {style.level.label}
-                      <em>{style.count}本</em>
-                    </span>
-                  </div>
-                  <div className="stAn__bar">
-                    <span style={{ width: `${style.level.pct}%` }} />
-                  </div>
-                  <p className="stAn__note">{style.level.note}</p>
-                  <dl className="stAn__g">
-                    {[
-                      ["1投稿の文字数", style.avgChars + " 文字"],
-                      ["行数", style.avgLines + " 行（空行 " + style.avgBlank + "）"],
-                      ["一文の長さ", style.avgSentLen + " 文字"],
-                      ["1行目の長さ", style.firstLen + " 文字"],
-                      ["絵文字", style.emojiPer + " 個/投稿"],
-                      ["ハッシュタグ", style.tagsPer + " 個/投稿"],
-                      ["問いかけで終わる", style.questionRate + " %"],
-                      ["数字を含む", style.numberRate + " %"],
-                      ["よく使う語尾", style.enders.length ? "「" + style.enders.join("」「") + "」" : "—"],
-                    ].map(([k, v]) => (
-                      <div key={k}>
-                        <dt>{k}</dt>
-                        <dd>{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              ) : (
-                <p className="stEmptyBox">投稿を貼り付けると、ここに読み取った文体が表示されます。</p>
-              )}
+                      {open && (
+                        <div className="stPart__b">
+                          {part.type !== "media" && (
+                            <>
+                              {r.texts.map((t, i) => (
+                                <div className="stPart__row" key={i}>
+                                  <span className="stPart__n">{i + 1}</span>
+                                  <textarea
+                                    rows={i === 0 ? 4 : 3}
+                                    value={t}
+                                    onChange={(e) => setPartText(refPf, part.id, i, e.target.value)}
+                                    placeholder={
+                                      i === 0
+                                        ? `お手本にしたい${part.label}を、そのまま貼り付けてください。`
+                                        : "2本目以降を貼るほど精度が上がります。"
+                                    }
+                                  />
+                                  {r.texts.length > 1 && (
+                                    <button className="stPart__x" onClick={() => removePartText(refPf, part.id, i)} aria-label="削除">×</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button className="stPart__add" onClick={() => addPartText(refPf, part.id)}>
+                                ＋ もう1本追加する
+                              </button>
+
+                              {st && (
+                                <div className="stPart__stat">
+                                  <span className={`stPart__lv lv-${st.level.pct}`}>{st.level.label}</span>
+                                  {styleToBrief(st)}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          <div className="stPart__media">
+                            <label className="stMedia__add">
+                              <Sic name="image" size={15} />
+                              画像を添付
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                hidden
+                                onChange={(e) => attachImages(refPf, part.id, e.target.files, () => (e.target.value = ""))}
+                              />
+                            </label>
+                            <input
+                              className="stPart__vid"
+                              type="text"
+                              value={r.video}
+                              onChange={(e) => setPartField(refPf, part.id, "video", e.target.value)}
+                              placeholder="参考動画のURL（任意）"
+                            />
+                          </div>
+
+                          {r.images.length > 0 && (
+                            <div className="stMedia__l">
+                              {r.images.map((im, i) => (
+                                <div className="stMedia__i" key={i}>
+                                  <img src={im.data} alt="" />
+                                  <div>
+                                    <p>{im.name}</p>
+                                    <input
+                                      type="text"
+                                      value={im.note}
+                                      onChange={(e) => setImageNote(refPf, part.id, i, e.target.value)}
+                                      placeholder="この画像のどこを参考にするか（例：文字の置き方、色数の少なさ）"
+                                    />
+                                  </div>
+                                  <button onClick={() => removeImage(refPf, part.id, i)} aria-label="削除">×</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {r.video && (
+                            <input
+                              className="stPart__vnote"
+                              type="text"
+                              value={r.videoNote}
+                              onChange={(e) => setPartField(refPf, part.id, "videoNote", e.target.value)}
+                              placeholder="その動画の、どこを参考にするか（例：冒頭2秒のテロップ、カットの速さ）"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
 
               <div className="stWarn">
                 <Sic name="warn" size={17} />
                 <p>
-                  真似るのは文体や構成の <b>型</b> だけです。表現をそのまま写すことはしません。
-                  貼り付けた文章は分析にのみ使われ、成果物に流用されません。
+                  参考にするのは文体や構成の <b>型</b> です。表現や画像をそのまま複製することはしません。
+                  貼り付けた文章と画像は、分析のためだけに使われます。
                 </p>
               </div>
 
               <div className="stFoot">
                 <p className="stFoot__c">
                   <button className="stBack" onClick={() => setStep(1)}>← 運用設計に戻る</button>
-              <div className="stMedia">
-                <p className="stMedia__k">
-                  参考にする画像・動画
-                  <em>任意</em>
+                  <span>進捗</span>
+                  {(() => {
+                    const a = refTargets.map((id) => platformRefStatus(id));
+                    const done = a.reduce((n, x) => n + x.done, 0);
+                    const total = a.reduce((n, x) => n + x.total, 0);
+                    return `${done} / ${total} パーツ設定済み`;
+                  })()}
                 </p>
-                <p className="stMedia__n">
-                  お手本の見た目を参考にしたいときに使います。画像は内容をAIが読み取り、制作条件に反映します。
-                  動画は現在URLの記録のみで、内容の解析はできません。
-                </p>
+                <button
+                  className="stSend"
+                  onClick={() => {
+                    const st = platformRefStatus(refPf);
+                    if (st.done < st.total) {
+                      setFlash({ ok: false, msg: `${(PLATFORMS.find((x) => x.id === refPf) || {}).label} のお手本が未設定のパーツがあります（${st.done}/${st.total}）。` });
+                      setTimeout(() => setFlash(null), 5000);
+                      return;
+                    }
+                    setPfId(refPf);
+                    const P = PLATFORMS.find((x) => x.id === refPf);
+                    if (P) setFmtId(P.formats[0].id);
 
-                <label className="stMedia__add">
-                  <Sic name="image" size={16} />
-                  画像を選ぶ（複数可）
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []).slice(0, 4);
-                      files.forEach((f) => {
-                        if (f.size > 3 * 1024 * 1024) {
-                          setFlash({ ok: false, msg: `${f.name} は3MBを超えています。小さい画像をお選びください。` });
-                          return;
-                        }
-                        const r = new FileReader();
-                        r.onload = () =>
-                          setRefImages((v) => [...v, { name: f.name, data: String(r.result), note: "" }].slice(0, 4));
-                        r.readAsDataURL(f);
-                      });
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-
-                {refImages.length > 0 && (
-                  <div className="stMedia__l">
-                    {refImages.map((im, i) => (
-                      <div className="stMedia__i" key={im.name + i}>
-                        <img src={im.data} alt="" />
-                        <div>
-                          <p>{im.name}</p>
-                          <input
-                            type="text"
-                            value={im.note}
-                            onChange={(e) =>
-                              setRefImages((v) => v.map((x, k) => (k === i ? { ...x, note: e.target.value } : x)))
-                            }
-                            placeholder="この画像のどこを参考にするか（例：文字の配置、色数の少なさ）"
-                          />
-                        </div>
-                        <button onClick={() => setRefImages((v) => v.filter((_, k) => k !== i))} aria-label="削除">×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <Field label="参考にする動画のURL" hint="任意。内容の解析はできないため、下の欄で特徴をご記入ください">
-                  <input type="text" value={refVideo} onChange={(e) => setRefVideo(e.target.value)} placeholder="https://..." />
-                </Field>
-                <Field label="その動画の、どこを参考にするか">
-                  <input type="text" value={refVideoNote} onChange={(e) => setRefVideoNote(e.target.value)} placeholder="冒頭2秒のテロップの出し方、カットの速さ など" />
-                </Field>
-              </div>
-
-                  <span>任意</span>お手本なしでも制作に進めます
-                </p>
-                <button className="stNext" onClick={() => setStep(3)}>制作に進む →</button>
+                    // お手本から制作条件を自動で決めます
+                    const allTexts = (PART_DEFS[refPf] || PART_DEFS.other)
+                      .flatMap((pt) => getPartRef(refPf, pt.id).texts)
+                      .filter((t) => String(t).trim().length > 5);
+                    const inf = inferSettings(allTexts);
+                    if (inf) {
+                      setTone(inf.tone);
+                      setStruct(inf.struct);
+                      setHook(inf.hook);
+                      setPerson(inf.person);
+                      setEmoji(inf.emoji);
+                      setCta(inf.cta);
+                      setLen(inf.len);
+                      setAutoSet(inf);
+                      setTweak(false);
+                      if (typeof pushLog === "function") {
+                        pushLog(`[${new Date().toLocaleTimeString()}] STYLE APPLIED: ${inf.tone} / ${inf.struct} / ${inf.hook}`);
+                      }
+                    }
+                    setStep(3);
+                  }}
+                >
+                  <Sic name="send" size={16} />
+                  この媒体の制作へ進む
+                </button>
               </div>
             </>
           )}
@@ -2532,8 +2853,44 @@ function Studio({ pushLog }) {
                     <textarea rows={4} value={points} onChange={(e) => setPoints(e.target.value)} placeholder={"深夜の問い合わせにも即返信\n担当者の確認は朝1回だけ\n月20時間が浮いた"} />
                   </Field>
 
-                  <div className="stDetail">
-                    <p className="stDetail__k">細かい条件</p>
+                  {autoSet && !tweak && (
+                    <div className="stAuto">
+                      <p className="stAuto__k">
+                        <Sic name="spark" size={15} />
+                        お手本{autoSet.from}本から、制作条件を決めました
+                        <button onClick={() => setTweak(true)}>調整する</button>
+                      </p>
+                      <ul className="stAuto__l">
+                        {[
+                          ["トーン", tone],
+                          ["構成", struct],
+                          ["フック", hook],
+                          ["一人称", person],
+                          ["絵文字", emoji],
+                          ["CTA", cta],
+                          ["文字数", len + " 字"],
+                        ].map(([k, v]) => (
+                          <li key={k}>
+                            <span>{k}</span>
+                            {v}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="stAuto__n">
+                        このまま制作を依頼できます。変えたいところがあれば「調整する」を押してください。
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="stDetail" style={{ display: autoSet && !tweak ? "none" : "block" }}>
+                    <p className="stDetail__k">
+                      細かい条件
+                      {autoSet && (
+                        <button className="stDetail__back" onClick={() => setTweak(false)}>
+                          判定結果に戻す
+                        </button>
+                      )}
+                    </p>
                     <Field label="トーン" ai={plan && !touched.tone}><Chips options={TONES} value={tone} onChange={(v) => { setTone(v); mark("tone"); }} /></Field>
                     <Field label="構成の型" ai={plan && !touched.struct}><Chips options={STRUCTS} value={struct} onChange={(v) => { setStruct(v); mark("struct"); }} /></Field>
                     <Field label="冒頭フックの型" ai={plan && !touched.hook}><Chips options={HOOKS} value={hook} onChange={(v) => { setHook(v); mark("hook"); }} /></Field>
@@ -4538,4 +4895,58 @@ const CSS_DASHBOARD = `
 .stPack .stCheck{align-items:flex-start;margin-bottom:0;}
 .stPack .stCheck b{display:block;font-size:12.5px;}
 .stPack .stCheck em{font-style:normal;font-size:11px;color:var(--muted);}
+
+/* ==== お手本：媒体タブとパーツ ==== */
+.stRefTabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;}
+.stRefTab{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;white-space:nowrap;transition:all .2s;}
+.stRefTab:hover{border-color:var(--t);}
+.stRefTab.is-on{border-color:var(--t);background:var(--s);}
+.stRefTab.is-ok .stRefTab__d{background:#0E9F73;}
+.stRefTab__d{width:8px;height:8px;border-radius:50%;background:var(--t);}
+.stRefTab b{font-size:13px;font-weight:700;}
+.stRefTab em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.stRefTab.is-ok em{color:#0E9F73;font-weight:700;}
+
+.stParts{display:grid;gap:9px;margin-bottom:18px;}
+.stPart{border:1.5px solid var(--line);border-radius:14px;overflow:hidden;background:var(--white);}
+.stPart.is-ok{border-color:#B9E4D2;}
+.stPart.is-open{border-color:var(--ai);}
+.stPart__h{display:flex;align-items:center;gap:11px;width:100%;padding:14px 16px;}
+.stPart__m{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:10px;font-weight:700;background:#FDECEA;color:var(--sig);flex-shrink:0;}
+.stPart.is-ok .stPart__m{background:#E6F7F0;color:#0E9F73;}
+.stPart__t{flex:1;min-width:0;}
+.stPart__t b{display:block;font-size:13.5px;font-weight:700;}
+.stPart__t em{font-style:normal;font-size:11px;color:var(--muted);}
+.stPart__c{font-size:11px;color:var(--muted);white-space:nowrap;}
+.stPart.is-ok .stPart__c{color:#0E9F73;font-weight:700;}
+.stPart__a{color:var(--muted);transition:transform .25s;}
+.stPart__a.is-up{transform:rotate(180deg);}
+.stPart__b{padding:0 16px 16px;border-top:1px solid var(--line);padding-top:14px;}
+.stPart__row{display:flex;gap:9px;align-items:flex-start;margin-bottom:8px;}
+.stPart__n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--bg);font-size:10.5px;font-weight:700;color:var(--muted);flex-shrink:0;margin-top:8px;}
+.stPart__row textarea{flex:1;}
+.stPart__x{color:#B9C0CB;font-size:16px;padding:4px 8px;border-radius:6px;margin-top:6px;}
+.stPart__x:hover{color:var(--sig);background:#FDECEA;}
+.stPart__add{font-size:12px;font-weight:700;color:var(--ai);padding:7px 0;}
+.stPart__stat{display:flex;align-items:flex-start;gap:9px;font-size:11.5px;line-height:1.8;color:var(--muted);background:var(--bg);border-radius:11px;padding:11px 13px;margin-top:11px;}
+.stPart__lv{font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;white-space:nowrap;background:#FDECEA;color:var(--sig);}
+.stPart__lv.lv-50{background:#FFF4DE;color:#B47C10;}
+.stPart__lv.lv-75,.stPart__lv.lv-100{background:#E6F7F0;color:#0E9F73;}
+.stPart__media{display:flex;gap:9px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+.stPart__vid,.stPart__vnote{flex:1;min-width:190px;}
+.stPart__vnote{margin-top:9px;}
+
+.stAuto{background:#F5F1FE;border:1px solid #DCD0F7;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stAuto__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:12px;}
+.stAuto__k svg{color:var(--ai);}
+.stAuto__k button{margin-left:auto;font-size:11.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:6px 15px;}
+.stAuto__l{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+.stAuto__l li{background:var(--white);border-radius:10px;padding:9px 12px;font-size:12.5px;font-weight:700;}
+.stAuto__l li span{display:block;font-size:9.5px;font-weight:400;color:var(--muted);margin-bottom:3px;}
+.stAuto__n{font-size:11.5px;line-height:1.85;color:var(--muted);margin-top:12px;}
+.stDetail__k{display:flex;align-items:center;}
+.stDetail__back{margin-left:auto;font-size:11px;font-weight:700;color:var(--ai);border:1px solid var(--ai);border-radius:999px;padding:5px 13px;}
+
+.stMore{display:block;width:100%;text-align:center;font-size:12.5px;font-weight:700;color:var(--ai);border:1.5px dashed #DCD0F7;border-radius:12px;padding:12px;margin-bottom:16px;transition:all .2s;}
+.stMore:hover{background:#F5F1FE;}
 `;
