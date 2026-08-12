@@ -1,3957 +1,1514 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+/**
+ * ============================================================================
+ * 株式会社SASHIWA — 制作バックエンド（Google Apps Script）
+ * ----------------------------------------------------------------------------
+ * これ1つで、以下がすべて動きます。Makeの設定は不要です。
+ *
+ *   1. 制作スタジオからの依頼を受け取る（doPost）
+ *   2. スプレッドシートに記録する
+ *   3. Difyを呼んで文章を生成する
+ *   4. Googleドキュメントを作成して保存する
+ *   5. 共有リンクを発行してメールで納品する
+ *   6. 予約投稿の時刻が来たら、完成した投稿文をメールで届ける
+ *
+ * ■ 設定はダイアログに沿って貼るだけ
+ *   setup を実行すると、Difyのキーを聞いてきます。貼り付ければ完了です。
+ *   通知先メールは自動取得。シートもトリガーも自動生成されます。
+ *
+ * ■ 費用
+ *   Google Apps Scriptは無料です。Difyの従量課金だけが実費になります。
+ * ============================================================================
+ */
 
-/* ============================================================================
-   株式会社SASHIWA — コントロールダッシュボード（統合版）
-   配置：src/Dashboard.jsx  ← このファイル1つだけで完結します
+/* ╔══════════════════════════════════════════════════════════════════╗
+   ║  ★ ここにキーを貼り付けてください（これだけで動きます）           ║
+   ╚══════════════════════════════════════════════════════════════════╝
 
-   ■ 収録内容
-     1. アカウント管理     … 投稿先アカウントの登録・編集
-     2. 接続設定           … Google Apps Script との接続
-     3. 成果物ライブラリ   … 作ったものを探して開く
-     4. 制作スタジオ       … 運用設計 → 制作 → 投稿予約
-     5. 全社ダッシュボード … 稼働状況・処理履歴・コンソール
+   Difyでアプリを開き、左メニュー「アクセスAPI」→「APIキー」で発行できます。
+   app- で始まる文字列を、下の "" の中に貼り付けて保存してください。
 
-   ■ なぜ1ファイルなのか
-   分割すると、GitHubのブラウザ編集では「先に作る側」を間違えたときに
-   ビルドが失敗します。1ファイルにまとめることで、この事故が起きません。
-   App.jsx が import するのはこのファイルだけです。
+   ※必須は KEY_CREATIVE の1つだけです。他は空欄のままで動きます。
+   ※このコードはご自身のGoogleアカウント内にあり、外部には公開されません。
+     ただし、キーを貼ったあとのコードは他人に共有しないでください。
+*/
 
-   ■ 以前に作った Accounts.jsx / Library.jsx / Studio.jsx について
-   このファイルに統合済みなので、リポジトリに残っていても使われません。
-   削除しても、そのまま置いておいても問題ありません。
-   ============================================================================ */
+const KEY_CREATIVE = "";  // 【必須】Creative_PR_AI のAPIキー（app-...）
+const KEY_QA       = "";  // 【任意】QA_Ethics_AI のAPIキー（検査工程を入れる場合）
+const KEY_OPENAI   = "";  // 【任意】OpenAI のAPIキー（画像を作る場合／sk-...）
+const KEY_VIDEO    = "";  // 【任意】JSON2Video のAPIキー（動画を作る場合）
 
+/* ══════════════════════════════════════════════════════════════════ */
 
+/* このスクリプトのバージョン。ダッシュボードが古いデプロイを検知するのに使います。 */
+const SASHIWA_VERSION = "3.0";
 
-/* ======================= 1. アカウント管理・接続設定 ======================= */
+/* 通知先が取得できなかった場合の宛先。必要に応じて書き換えてください。 */
+const DEFAULT_NOTIFY = "sashiwa0713naoto@gmail.com";
 
-/* ============================================================================
-   株式会社SASHIWA — アカウント管理
-   配置：src/Accounts.jsx
+/**
+ * APIキーを取得します。
+ * 上の貼り付け欄を最優先し、無ければスクリプトプロパティを見ます。
+ */
+function getKey(propName, pasted) {
+  const v = String(pasted || "").trim();
+  if (v) return v;
+  return PropertiesService.getScriptProperties().getProperty(propName) || "";
+}
 
-   ■ 役割
-   「どのアカウントに投稿するか」を一元管理します。制作スタジオはここに登録した
-   アカウントから選ぶ形になるため、投稿先の取り違えが起きません。
+function creativeKey() { return getKey("DIFY_CREATIVE_KEY", KEY_CREATIVE); }
+function qaKey()       { return getKey("DIFY_QA_KEY", KEY_QA); }
+function openaiKey()   { return getKey("OPENAI_KEY", KEY_OPENAI); }
+function videoKey()    { return getKey("VIDEO_KEY", KEY_VIDEO); }
 
-   ■ 保存場所
-   ブラウザのローカルストレージに保存します（このPCのこのブラウザのみ）。
-   別の端末でも使う場合は、右上の「書き出し」でJSONを保存し、
-   別端末で「読み込み」してください。
-   ============================================================================ */
+/** 通知先メールアドレスを返します（設定 → ログイン中のアカウント → 既定値の順） */
+function notifyEmail() {
+  const p = PropertiesService.getScriptProperties().getProperty("NOTIFY_EMAIL");
+  if (p) return p;
+  let me = "";
+  try { me = Session.getActiveUser().getEmail() || ""; } catch (e) {}
+  return me || DEFAULT_NOTIFY;
+}
 
-const KEY = "sashiwa.accounts.v1";
-
-const PLATFORM_META = {
-  x: { label: "X（旧Twitter）", tone: "#1A2233", soft: "#ECEEF2", cap: 140 },
-  instagram: { label: "Instagram", tone: "#C13584", soft: "#FBEAF4", cap: 2200 },
-  threads: { label: "Threads", tone: "#3B4252", soft: "#EDEFF3", cap: 500 },
-  tiktok: { label: "TikTok", tone: "#E0402F", soft: "#FDECEA", cap: 2200 },
-  youtube: { label: "YouTube", tone: "#B3181C", soft: "#FBE9E9", cap: 5000 },
-  yt_shorts: { label: "YouTube Shorts", tone: "#D3241C", soft: "#FCEAE9", cap: 100 },
-  note: { label: "note", tone: "#0E9F73", soft: "#E7F6F1", cap: 8000 },
-};
-
-const SEED = [
-  {
-    id: "seed-own-x",
-    name: "SASHIWA 公式X",
-    platform: "x",
-    handle: "sashiwa_ai",
-    ownerType: "own",
-    owner: "自社",
-    purpose: "認知",
-    tone: "丁寧・ですます",
-    cadence: "毎日1本",
-    status: "運用中",
-    email: "",
-    note: "AI社員構築代行の認知獲得。実際の稼働ログを出す。",
-  },
-];
-
-/* ------------------------------------------------------------- ストア */
-
-function load() {
-  if (typeof window === "undefined" || !window.localStorage) return SEED;
+/** シートが無ければ作ります（doPostからも呼びます） */
+/** トリガーが無ければ自動で登録します（設定漏れの自己修復） */
+function ensureTriggers() {
   try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return SEED;
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? v : SEED;
-  } catch (e) {
-    return SEED;
-  }
-}
-
-function persist(list) {
-  if (typeof window === "undefined" || !window.localStorage) return;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(list));
-  } catch (e) {
-    /* 保存できない環境では無視（表示は継続） */
-  }
-}
-
-function useAccounts() {
-  const [accounts, setAccounts] = useState(SEED);
-
-  useEffect(() => {
-    setAccounts(load());
-  }, []);
-
-  const commit = useCallback((next) => {
-    setAccounts(next);
-    persist(next);
-  }, []);
-
-  const add = useCallback(
-    (a) => commit([...load(), { ...a, id: `a-${Date.now()}` }]),
-    [commit]
-  );
-  const update = useCallback(
-    (id, patch) => commit(load().map((a) => (a.id === id ? { ...a, ...patch } : a))),
-    [commit]
-  );
-  const remove = useCallback((id) => commit(load().filter((a) => a.id !== id)), [commit]);
-  const replaceAll = useCallback((list) => commit(list), [commit]);
-
-  return { accounts, add, update, remove, replaceAll };
-}
-
-/* ------------------------------------------------------------- 部品 */
-
-function Ac({ name, size = 18 }) {
-  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
-  const p = {
-    plus: <path d="M12 5v14M5 12h14" {...s} />,
-    edit: (<><path d="M16.8 3.4a2.3 2.3 0 0 1 3.3 3.3L8.4 18.4l-4.4 1.2 1.2-4.4Z" {...s} /><path d="m15 5.2 3.3 3.3" {...s} /></>),
-    trash: (<><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" {...s} /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2A1.5 1.5 0 0 0 16.6 19l.9-12.5" {...s} /></>),
-    down: (<><path d="M12 3.5v12M7.5 11l4.5 4.5 4.5-4.5" {...s} /><path d="M4 20.5h16" {...s} /></>),
-    up: (<><path d="M12 15.5v-12M7.5 8 12 3.5 16.5 8" {...s} /><path d="M4 20.5h16" {...s} /></>),
-    user: (<><circle cx="12" cy="8" r="3.6" {...s} /><path d="M5.5 20.4a6.5 6.5 0 0 1 13 0" {...s} /></>),
-    x: <path d="M6 6l12 12M18 6L6 18" {...s} />,
-    check: (<><circle cx="12" cy="12" r="9" {...s} /><path d="m8 12.3 2.8 2.8L16 9.8" {...s} /></>),
-  };
-  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.check}</svg>;
-}
-
-const EMPTY = {
-  name: "", platform: "x", handle: "", ownerType: "own", owner: "自社",
-  purpose: "認知", tone: "丁寧・ですます", cadence: "毎日1本", status: "運用中", email: "", note: "",
-};
-
-/* ------------------------------------------------------------- 本体 */
-
-function AccountsView({ pushLog }) {
-  const { accounts, add, update, remove, replaceAll } = useAccounts();
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(EMPTY);
-  const [filter, setFilter] = useState("all");
-  const [msg, setMsg] = useState("");
-
-  const note = useCallback((l) => { if (typeof pushLog === "function") pushLog(l); }, [pushLog]);
-
-  const openNew = () => { setForm(EMPTY); setEditing("new"); };
-  const openEdit = (a) => { setForm(a); setEditing(a.id); };
-  const close = () => { setEditing(null); setForm(EMPTY); };
-
-  const save = () => {
-    if (!form.name.trim()) return setMsg("アカウント名を入力してください。");
-    if (form.ownerType === "client" && !form.owner.trim()) return setMsg("お客様名を入力してください。");
-    const clean = { ...form, owner: form.ownerType === "own" ? "自社" : form.owner };
-    if (editing === "new") { add(clean); note(`[${new Date().toLocaleTimeString()}] ACCOUNT ADDED: ${clean.name}`); }
-    else { update(editing, clean); note(`[${new Date().toLocaleTimeString()}] ACCOUNT UPDATED: ${clean.name}`); }
-    setMsg("");
-    close();
-  };
-
-  const del = (a) => {
-    if (typeof window !== "undefined" && !window.confirm(`「${a.name}」を削除します。よろしいですか？`)) return;
-    remove(a.id);
-    note(`[${new Date().toLocaleTimeString()}] ACCOUNT REMOVED: ${a.name}`);
-  };
-
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify(accounts, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sashiwa_accounts_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importJson = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const v = JSON.parse(String(r.result));
-        if (!Array.isArray(v)) throw new Error();
-        replaceAll(v);
-        setMsg(`${v.length}件を読み込みました。`);
-        setTimeout(() => setMsg(""), 4000);
-      } catch (err) {
-        setMsg("読み込めませんでした。書き出したJSONファイルを選んでください。");
-      }
-    };
-    r.readAsText(f);
-    e.target.value = "";
-  };
-
-  const shown = accounts.filter((a) =>
-    filter === "all" ? true : filter === "own" ? a.ownerType === "own" : a.ownerType === "client"
-  );
-  const groups = shown.reduce((m, a) => {
-    const k = a.ownerType === "own" ? "自社" : a.owner || "（お客様名未設定）";
-    (m[k] = m[k] || []).push(a);
-    return m;
-  }, {});
-
-  const active = accounts.filter((a) => a.status === "運用中").length;
-
-  return (
-    <div className="acRoot">
-      <style>{CSS_ACCOUNTS}</style>
-
-      <header className="acHead">
-        <div>
-          <p className="acHead__en">ACCOUNTS</p>
-          <h1>アカウント管理</h1>
-          <p className="acHead__s">投稿先をここで管理します。制作スタジオはこの一覧から選ぶ形になります。</p>
-        </div>
-        <div className="acHead__b">
-          <button className="acGhost" onClick={exportJson}><Ac name="down" size={15} />書き出し</button>
-          <label className="acGhost">
-            <Ac name="up" size={15} />読み込み
-            <input type="file" accept="application/json" onChange={importJson} hidden />
-          </label>
-          <button className="acAdd" onClick={openNew}><Ac name="plus" size={16} />アカウントを追加</button>
-        </div>
-      </header>
-
-      <div className="acBar">
-        <div className="acFilter">
-          {[
-            { id: "all", label: `すべて ${accounts.length}` },
-            { id: "own", label: `自社 ${accounts.filter((a) => a.ownerType === "own").length}` },
-            { id: "client", label: `お客様 ${accounts.filter((a) => a.ownerType === "client").length}` },
-          ].map((f) => (
-            <button key={f.id} className={filter === f.id ? "is-on" : ""} onClick={() => setFilter(f.id)}>{f.label}</button>
-          ))}
-        </div>
-        <p className="acBar__n">運用中 {active} 件 ／ 停止中 {accounts.length - active} 件</p>
-      </div>
-
-      {msg && <p className="acMsg">{msg}</p>}
-
-      {Object.keys(groups).length === 0 ? (
-        <div className="acEmpty">
-          <Ac name="user" size={30} />
-          <h2>アカウントがまだありません</h2>
-          <p>投稿先のアカウントを登録すると、制作スタジオから選べるようになります。</p>
-          <button className="acAdd" onClick={openNew}><Ac name="plus" size={16} />最初のアカウントを追加</button>
-        </div>
-      ) : (
-        Object.entries(groups).map(([owner, list]) => (
-          <section className="acGroup" key={owner}>
-            <h2 className="acGroup__t">
-              <Ac name="user" size={15} />
-              {owner}
-              <em>{list.length}</em>
-            </h2>
-            <div className="acGrid">
-              {list.map((a) => {
-                const m = PLATFORM_META[a.platform] || PLATFORM_META.x;
-                return (
-                  <article className={`acCard ${a.status === "停止中" ? "is-off" : ""}`} key={a.id} style={{ "--t": m.tone, "--s": m.soft }}>
-                    <div className="acCard__h">
-                      <span className="acCard__pf">{m.label}</span>
-                      <span className={`acCard__st ${a.status === "運用中" ? "is-on" : ""}`}>{a.status}</span>
-                    </div>
-                    <p className="acCard__n">{a.name}</p>
-                    {a.handle && <p className="acCard__hd">@{a.handle}</p>}
-                    <dl className="acCard__m">
-                      <div><dt>目的</dt><dd>{a.purpose}</dd></div>
-                      <div><dt>頻度</dt><dd>{a.cadence}</dd></div>
-                      <div><dt>トーン</dt><dd>{a.tone}</dd></div>
-                    </dl>
-                    {a.note && <p className="acCard__note">{a.note}</p>}
-                    <div className="acCard__f">
-                      <button onClick={() => update(a.id, { status: a.status === "運用中" ? "停止中" : "運用中" })}>
-                        {a.status === "運用中" ? "停止する" : "運用を再開"}
-                      </button>
-                      <button onClick={() => openEdit(a)}><Ac name="edit" size={14} />編集</button>
-                      <button className="acCard__del" onClick={() => del(a)}><Ac name="trash" size={14} /></button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        ))
-      )}
-
-      {editing && (
-        <div className="acModal" onClick={close}>
-          <div className="acModal__b" onClick={(e) => e.stopPropagation()}>
-            <div className="acModal__h">
-              <h2>{editing === "new" ? "アカウントを追加" : "アカウントを編集"}</h2>
-              <button onClick={close} aria-label="閉じる"><Ac name="x" size={18} /></button>
-            </div>
-
-            <div className="acForm">
-              <label><span>アカウント名</span>
-                <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="SASHIWA 公式X" />
-              </label>
-              <div className="acForm__r">
-                <label><span>プラットフォーム</span>
-                  <select value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
-                    {Object.entries(PLATFORM_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                  </select>
-                </label>
-                <label><span>ハンドル（@なし）</span>
-                  <input type="text" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} placeholder="sashiwa_ai" />
-                </label>
-              </div>
-
-              <label><span>持ち主</span>
-                <div className="acSeg">
-                  <button className={form.ownerType === "own" ? "is-on" : ""} onClick={() => setForm({ ...form, ownerType: "own", owner: "自社" })}>自社（無料）</button>
-                  <button className={form.ownerType === "client" ? "is-on" : ""} onClick={() => setForm({ ...form, ownerType: "client", owner: form.owner === "自社" ? "" : form.owner })}>お客様（課金）</button>
-                </div>
-              </label>
-
-              {form.ownerType === "client" && (
-                <div className="acForm__r">
-                  <label><span>お客様名</span>
-                    <input type="text" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} placeholder="株式会社◯◯" />
-                  </label>
-                  <label><span>納品先メール</span>
-                    <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="client@example.com" />
-                  </label>
-                </div>
-              )}
-
-              <div className="acForm__r">
-                <label><span>目的</span>
-                  <select value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}>
-                    {["認知", "見込み客", "販売", "採用", "信頼"].map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </label>
-                <label><span>投稿頻度</span>
-                  <select value={form.cadence} onChange={(e) => setForm({ ...form, cadence: e.target.value })}>
-                    {["毎日1本", "毎日2本", "週3本", "週2本", "週1本"].map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </label>
-              </div>
-
-              <div className="acForm__r">
-                <label><span>トーン</span>
-                  <select value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })}>
-                    {["丁寧・ですます", "フランク", "断定的・力強い", "専門的・硬め", "やわらかい・共感"].map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </label>
-                <label><span>状態</span>
-                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                    <option>運用中</option><option>停止中</option>
-                  </select>
-                </label>
-              </div>
-
-              <label><span>メモ・運用方針</span>
-                <textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="このアカウントで何を発信するか。制作時にAIへ渡されます。" />
-              </label>
-            </div>
-
-            {msg && <p className="acMsg acMsg--in">{msg}</p>}
-
-            <div className="acModal__f">
-              <button className="acGhost" onClick={close}>キャンセル</button>
-              <button className="acAdd" onClick={save}><Ac name="check" size={16} />保存する</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <p className="acFoot">
-        アカウント情報はこのブラウザ内に保存されます。別の端末でも使う場合は「書き出し」でJSONを保存し、移行先で「読み込み」してください。
-      </p>
-    </div>
-  );
-}
-
-/* ================================ CSS_ACCOUNTS ================================== */
-
-const CSS_ACCOUNTS = `
-.acRoot{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;--t:#1A2233;--s:#ECEEF2;
-  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
-.acRoot *,.acRoot *::before,.acRoot *::after{box-sizing:border-box;}
-.acRoot h1,.acRoot h2,.acRoot p,.acRoot ul,.acRoot li,.acRoot dl,.acRoot dd,.acRoot dt{margin:0;padding:0;}
-.acRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
-.acRoot a{color:inherit;text-decoration:none;}
-.acRoot :focus-visible{outline:2px solid var(--ai);outline-offset:2px;}
-
-.acHead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:18px;}
-.acHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai);font-weight:700;margin-bottom:8px;}
-.acHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
-.acHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
-.acHead__b{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-.acGhost{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:10px 18px;cursor:pointer;transition:all .2s;}
-.acGhost:hover{border-color:var(--ink);color:var(--ink);}
-.acAdd{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:11px 22px;transition:all .2s;box-shadow:0 12px 24px -14px rgba(124,92,214,.9);}
-.acAdd:hover{filter:brightness(.93);transform:translateY(-1px);}
-
-.acBar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
-.acFilter{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;}
-.acFilter button{font-size:12.5px;font-weight:700;padding:8px 17px;border-radius:999px;color:var(--muted);transition:all .2s;}
-.acFilter button.is-on{background:var(--ink);color:#fff;}
-.acBar__n{font-size:12px;color:var(--muted);}
-.acMsg{font-size:12.5px;color:var(--ai);background:#F5F1FE;border-radius:10px;padding:11px 15px;margin-bottom:14px;}
-.acMsg--in{margin:0 22px 12px;}
-
-.acEmpty{background:var(--white);border:1px dashed var(--line);border-radius:20px;padding:52px 28px;text-align:center;color:var(--muted);}
-.acEmpty svg{margin:0 auto 16px;color:var(--ai);}
-.acEmpty h2{font-size:18px;font-weight:900;color:var(--ink);margin-bottom:8px;}
-.acEmpty p{font-size:13px;margin-bottom:22px;}
-
-.acGroup{margin-bottom:26px;}
-.acGroup__t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:12px;color:var(--muted);}
-.acGroup__t em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ai);background:#F1EDFC;border-radius:999px;padding:2px 9px;}
-.acGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:13px;}
-
-.acCard{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:18px 20px;transition:transform .25s,box-shadow .25s;}
-.acCard:hover{transform:translateY(-3px);box-shadow:0 22px 42px -30px rgba(26,34,51,.5);}
-.acCard.is-off{opacity:.55;}
-.acCard__h{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
-.acCard__pf{font-size:10.5px;font-weight:700;color:var(--t);background:var(--s);border-radius:999px;padding:3px 10px;}
-.acCard__st{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;}
-.acCard__st.is-on{color:#0E9F73;background:#E6F7F0;}
-.acCard__n{font-size:15px;font-weight:900;line-height:1.5;}
-.acCard__hd{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:12px;}
-.acCard__m{display:flex;gap:16px;flex-wrap:wrap;padding:11px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
-.acCard__m dt{font-size:9.5px;color:var(--muted);margin-bottom:2px;}
-.acCard__m dd{font-size:12px;font-weight:500;}
-.acCard__note{font-size:11.5px;line-height:1.8;color:var(--muted);margin-top:10px;}
-.acCard__f{display:flex;gap:6px;align-items:center;margin-top:14px;}
-.acCard__f button{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:all .2s;}
-.acCard__f button:hover{border-color:var(--ink);color:var(--ink);}
-.acCard__del{margin-left:auto;padding:7px 10px !important;}
-.acCard__del:hover{color:var(--sig) !important;border-color:var(--sig) !important;background:#FDECEA;}
-
-.acModal{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
-.acModal__b{background:var(--white);border-radius:22px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;box-shadow:0 40px 80px -40px rgba(0,0,0,.5);}
-.acModal__h{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--white);z-index:2;}
-.acModal__h h2{font-size:16px;font-weight:900;}
-.acModal__h button{color:var(--muted);padding:6px;border-radius:8px;}
-.acModal__h button:hover{background:var(--bg);color:var(--ink);}
-.acForm{padding:20px 22px;}
-.acForm label{display:block;margin-bottom:15px;}
-.acForm label > span{display:block;font-size:12px;font-weight:700;margin-bottom:7px;}
-.acForm__r{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-@media (max-width:560px){.acForm__r{grid-template-columns:1fr;}}
-.acRoot input[type=text],.acRoot input[type=email],.acRoot select,.acRoot textarea{
-  width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:11px 13px;
-  font-family:var(--sans);font-size:13.5px;line-height:1.75;color:var(--ink);resize:vertical;transition:all .2s;}
-.acRoot input:focus,.acRoot select:focus,.acRoot textarea:focus{outline:none;background:var(--white);border-color:var(--ai);box-shadow:0 0 0 4px #F1EDFC;}
-.acSeg{display:flex;gap:6px;}
-.acSeg button{flex:1;text-align:center;font-size:12.5px;font-weight:700;border:1.5px solid var(--line);border-radius:11px;padding:11px;color:var(--muted);transition:all .2s;}
-.acSeg button.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
-.acModal__f{display:flex;justify-content:flex-end;gap:9px;padding:16px 22px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--white);}
-
-.acFoot{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:12px;padding:13px 16px;margin-top:24px;}
-
-.acConn{display:flex;align-items:center;gap:13px;background:var(--white);border:1px solid var(--line);border-left:4px solid #9BA3B1;border-radius:16px;padding:16px 18px;margin-bottom:16px;}
-.acConn.is-on{border-left-color:#0E9F73;}
-.acConn__d{width:10px;height:10px;border-radius:50%;background:#9BA3B1;flex-shrink:0;}
-.acConn.is-on .acConn__d{background:#0E9F73;box-shadow:0 0 0 4px rgba(14,159,115,.18);}
-.acConn b{display:block;font-size:14px;font-weight:700;margin-bottom:3px;}
-.acConn em{font-style:normal;font-size:12px;color:var(--muted);line-height:1.75;}
-.acPanel{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:14px;}
-.acPanel__f{display:block;}
-.acPanel__f > span{display:block;font-size:12px;font-weight:700;margin-bottom:8px;}
-.acPanel__f > em{display:block;font-style:normal;font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.75;}
-.acPanel__b{display:flex;gap:9px;margin-top:16px;flex-wrap:wrap;}
-.acResult{font-size:12.5px;line-height:1.85;border-radius:11px;padding:12px 15px;margin-top:14px;}
-.acResult.is-ok{color:#0E9F73;background:#E6F7F0;}
-.acResult.is-ng{color:var(--sig);background:#FDECEA;}
-.acPanel--guide h2{font-size:14px;font-weight:900;margin-bottom:14px;}
-.acSteps{counter-reset:s;display:grid;gap:11px;}
-.acSteps li{counter-increment:s;position:relative;padding-left:34px;font-size:13px;line-height:1.9;color:var(--muted);}
-.acSteps li::before{content:counter(s);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;background:var(--ai);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
-.acSteps b{color:var(--ink);font-weight:700;}
-.acNote{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-top:16px;}
-
-.acDiagBar{display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line);flex-wrap:wrap;}
-.acDiagBar span{font-size:11.5px;color:var(--muted);line-height:1.75;}
-.acDiag{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;}
-.acDiag__v{font-size:12px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
-.acDiag__v b{font-family:var(--mono);color:var(--ink);}
-.acDiag__v em{font-style:normal;font-size:11px;color:#fff;background:var(--sig);border-radius:999px;padding:3px 10px;}
-.acDiag__l{display:grid;gap:7px;list-style:none;padding:0;margin:0;}
-.acDiag__l li{display:flex;align-items:center;gap:10px;font-size:12.5px;flex-wrap:wrap;background:var(--white);border-radius:10px;padding:10px 13px;}
-.acDiag__m{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;flex-shrink:0;}
-.acDiag__l li.is-ok .acDiag__m{color:#0E9F73;background:#E6F7F0;}
-.acDiag__l li.is-ng .acDiag__m{color:var(--sig);background:#FDECEA;}
-.acDiag__l li.is-opt{opacity:.72;}
-.acDiag__l li.is-opt .acDiag__m{color:var(--muted);background:var(--line);}
-.acDiag__l li em{font-style:normal;font-size:11.5px;color:var(--muted);flex:1;min-width:160px;}
-.acDiag__n{font-size:11.5px;color:var(--muted);margin-top:12px;}
-.acDiag__n b{color:var(--ink);}
-.acDiag__w{margin-top:12px;background:#FDECEA;border-radius:11px;padding:12px 14px;}
-.acDiag__w > p:first-child{font-size:11.5px;font-weight:700;color:var(--sig);margin-bottom:7px;}
-.acDiag__job{font-size:11.5px;line-height:1.8;color:#8C2A22;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px;}
-.acDiag__job em{font-style:normal;font-size:10px;font-weight:700;background:var(--sig);color:#fff;border-radius:999px;padding:2px 8px;}
-.acDiag__job.is-hold{color:#7A5A12;}
-.acDiag__job.is-hold em{background:#B47C10;}
-.acDiag__job span{width:100%;font-family:var(--mono);font-size:10.5px;opacity:.85;}
-`;
-
-
-/* ============================================================================
-   接続設定（GASのURLなど）
-   GitHubを触らずに、ダッシュボード上で設定できるようにするための仕組みです。
-   ============================================================================ */
-
-const SKEY = "sashiwa.settings.v1";
-
-const DEFAULT_SETTINGS = {
-  gasUrl: "",
-  makeUrl: "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv",
-  useGas: true,
-  liveSubmit: true,
-};
-
-function loadSettings() {
-  if (typeof window === "undefined" || !window.localStorage) return DEFAULT_SETTINGS;
-  try {
-    const raw = window.localStorage.getItem(SKEY);
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS;
-  } catch (e) {
-    return DEFAULT_SETTINGS;
-  }
-}
-
-function useSettings() {
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  useEffect(() => { setSettings(loadSettings()); }, []);
-  const save = useCallback((patch) => {
-    const next = { ...loadSettings(), ...patch };
-    setSettings(next);
-    if (typeof window !== "undefined" && window.localStorage) {
-      try { window.localStorage.setItem(SKEY, JSON.stringify(next)); } catch (e) {}
-    }
-    return next;
-  }, []);
-  return { settings, save };
-}
-
-/** 送信先URLと、プリフライトを避けるContent-Typeを返します */
-function resolveEndpoint(settings) {
-  const useGas = settings.useGas && settings.gasUrl;
-  return {
-    url: useGas ? settings.gasUrl : settings.makeUrl,
-    contentType: useGas ? "text/plain;charset=utf-8" : "application/json",
-    isGas: !!useGas,
-  };
-}
-
-function SettingsView({ pushLog }) {
-  const { settings, save } = useSettings();
-  const [gasUrl, setGasUrl] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState(null);
-
-  useEffect(() => { setGasUrl(settings.gasUrl || ""); }, [settings.gasUrl]);
-
-  const test = async () => {
-    const u = gasUrl.trim();
-    if (!u) return setResult({ ok: false, msg: "URLを入力してください。" });
-    if (u.indexOf("script.google.com") < 0 || u.indexOf("/exec") < 0) {
-      return setResult({ ok: false, msg: "GASのウェブアプリURLは script.google.com で始まり /exec で終わります。デプロイ画面のURLをそのまま貼ってください。" });
-    }
-    setTesting(true);
-    setResult(null);
-    try {
-      const r = await fetch(u, { method: "GET" });
-      const t = await r.text();
-      if (t.indexOf("SASHIWA") >= 0) {
-        save({ gasUrl: u, useGas: true });
-        setResult({ ok: true, msg: "接続できました。保存しました。これ以降の依頼はこちらで処理されます。" });
-        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] BACKEND CONNECTED: Google Apps Script`);
-      } else {
-        setResult({ ok: false, msg: "応答はありましたが、SASHIWAのバックエンドではないようです。URLをご確認ください。" });
-      }
-    } catch (e) {
-      setResult({ ok: false, msg: "接続できませんでした。デプロイ時の「アクセスできるユーザー」が『全員』になっているかご確認ください。" });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const [diag, setDiag] = useState(null);
-  const [diagging, setDiagging] = useState(false);
-
-  const runDiag = async () => {
-    const u = (gasUrl || settings.gasUrl || "").trim();
-    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
-    setDiagging(true);
-    setDiag(null);
-    try {
-      const r = await fetch(`${u}?action=diag`);
-      const d = await r.json();
-      if (d && d.diag) setDiag(d.diag);
-      else setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直したあと、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
-    } catch (e) {
-      setResult({ ok: false, msg: "状態を取得できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
-    } finally {
-      setDiagging(false);
-    }
-  };
-
-  const [running, setRunning] = useState(false);
-
-  const runNow = async () => {
-    const u = (gasUrl || settings.gasUrl || "").trim();
-    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
-    setRunning(true);
-    setResult(null);
-    try {
-      const r = await fetch(`${u}?action=run`);
-      const d = await r.json();
-      if (d && d.ran) {
-        if (d.diag) setDiag(d.diag);
-        setResult({ ok: true, msg: "処理を実行しました。数十秒後にメールが届きます。届かない場合は下の状態表示をご確認ください。" });
-        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] MANUAL RUN EXECUTED`);
-      } else {
-        setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直し、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
-      }
-    } catch (e) {
-      setResult({ ok: false, msg: "実行できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const runRetry = async () => {
-    const u = (gasUrl || settings.gasUrl || "").trim();
-    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
-    setRunning(true);
-    setResult(null);
-    try {
-      const r = await fetch(`${u}?action=retry`);
-      const d = await r.json();
-      if (d && typeof d.retried === "number") {
-        if (d.diag) setDiag(d.diag);
-        setResult({
-          ok: true,
-          msg:
-            d.retried > 0
-              ? `${d.retried} 件を再実行しました。数十秒後にメールが届きます。`
-              : "再実行が必要な依頼はありませんでした。",
-        });
-        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] RETRY: ${d.retried} jobs`);
-      } else {
-        setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、デプロイを新バージョンで更新してください。" });
-      }
-    } catch (e) {
-      setResult({ ok: false, msg: "実行できませんでした。デプロイ設定をご確認ください。" });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const disconnect = () => {
-    save({ gasUrl: "", useGas: false });
-    setGasUrl("");
-    setResult({ ok: true, msg: "接続を解除しました。以降はMakeに送信されます。" });
-  };
-
-  const connected = !!settings.gasUrl && settings.useGas;
-
-  return (
-    <div className="acRoot">
-      <style>{CSS_ACCOUNTS}</style>
-
-      <header className="acHead">
-        <div>
-          <p className="acHead__en">SETTINGS</p>
-          <h1>接続設定</h1>
-          <p className="acHead__s">制作の依頼をどこで処理するかを設定します。GitHubを触る必要はありません。</p>
-        </div>
-      </header>
-
-      <div className={`acConn ${connected ? "is-on" : ""}`}>
-        <span className="acConn__d" />
-        <div>
-          <b>{connected ? "Google Apps Script に接続中" : "未接続（Makeに送信中）"}</b>
-          <em>
-            {connected
-              ? "文章の生成・保存・納品・予約配信まで自動で処理されます。"
-              : "現在はMakeへ送信しています。成果物の保存と納品は行われません。"}
-          </em>
-        </div>
-      </div>
-
-      <section className="acPanel">
-        <label className="acPanel__f">
-          <span>ウェブアプリのURL</span>
-          <input
-            type="text"
-            value={gasUrl}
-            onChange={(e) => setGasUrl(e.target.value)}
-            placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-          />
-          <em>Apps Scriptの「デプロイ」で発行されたURLをそのまま貼り付けてください。</em>
-        </label>
-
-        <div className="acPanel__b">
-          <button className="acAdd" onClick={test} disabled={testing}>
-            {testing ? "接続を確認中..." : "接続して保存"}
-          </button>
-          {connected && <button className="acGhost" onClick={disconnect}>接続を解除</button>}
-        </div>
-
-        {result && <p className={`acResult ${result.ok ? "is-ok" : "is-ng"}`}>{result.msg}</p>}
-
-        <div className="acDiagBar">
-          <button className="acGhost" onClick={runDiag} disabled={diagging}>
-            {diagging ? "確認中..." : "バックエンドの状態を確認"}
-          </button>
-          <button className="acAdd" onClick={runNow} disabled={running}>
-            {running ? "処理中..." : "今すぐ処理する"}
-          </button>
-          <button className="acGhost" onClick={runRetry} disabled={running}>
-            失敗した依頼を再実行
-          </button>
-          <span>生成されない・メールが来ないときは、まずここを押してください。</span>
-        </div>
-
-        {diag && (
-          <div className="acDiag">
-            <p className="acDiag__v">
-              バージョン <b>{diag.version || "不明"}</b>
-              {diag.version !== "3.0" && <em>古いデプロイが公開されています</em>}
-            </p>
-            <ul className="acDiag__l">
-              {[
-                {
-                  label: "制作キー（Dify）",
-                  ok: diag["キー"] && diag["キー"]["制作"],
-                  need: true,
-                  hint: 'Apps Scriptの冒頭 KEY_CREATIVE = "" に、Creative_PR_AI のAPIキー（app-…）を貼って保存してください',
-                },
-                { label: "検査キー（Dify）", ok: diag["キー"] && diag["キー"]["検査"], need: false, hint: "入れると品質・法令の二重検査が働きます" },
-                { label: "画像キー（OpenAI）", ok: diag["キー"] && diag["キー"]["画像"], need: false, hint: "画像を作る場合のみ必要です" },
-                { label: "動画キー（JSON2Video）", ok: diag["キー"] && diag["キー"]["動画"], need: false, hint: "動画を作る場合のみ必要です" },
-                { label: "自動実行トリガー", ok: diag["トリガー"] && diag["トリガー"].length > 0, need: true, hint: "setup を実行すると登録されます" },
-                { label: "シートの準備", ok: diag["シート"] && diag["シート"]["ジョブ"], need: true, hint: "setup を実行すると作られます" },
-              ].map((it) => (
-                <li key={it.label} className={it.ok ? "is-ok" : it.need ? "is-ng" : "is-opt"}>
-                  <span className="acDiag__m">{it.ok ? "OK" : it.need ? "要対応" : "任意"}</span>
-                  <b>{it.label}</b>
-                  {!it.ok && <em>{it.hint}</em>}
-                </li>
-              ))}
-            </ul>
-            <p className="acDiag__n">
-              通知先：<b>{diag["通知先"] || "未設定"}</b> ／ 記録件数：{(diag["シート"] && diag["シート"]["件数"]) || 0} 件
-            </p>
-            {diag["未処理"] && diag["未処理"].length > 0 && (
-              <div className="acDiag__w">
-                <p>未処理・エラーの案件</p>
-                {diag["未処理"].map((w) => (
-                  <p key={w.id} className={`acDiag__job ${w["状態"] === "保留" ? "is-hold" : ""}`}>
-                    <em>{w["状態"]}</em>
-                    {w.id}
-                    <span>{w["備考"]}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      <section className="acPanel acPanel--guide">
-        <h2>接続までの手順</h2>
-        <ol className="acSteps">
-          <li><b>スプレッドシートを新規作成</b>して、名前を「SASHIWA_制作バックエンド」にします。</li>
-          <li>メニューの<b>「拡張機能」→「Apps Script」</b>を開きます。</li>
-          <li>最初のコードを全部消し、<b>SASHIWA_Backend.gs の中身を貼り付け</b>て保存します。</li>
-          <li>関数選択で <b>setup</b> を選んで実行。ダイアログにDifyのキーを貼るだけで、シートもトリガーも自動で用意されます。</li>
-          <li><b>「デプロイ」→「新しいデプロイ」→ ウェブアプリ</b>。アクセスできるユーザーを<b>「全員」</b>にしてデプロイ。</li>
-          <li>表示されたURLを<b>上の欄に貼って「接続して保存」</b>。以上で完了です。</li>
-        </ol>
-        <p className="acNote">
-          設定はこのブラウザに保存されます。別の端末でも使う場合は、同じURLをその端末でも貼り付けてください。
-        </p>
-      </section>
-    </div>
-  );
-}
-
-/* ========================== 2. 成果物ライブラリ ========================== */
-
-/* ============================================================================
-   株式会社SASHIWA — 成果物ライブラリ
-   配置：src/Library.jsx
-
-   ■ 役割
-   作った文章・画像・動画・運用設計を、あとから探して開ける場所です。
-   Google Apps Script から直接取得するため、スプレッドシートを一般公開する
-   必要がありません（顧客名が含まれるため、公開は避ける設計にしています）。
-   ============================================================================ */
-
-const SERVICE_META = {
-  AGENT: { label: "AI社員構築代行", tone: "#E0402F", soft: "#FDECEA" },
-  STUDIO: { label: "文書・動画 自動制作", tone: "#2456C8", soft: "#E8EEFB" },
-  SOCIAL: { label: "SNSアカウント運用", tone: "#7C5CD6", soft: "#F1EDFC" },
-};
-
-const KIND_META = {
-  コンテンツ: { icon: "doc", tone: "#2456C8", soft: "#E8EEFB" },
-  画像: { icon: "image", tone: "#0E9F73", soft: "#E7F6F1" },
-  動画: { icon: "film", tone: "#E08A1F", soft: "#FBF2E1" },
-  運用設計: { icon: "map", tone: "#7C5CD6", soft: "#F1EDFC" },
-  予約投稿: { icon: "clock", tone: "#7C5CD6", soft: "#F1EDFC" },
-  問い合わせ: { icon: "mail", tone: "#E0402F", soft: "#FDECEA" },
-};
-
-/* デモ用。GAS未接続のときに表示します。 */
-const DEMO_JOBS = [
-  {
-    job_id: "J1786200000001",
-    受信日時: "2026-08-06 22:00",
-    種別: "コンテンツ",
-    投稿先アカウント: "SASHIWA 公式X（X（旧Twitter） @sashiwa_ai）",
-    持ち主: "自社",
-    媒体: "X（旧Twitter）",
-    状態: "完了",
-    指示内容:
-      "【事業】STUDIO／【JOB】CONTENT／【課金】無料（社内利用）／【媒体】X（旧Twitter）／【形式】単発投稿／【文字数上限】140／【媒体仕様】1行目で完結。改行で余白を作る。／【勝ち筋】1行目だけで価値が伝わること。／【目的】見込み客／【ターゲット】従業員10〜50名の中小企業の経営者／【トーン】丁寧・ですます／【構成】PREP法／【フックの型】数字を出す／【案数】3案／【検査】厳格／【テーマ】問い合わせ対応を自動化したら何時間浮いたか",
-    成果物URL: "",
-    完了日時: "2026-08-06 22:03",
-  },
-  {
-    job_id: "J1786200000002",
-    受信日時: "2026-08-06 05:30",
-    種別: "運用設計",
-    投稿先アカウント: "SASHIWA 公式X",
-    持ち主: "自社",
-    媒体: "X（旧Twitter）",
-    状態: "完了",
-    指示内容:
-      "【事業】STUDIO／【JOB】PLAN／【依頼】SNS運用設計書の作成／【会社】株式会社SASHIWA／【業種】BtoBサービス／【目的】見込み客／【使える時間】週2〜3時間／【ターゲット】中小企業の経営者",
-    成果物URL: "",
-    完了日時: "2026-08-06 05:34",
-  },
-];
-
-/* ------------------------------------------------------------- 解析 */
-
-/** 「【キー】値／【キー】値」の形を配列に分解します */
-function parseInstruction(text) {
-  const out = [];
-  String(text || "")
-    .split("／")
-    .forEach((chunk) => {
-      const m = chunk.match(/^\s*【([^】]+)】([\s\S]*)$/);
-      if (m) out.push({ k: m[1].trim(), v: m[2].trim() });
-      else if (chunk.trim()) {
-        if (out.length) out[out.length - 1].v += "／" + chunk.trim();
-      }
+    const has = ScriptApp.getProjectTriggers().some(function (t) {
+      return t.getHandlerFunction() === "processJobs";
     });
-  return out;
+    if (!has) installTriggers();
+  } catch (e) {}
 }
 
-/** 一覧に出す短いタイトルを作ります */
-function jobTitle(job) {
-  const p = parseInstruction(job.指示内容);
-  const find = (k) => (p.find((x) => x.k === k) || {}).v;
-  return (
-    find("テーマ") ||
-    find("本文") ||
-    find("描画内容") ||
-    find("依頼") ||
-    find("内容") ||
-    job.種別 ||
-    "（内容なし）"
-  );
+function ensureSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheet(ss, "ジョブ", [
+    "job_id", "受信日時", "種別", "投稿先アカウント", "持ち主",
+    "媒体", "状態", "指示内容", "成果物URL", "完了日時", "納品先メール", "備考",
+  ]);
+  ensureSheet(ss, "投稿キュー", [
+    "post_id", "予定日時", "アカウント", "媒体", "本文",
+    "画像URL", "繰り返し", "状態", "実行日時",
+  ]);
 }
 
-/* ------------------------------------------------------------- 部品 */
+/* ========================= ① 最初に1回だけ実行 ========================= */
 
-function Li({ name, size = 18 }) {
-  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
-  const p = {
-    doc: (<><path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} /><path d="M14 2.8V7h4M8.5 12h7M8.5 16h5" {...s} /></>),
-    image: (<><rect x="3" y="4.5" width="18" height="15" rx="2.6" {...s} /><circle cx="8.6" cy="10" r="1.9" {...s} /><path d="m4 17 4.6-4.4 3.4 3.2 3.4-3.6L20 17" {...s} /></>),
-    film: (<><rect x="2.5" y="4.5" width="19" height="15" rx="2.6" {...s} /><path d="M7.5 4.5v15M16.5 4.5v15" {...s} opacity=".4" /><path d="m10.8 9.4 3.4 2.1-3.4 2.1z" {...s} /></>),
-    map: (<><path d="M9 3.5 3.5 6v14.5L9 18l6 2.5 5.5-2.5V3.5L15 6Z" {...s} /><path d="M9 3.5V18M15 6v14.5" {...s} /></>),
-    clock: (<><circle cx="12" cy="12" r="9" {...s} /><path d="M12 7v5.3l3.4 2" {...s} /></>),
-    mail: (<><rect x="2.5" y="5" width="19" height="14" rx="2.4" {...s} /><path d="m3.5 7 8.5 6 8.5-6" {...s} /></>),
-    open: (<><path d="M14 4.5h5.5V10" {...s} /><path d="M19.5 4.5 11 13" {...s} /><path d="M18 14.5v4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" {...s} /></>),
-    x: <path d="M6 6l12 12M18 6L6 18" {...s} />,
-    search: (<><circle cx="10.8" cy="10.8" r="6.8" {...s} /><path d="m15.8 15.8 4.4 4.4" {...s} /></>),
-    refresh: (<><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" {...s} /><path d="M20.5 4.5V10H15" {...s} /></>),
-    copy: (<><rect x="8.5" y="8.5" width="12" height="12" rx="2.4" {...s} /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" {...s} /></>),
-    box: (<><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5Z" {...s} /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" {...s} /></>),
-  };
-  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.doc}</svg>;
+/**
+ * 一番最初に、この setup 関数を実行してください。
+ * スプレッドシートのシートと見出し行を自動で作ります。
+ */
+function setup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+
+  // 1) シートを用意
+  ensureSheets();
+
+  // 2) 貼り付け欄のキーをスクリプトプロパティにも保存します
+  if (KEY_CREATIVE) props.setProperty("DIFY_CREATIVE_KEY", KEY_CREATIVE.trim());
+  if (KEY_QA) props.setProperty("DIFY_QA_KEY", KEY_QA.trim());
+  if (KEY_OPENAI) props.setProperty("OPENAI_KEY", KEY_OPENAI.trim());
+  if (KEY_VIDEO) props.setProperty("VIDEO_KEY", KEY_VIDEO.trim());
+
+  // 3) 通知先
+  if (!props.getProperty("NOTIFY_EMAIL")) {
+    let me = "";
+    try { me = Session.getActiveUser().getEmail() || ""; } catch (e) {}
+    props.setProperty("NOTIFY_EMAIL", me || DEFAULT_NOTIFY);
+  }
+
+  // 4) トリガー
+  installTriggers();
+
+  const c = creativeKey();
+  let msg = "";
+  if (!c) {
+    msg =
+      "あと1ステップです。\n\n" +
+      "このコードの冒頭にある\n" +
+      "    const KEY_CREATIVE = \"\";\n" +
+      "の \"\" の中に、Dify の Creative_PR_AI のAPIキー\n" +
+      "（app- で始まる文字列）を貼り付けて保存してください。\n\n" +
+      "キーの場所：Dify → Creative_PR_AI を開く →\n" +
+      "        左メニュー「アクセスAPI」→「APIキー」→ 作成\n\n" +
+      "貼り付けたら、もう一度 setup を実行してください。";
+  } else if (c.indexOf("app-") !== 0) {
+    msg =
+      "キーの形式が違うようです。\n\n" +
+      "Dify のAPIキーは app- で始まります。\n" +
+      "アプリ内の「アクセスAPI」から発行したキーを貼り付けてください。\n\n" +
+      "（現在の値の先頭：" + c.slice(0, 8) + "...）";
+  } else {
+    msg =
+      "セットアップが完了しました。\n\n" +
+      "  制作キー：登録済み\n" +
+      "  検査キー：" + (qaKey() ? "登録済み" : "未登録（任意）") + "\n" +
+      "  画像キー：" + (openaiKey() ? "登録済み" : "未登録（任意）") + "\n" +
+      "  動画キー：" + (videoKey() ? "登録済み" : "未登録（任意）") + "\n" +
+      "  通知先：" + notifyEmail() + "\n" +
+      "  自動実行：5分ごと（制作）／15分ごと（予約配信）\n\n" +
+      "【残り1ステップ】\n" +
+      "右上「デプロイ」→「デプロイを管理」→ 鉛筆アイコン →\n" +
+      "バージョンを「新バージョン」にして「デプロイ」。\n\n" +
+      "そのあと 今すぐ処理 を実行すると、溜まっている依頼が処理されます。";
+  }
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (e) {
+    Logger.log(msg);
+  }
 }
 
-/* ------------------------------------------------------------- 詳細 */
-
-function JobDetail({ job, onClose }) {
-  const [copied, setCopied] = useState(false);
-  if (!job) return null;
-  const pairs = parseInstruction(job.指示内容);
-  const km = KIND_META[job.種別] || KIND_META.コンテンツ;
-  const svc = (pairs.find((x) => x.k === "事業") || {}).v;
-  const sm = SERVICE_META[svc] || null;
-
-  const HIDE = ["事業", "JOB"];
-  const shown = pairs.filter((p) => HIDE.indexOf(p.k) < 0);
-
-  return (
-    <div className="lbModal" onClick={onClose}>
-      <style>{CSS_LIBRARY}</style>
-      <div className="lbModal__b" onClick={(e) => e.stopPropagation()} style={{ "--t": km.tone, "--s": km.soft }}>
-        <div className="lbModal__h">
-          <span className="lbModal__ic"><Li name={km.icon} size={20} /></span>
-          <div className="lbModal__ht">
-            <p className="lbModal__k">
-              {job.種別}
-              {sm && <em style={{ background: sm.soft, color: sm.tone }}>{sm.label}</em>}
-              <span className={`lbSt lbSt--${job.状態}`}>{job.状態}</span>
-            </p>
-            <h2>{jobTitle(job)}</h2>
-          </div>
-          <button className="lbModal__x" onClick={onClose} aria-label="閉じる"><Li name="x" size={18} /></button>
-        </div>
-
-        <div className="lbModal__body">
-          <dl className="lbMeta">
-            <div><dt>受信日時</dt><dd className="lbMono">{job.受信日時 || "—"}</dd></div>
-            <div><dt>完了日時</dt><dd className="lbMono">{job.完了日時 || "—"}</dd></div>
-            <div><dt>投稿先</dt><dd>{job.投稿先アカウント || "—"}</dd></div>
-            <div><dt>持ち主</dt><dd>{job.持ち主 || "—"}</dd></div>
-            <div><dt>媒体</dt><dd>{job.媒体 || "—"}</dd></div>
-            <div><dt>ジョブID</dt><dd className="lbMono">{job.job_id}</dd></div>
-          </dl>
-
-          {job.成果物URL && String(job.成果物URL).indexOf("http") === 0 ? (
-            <a className="lbOpen" href={job.成果物URL} target="_blank" rel="noopener noreferrer">
-              <Li name="open" size={17} />
-              成果物を開く
-            </a>
-          ) : (
-            <p className="lbNone">
-              {job.状態 === "完了"
-                ? "この案件には成果物ファイルが紐づいていません。"
-                : job.状態 === "エラー"
-                ? "処理中にエラーが発生しました。理由は下記のとおりです。"
-                : "処理が完了すると、ここに成果物へのリンクが表示されます。"}
-              {job.状態 === "エラー" && job.成果物URL && <span className="lbErr">{job.成果物URL}</span>}
-            </p>
-          )}
-
-          <div className="lbSpecH">
-            <h3>制作条件</h3>
-            <button
-              className="lbCopy"
-              onClick={() => {
-                try {
-                  navigator.clipboard.writeText(String(job.指示内容 || ""));
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                } catch (e) {}
-              }}
-            >
-              <Li name="copy" size={13} />
-              {copied ? "コピーしました" : "条件をコピー"}
-            </button>
-          </div>
-
-          {shown.length === 0 ? (
-            <p className="lbNone">条件の記録がありません。</p>
-          ) : (
-            <dl className="lbSpec">
-              {shown.map((p, i) => (
-                <div key={`${p.k}-${i}`}>
-                  <dt>{p.k}</dt>
-                  <dd>{p.v || "—"}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+/** キーが正しく読めているかだけを確認します */
+function キー確認() {
+  const c = creativeKey();
+  const msg =
+    "APIキーの状態\n────────────────\n" +
+    "  制作（必須）：" + (c ? (c.indexOf("app-") === 0 ? "OK（" + c.slice(0, 8) + "...）" : "形式が違います") : "未登録") + "\n" +
+    "  検査（任意）：" + (qaKey() ? "OK" : "未登録") + "\n" +
+    "  画像（任意）：" + (openaiKey() ? "OK" : "未登録") + "\n" +
+    "  動画（任意）：" + (videoKey() ? "OK" : "未登録") + "\n\n" +
+    (c ? "設定できています。デプロイを更新してください。" :
+      "コード冒頭の KEY_CREATIVE = \"\" にキーを貼って保存してください。");
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
-/* ------------------------------------------------------------- 本体 */
-
-function LibraryView({ pushLog, initialFilter }) {
-  const { settings } = useSettings();
-  const [jobs, setJobs] = useState(DEMO_JOBS);
-  const [live, setLive] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [svc, setSvc] = useState(initialFilter || "all");
-  const [kind, setKind] = useState("all");
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(null);
-  const [err, setErr] = useState("");
-  const [tab, setTab] = useState("works");
-  const [queue, setQueue] = useState([]);
-  const [copiedId, setCopiedId] = useState("");
-
-  useEffect(() => { if (initialFilter) setSvc(initialFilter); }, [initialFilter]);
-
-  const load = useCallback(async () => {
-    if (!settings.gasUrl) return;
-    setLoading(true);
-    setErr("");
-    try {
-      const r = await fetch(`${settings.gasUrl}?action=jobs`);
-      const data = await r.json();
-      try {
-        const rq = await fetch(`${settings.gasUrl}?action=queue`);
-        const dq = await rq.json();
-        if (dq && dq.ok && Array.isArray(dq.queue)) setQueue(dq.queue);
-      } catch (e2) { /* 予約が取れなくても本体は表示します */ }
-      if (data && data.ok && Array.isArray(data.jobs)) {
-        setJobs(data.jobs);
-        setLive(true);
-        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] LIBRARY SYNCED: ${data.jobs.length} records`);
-      } else {
-        throw new Error("形式が違います");
-      }
-    } catch (e) {
-      setLive(false);
-      setErr("取得できませんでした。接続設定をご確認ください。デモデータを表示しています。");
-    } finally {
-      setLoading(false);
-    }
-  }, [settings.gasUrl, pushLog]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const filtered = useMemo(() => {
-    return jobs.filter((j) => {
-      if (kind !== "all" && j.種別 !== kind) return false;
-      if (svc !== "all") {
-        const p = parseInstruction(j.指示内容);
-        const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
-        if (s !== svc) return false;
-      }
-      if (q.trim()) {
-        const hay = `${j.投稿先アカウント} ${j.持ち主} ${j.媒体} ${j.指示内容}`.toLowerCase();
-        if (hay.indexOf(q.trim().toLowerCase()) < 0) return false;
-      }
-      return true;
+/** 設定内容の確認用。いつでも実行できます。 */
+function showStatus() {
+  const d = diagnose();
+  const yn = function (b) { return b ? "登録済み" : "未登録"; };
+  const trig = d.トリガー.length ? d.トリガー.join(", ") : "なし（setup を実行してください）";
+  let msg =
+    "SASHIWA バックエンドの状態\n" +
+    "────────────────\n" +
+    "  バージョン：" + d.version + "\n" +
+    "  シート：ジョブ " + (d.シート.ジョブ ? "○" : "×") + " ／ 投稿キュー " + (d.シート.投稿キュー ? "○" : "×") + "\n" +
+    "  記録件数：" + d.シート.件数 + " 件\n" +
+    "  制作キー：" + yn(d.キー.制作) + "\n" +
+    "  検査キー：" + yn(d.キー.検査) + "\n" +
+    "  画像キー：" + yn(d.キー.画像) + "\n" +
+    "  動画キー：" + yn(d.キー.動画) + "\n" +
+    "  X投稿キー：" + yn(d.キー.X投稿) + "\n" +
+    "  通知先：" + d.通知先 + "\n" +
+    "  トリガー：" + trig + "\n";
+  if (d.未処理.length) {
+    msg += "\n未処理・エラーの案件\n────────────────\n";
+    d.未処理.forEach(function (w) {
+      msg += "  " + w.id + "（" + w.状態 + "）\n    " + w.備考 + "\n";
     });
-  }, [jobs, kind, svc, q]);
-
-  const kinds = useMemo(() => {
-    const set = {};
-    jobs.forEach((j) => { set[j.種別] = (set[j.種別] || 0) + 1; });
-    return set;
-  }, [jobs]);
-
-  return (
-    <div className="lbRoot">
-      <style>{CSS_LIBRARY}</style>
-
-      <header className="lbHead">
-        <div>
-          <p className="lbHead__en">LIBRARY</p>
-          <h1>成果物ライブラリ</h1>
-          <p className="lbHead__s">これまでに作ったものを、条件つきで探して開けます。</p>
-        </div>
-        <button className="lbRe" onClick={load} disabled={loading || !settings.gasUrl}>
-          <span className={loading ? "lbSpin" : ""}><Li name="refresh" size={15} /></span>
-          {settings.gasUrl ? (loading ? "取得中..." : "再取得") : "未接続"}
-        </button>
-      </header>
-
-      <div className={`lbSync ${live ? "is-live" : ""}`}>
-        <span className="lbSync__d" />
-        {live ? `実データを表示中（${jobs.length}件）` : "デモデータを表示中｜接続設定でGoogle Apps Scriptを接続すると実データになります"}
-      </div>
-      {err && <p className="lbErrBar">{err}</p>}
-
-      <div className="lbTabs">
-        <button className={tab === "works" ? "is-on" : ""} onClick={() => setTab("works")}>成果物</button>
-        <button className={tab === "queue" ? "is-on" : ""} onClick={() => setTab("queue")}>
-          予約投稿<em>{queue.filter((q) => q.状態 === "予約").length}</em>
-        </button>
-      </div>
-
-      {tab === "queue" ? (
-        queue.length === 0 ? (
-          <div className="lbEmpty">
-            <Li name="clock" size={30} />
-            <h2>予約された投稿はありません</h2>
-            <p>制作スタジオのSTEP3から予約すると、ここに並びます。</p>
-          </div>
-        ) : (
-          <div className="lbQueue">
-            {queue.map((q) => (
-              <article className={`lbQ lbQ--${q.状態}`} key={q.post_id}>
-                <div className="lbQ__l">
-                  <span className="lbMono lbQ__t">{q.予定日時}</span>
-                  <span className={`lbSt lbSt--${q.状態}`}>{q.状態}</span>
-                </div>
-                <div className="lbQ__m">
-                  <p className="lbQ__h">
-                    {q.アカウント}
-                    <em>{q.媒体}</em>
-                    {q.繰り返し && q.繰り返し !== "なし" && <em>{q.繰り返し}</em>}
-                  </p>
-                  <p className="lbQ__b">{q.本文}</p>
-                  <div className="lbQ__f">
-                    {q.投稿リンク && (
-                      <a className="lbQ__go" href={q.投稿リンク} target="_blank" rel="noopener noreferrer">
-                        <Li name="open" size={14} />
-                        投稿画面を開く
-                      </a>
-                    )}
-                    <button
-                      className="lbQ__cp"
-                      onClick={() => {
-                        try {
-                          navigator.clipboard.writeText(String(q.本文 || ""));
-                          setCopiedId(q.post_id);
-                          setTimeout(() => setCopiedId(""), 2000);
-                        } catch (e) {}
-                      }}
-                    >
-                      <Li name="copy" size={13} />
-                      {copiedId === q.post_id ? "コピーしました" : "本文をコピー"}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )
-      ) : (
-      <>
-      <div className="lbFilters">
-        <div className="lbSeg">
-          {[["all", "すべて"], ["AGENT", "AI社員構築"], ["STUDIO", "文書・動画"], ["SOCIAL", "SNS運用"]].map(([id, label]) => (
-            <button key={id} className={svc === id ? "is-on" : ""} onClick={() => setSvc(id)}>{label}</button>
-          ))}
-        </div>
-        <div className="lbSeg lbSeg--sub">
-          <button className={kind === "all" ? "is-on" : ""} onClick={() => setKind("all")}>全種別</button>
-          {Object.keys(kinds).map((k) => (
-            <button key={k} className={kind === k ? "is-on" : ""} onClick={() => setKind(k)}>{k} {kinds[k]}</button>
-          ))}
-        </div>
-        <label className="lbSearch">
-          <Li name="search" size={15} />
-          <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="アカウント名・内容で検索" />
-        </label>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="lbEmpty">
-          <Li name="box" size={30} />
-          <h2>該当する成果物がありません</h2>
-          <p>条件を変えるか、制作スタジオから新しく作ってみてください。</p>
-        </div>
-      ) : (
-        <div className="lbGrid">
-          {filtered.map((j) => {
-            const km = KIND_META[j.種別] || KIND_META.コンテンツ;
-            const p = parseInstruction(j.指示内容);
-            const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
-            const sm = SERVICE_META[s];
-            const hasFile = j.成果物URL && String(j.成果物URL).indexOf("http") === 0;
-            return (
-              <article key={j.job_id} className="lbCard" style={{ "--t": km.tone, "--s": km.soft }} onClick={() => setSel(j)}>
-                <div className="lbCard__h">
-                  <span className="lbCard__ic"><Li name={km.icon} size={17} /></span>
-                  <span className="lbCard__k">{j.種別}</span>
-                  {sm && <span className="lbCard__s" style={{ background: sm.soft, color: sm.tone }}>{s}</span>}
-                  <span className={`lbSt lbSt--${j.状態}`}>{j.状態}</span>
-                </div>
-                <p className="lbCard__t">{jobTitle(j)}</p>
-                <p className="lbCard__m">
-                  <span className="lbMono">{j.受信日時}</span>
-                  {j.媒体 && j.媒体 !== "-" && <em>{j.媒体}</em>}
-                </p>
-                <p className="lbCard__a">{j.投稿先アカウント || j.持ち主 || "—"}</p>
-                <div className="lbCard__f">
-                  <span className="lbCard__more">詳細を見る →</span>
-                  {hasFile && (
-                    <a href={j.成果物URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                      <Li name="open" size={14} />開く
-                    </a>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      </>
-      )}
-
-      <JobDetail job={sel} onClose={() => setSel(null)} />
-    </div>
-  );
-}
-
-/* ================================ CSS_LIBRARY ================================== */
-
-const CSS_LIBRARY = `
-.lbRoot,.lbModal{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;--t:#2456C8;--s:#E8EEFB;
-  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
-.lbRoot *,.lbRoot *::before,.lbRoot *::after,.lbModal *,.lbModal *::before,.lbModal *::after{box-sizing:border-box;}
-.lbRoot h1,.lbRoot h2,.lbRoot p,.lbRoot dl,.lbRoot dd,.lbRoot dt,.lbModal h2,.lbModal h3,.lbModal p,.lbModal dl,.lbModal dd,.lbModal dt{margin:0;padding:0;}
-.lbRoot button,.lbModal button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
-.lbRoot a,.lbModal a{color:inherit;text-decoration:none;}
-.lbMono{font-family:var(--mono);}
-.lbSpin{display:inline-flex;animation:lbSpin 1s linear infinite;}
-@keyframes lbSpin{to{transform:rotate(360deg);}}
-
-.lbHead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
-.lbHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai);font-weight:700;margin-bottom:8px;}
-.lbHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
-.lbHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
-.lbRe{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:10px 18px;transition:all .2s;}
-.lbRe:hover:not(:disabled){border-color:var(--ink);color:var(--ink);}
-.lbRe:disabled{opacity:.5;cursor:default;}
-
-.lbSync{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 15px;margin-bottom:12px;}
-.lbSync__d{width:8px;height:8px;border-radius:50%;background:#9BA3B1;flex-shrink:0;}
-.lbSync.is-live .lbSync__d{background:#0E9F73;box-shadow:0 0 0 3px rgba(14,159,115,.2);}
-.lbErrBar{font-size:12px;color:var(--sig);background:#FDECEA;border-radius:11px;padding:11px 15px;margin-bottom:12px;line-height:1.8;}
-
-.lbFilters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
-.lbSeg{display:flex;gap:4px;background:var(--bg);border-radius:999px;padding:4px;flex-wrap:wrap;}
-.lbSeg button{font-size:12.5px;font-weight:700;padding:8px 16px;border-radius:999px;color:var(--muted);transition:all .2s;white-space:nowrap;}
-.lbSeg button.is-on{background:var(--ink);color:#fff;}
-.lbSeg--sub button.is-on{background:var(--ai);}
-.lbSearch{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;flex:1;min-width:200px;}
-.lbSearch svg{color:var(--muted);}
-.lbSearch input{flex:1;border:none;background:none;font:inherit;font-size:13px;outline:none;color:var(--ink);}
-
-.lbGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:13px;}
-.lbCard{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:18px 20px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
-.lbCard:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);}
-.lbCard__h{display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap;}
-.lbCard__ic{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--s);color:var(--t);}
-.lbCard__k{font-size:11.5px;font-weight:700;}
-.lbCard__s{font-family:var(--mono);font-size:9px;font-weight:700;border-radius:999px;padding:3px 8px;letter-spacing:.06em;}
-.lbSt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;white-space:nowrap;}
-.lbSt--完了{color:#0E9F73;background:#E6F7F0;}
-.lbSt--制作中{color:#B47C10;background:#FFF4DE;}
-.lbSt--エラー{color:var(--sig);background:#FDECEA;}
-.lbCard__t{font-size:14px;font-weight:700;line-height:1.65;margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.lbCard__m{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--muted);margin-bottom:5px;}
-.lbCard__m em{font-style:normal;border:1px solid var(--line);border-radius:999px;padding:2px 8px;}
-.lbCard__a{font-size:11.5px;color:var(--muted);margin-bottom:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.lbCard__f{display:flex;align-items:center;gap:10px;padding-top:11px;border-top:1px solid var(--line);}
-.lbCard__more{font-size:12px;font-weight:700;color:var(--t);}
-.lbCard__f a{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px;transition:all .2s;}
-.lbCard__f a:hover{border-color:var(--t);color:var(--t);}
-
-.lbEmpty{background:var(--white);border:1px dashed var(--line);border-radius:20px;padding:52px 28px;text-align:center;color:var(--muted);}
-.lbEmpty svg{margin:0 auto 16px;color:var(--ai);}
-.lbEmpty h2{font-size:17px;font-weight:900;color:var(--ink);margin-bottom:8px;}
-.lbEmpty p{font-size:13px;}
-
-/* 詳細モーダル */
-.lbModal{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:220;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
-.lbModal__b{background:var(--white);border-radius:22px;width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 80px -40px rgba(0,0,0,.5);}
-.lbModal__h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px;border-bottom:1px solid var(--line);}
-.lbModal__ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--s);color:var(--t);flex-shrink:0;}
-.lbModal__ht{flex:1;min-width:0;}
-.lbModal__k{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px;flex-wrap:wrap;}
-.lbModal__k em{font-style:normal;font-size:9.5px;border-radius:999px;padding:2px 8px;}
-.lbModal__ht h2{font-size:17px;font-weight:900;line-height:1.55;}
-.lbModal__x{color:var(--muted);padding:6px;border-radius:8px;flex-shrink:0;}
-.lbModal__x:hover{background:var(--bg);color:var(--ink);}
-.lbModal__body{padding:20px 22px;overflow-y:auto;}
-
-.lbMeta{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px;}
-.lbMeta > div{background:var(--white);padding:11px 14px;}
-.lbMeta dt{font-size:10px;color:var(--muted);margin-bottom:3px;}
-.lbMeta dd{font-size:12.5px;font-weight:500;line-height:1.6;word-break:break-all;}
-@media (max-width:560px){.lbMeta{grid-template-columns:1fr;}}
-
-.lbOpen{display:flex;align-items:center;justify-content:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:14px;margin-bottom:18px;transition:filter .2s,transform .2s;}
-.lbOpen:hover{filter:brightness(.92);transform:translateY(-1px);}
-.lbNone{font-size:12.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
-.lbErr{display:block;font-family:var(--mono);font-size:11px;color:var(--sig);margin-top:8px;word-break:break-all;}
-
-.lbSpecH{display:flex;align-items:center;gap:10px;margin-bottom:11px;}
-.lbSpecH h3{font-size:13px;font-weight:700;}
-.lbCopy{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 13px;transition:all .2s;}
-.lbCopy:hover{border-color:var(--t);color:var(--t);}
-.lbSpec{display:grid;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;}
-.lbSpec > div{display:grid;grid-template-columns:130px 1fr;gap:12px;padding:10px 14px;align-items:baseline;}
-.lbSpec > div:nth-child(odd){background:var(--bg);}
-.lbSpec dt{font-size:11px;font-weight:700;color:var(--muted);}
-.lbSpec dd{font-size:12.5px;line-height:1.85;word-break:break-word;}
-@media (max-width:560px){.lbSpec > div{grid-template-columns:1fr;gap:3px;}}
-
-.lbTabs{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;margin-bottom:14px;width:fit-content;}
-.lbTabs button{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;padding:9px 20px;border-radius:999px;color:var(--muted);transition:all .2s;}
-.lbTabs button.is-on{background:var(--ink);color:#fff;}
-.lbTabs em{font-style:normal;font-family:var(--mono);font-size:10px;background:var(--ai);color:#fff;border-radius:999px;padding:1px 7px;}
-.lbQueue{display:grid;gap:10px;}
-.lbQ{display:grid;grid-template-columns:150px 1fr;gap:16px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--ai);border-radius:16px;padding:16px 18px;}
-.lbQ--投稿済み,.lbQ--配信済み{border-left-color:#0E9F73;opacity:.72;}
-.lbQ--エラー{border-left-color:var(--sig);}
-.lbQ__l{display:flex;flex-direction:column;gap:7px;align-items:flex-start;}
-.lbQ__t{font-size:12px;font-weight:700;color:var(--ai);}
-.lbQ__l .lbSt{margin-left:0;}
-.lbQ__h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:6px;flex-wrap:wrap;}
-.lbQ__h em{font-style:normal;font-size:10.5px;font-weight:400;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
-.lbQ__b{font-size:12.5px;line-height:1.85;color:var(--muted);white-space:pre-wrap;}
-.lbSt--予約{color:var(--ai);background:#F1EDFC;}
-.lbSt--投稿済み,.lbSt--配信済み{color:#0E9F73;background:#E6F7F0;}
-@media (max-width:640px){.lbQ{grid-template-columns:1fr;gap:9px;}.lbQ__l{flex-direction:row;align-items:center;}}
-
-.lbQ__f{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;}
-.lbQ__go{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;transition:filter .2s;}
-.lbQ__go:hover{filter:brightness(.92);}
-.lbQ__cp{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:8px 15px;transition:all .2s;}
-.lbQ__cp:hover{border-color:var(--ink);color:var(--ink);}
-`;
-
-/* ============================ 3. 制作スタジオ ============================ */
-
-/* ============================================================================
-   株式会社SASHIWA — 制作スタジオ v3
-   配置：src/Studio.jsx
-
-   ■ 設計の考え方
-   お客様も運用者も「何が最適か」は分かりません。そこで
-     STEP1 運用設計 … AIがまず最適解を提案し、人が調整する
-     STEP2 制作     … 提案された条件を引き継いで、細部を詰めて生成する
-     STEP3 投稿予約 … 予約キューに積む
-   という順路にしています。
-
-   ■ 推奨エンジンについて
-   媒体特性・業種・目的・使える時間から、内蔵のルールで即座に提案します
-   （通信もAPI費用も発生しません）。さらに踏み込んだ運用設計書が必要な場合は、
-   「詳細な運用設計書をAIに作らせる」からMake経由でDifyに依頼できます。
-
-   ■ セキュリティ
-   APIキーはフロントに置きません。生成は必ず Make Webhook 経由です。
-   ============================================================================ */
-
-/* 送信先は「接続設定」画面で切り替えます。コードを書き換える必要はありません。 */
-const OWNER = { name: "OWNER（指輪直人）", email: "owner@sashiwa.local" };
-
-/* =========================== プラットフォーム定義 ======================== */
-
-const PLATFORMS = [
-  {
-    id: "instagram", label: "Instagram", en: "INSTAGRAM", tone: "#C13584", soft: "#FBEAF4",
-    hashtag: "5〜10個。大規模タグより中小規模タグを混ぜる",
-    times: ["12:00", "20:00"], kpi: "保存数・リーチ",
-    win: "1枚目（表紙）で結論を言い切ること。保存される情報密度があるか。",
-    strength: { 認知: 4, 見込み客: 3, 販売: 4, 採用: 4, 信頼: 3 },
-    effort: 3,
-    formats: [
-      { id: "reel", label: "リール", ratio: "9:16", dur: "15〜60秒", cap: 2200, spec: "冒頭1秒でフックを出す。字幕は全編必須。音源は商用可のものだけ。" },
-      { id: "feed", label: "フィード", ratio: "4:5", cap: 2200, spec: "1枚目で完結させる。文字は最小限で大きく。" },
-      { id: "carousel", label: "カルーセル", ratio: "4:5", cap: 2200, pages: "5〜10枚", spec: "表紙→本編→まとめ→CTA。1枚1メッセージ。" },
-      { id: "story", label: "ストーリーズ", ratio: "9:16", dur: "15秒", cap: 0, spec: "リンク導線に使う。上下15%は安全マージンを空ける。" },
-    ],
-  },
-  {
-    id: "threads", label: "Threads", en: "THREADS", tone: "#1A2233", soft: "#ECEEF2",
-    hashtag: "1〜2個。付けすぎない",
-    times: ["08:00", "22:00"], kpi: "返信数・いいね",
-    win: "会話が始まる余白を残すこと。断定より問いかけ。",
-    strength: { 認知: 3, 見込み客: 3, 販売: 2, 採用: 2, 信頼: 3 },
-    effort: 1,
-    formats: [
-      { id: "text", label: "テキスト投稿", cap: 500, spec: "1投稿1論点。改行を多めに取り、スマホで読める塊にする。" },
-      { id: "thread", label: "連投（スレッド）", cap: 500, pages: "3〜7投稿", spec: "1本目で全体の結論、以降で分解。最後に問いかけ。" },
-      { id: "image", label: "画像つき投稿", ratio: "1:1", cap: 500, spec: "画像は文章の補足ではなく、単体で意味が通ること。" },
-    ],
-  },
-  {
-    id: "tiktok", label: "TikTok", en: "TIKTOK", tone: "#E0402F", soft: "#FDECEA",
-    hashtag: "3〜5個。ジャンルタグ中心",
-    times: ["19:00", "22:00"], kpi: "視聴完了率",
-    win: "最後まで見られること。冒頭2秒で離脱が決まる。",
-    strength: { 認知: 5, 見込み客: 2, 販売: 3, 採用: 3, 信頼: 2 },
-    effort: 4,
-    formats: [
-      { id: "short", label: "ショート動画", ratio: "9:16", dur: "15〜60秒", cap: 2200, spec: "冒頭2秒でフック。テンポは短めのカット割り。字幕必須。" },
-      { id: "long", label: "長尺動画", ratio: "9:16", dur: "1〜3分", cap: 2200, spec: "序盤で結論を提示してから展開する。中だるみを作らない。" },
-      { id: "photo", label: "フォトモード", ratio: "9:16", cap: 2200, pages: "5〜10枚", spec: "1枚目で疑問を投げ、めくらせる構成に。" },
-    ],
-  },
-  {
-    id: "yt_shorts", label: "YouTube Shorts", en: "YT SHORTS", tone: "#D3241C", soft: "#FCEAE9",
-    hashtag: "#Shorts を必ず含める",
-    times: ["07:00", "21:00"], kpi: "視聴維持率・チャンネル登録",
-    win: "ループして見られる構成。終わりと始まりを繋げる。",
-    strength: { 認知: 5, 見込み客: 2, 販売: 2, 採用: 3, 信頼: 3 },
-    effort: 4,
-    formats: [
-      { id: "short", label: "ショート", ratio: "9:16", dur: "〜60秒", cap: 100, spec: "タイトルは40文字以内。冒頭1.5秒でフック。ループ構成を狙う。" },
-      { id: "clip", label: "切り抜き", ratio: "9:16", dur: "30〜60秒", cap: 100, spec: "長尺の山場を切り出す。前後に文脈の補足字幕を足す。" },
-    ],
-  },
-  {
-    id: "youtube", label: "YouTube", en: "YOUTUBE", tone: "#B3181C", soft: "#FBE9E9",
-    hashtag: "3個まで。説明欄の先頭に",
-    times: ["19:00"], kpi: "総再生時間・クリック率",
-    win: "サムネイルとタイトルの組み合わせで開かれるか。",
-    strength: { 認知: 3, 見込み客: 4, 販売: 3, 採用: 4, 信頼: 5 },
-    effort: 5,
-    formats: [
-      { id: "long", label: "通常動画", ratio: "16:9", dur: "8〜15分", cap: 5000, spec: "冒頭30秒で得られるものを明示。章立てとタイムスタンプを付ける。" },
-      { id: "thumb", label: "サムネイル案", ratio: "16:9", cap: 0, spec: "文字は13文字以内。スマホの小さい表示で読めるか。" },
-      { id: "community", label: "コミュニティ投稿", cap: 1000, spec: "動画への導線か、視聴者への問いかけに絞る。" },
-    ],
-  },
-  {
-    id: "x", label: "X（旧Twitter）", en: "X", tone: "#1A2233", soft: "#ECEEF2",
-    hashtag: "0〜2個。無しでも良い",
-    times: ["08:00", "12:00", "22:00"], kpi: "インプレッション・リポスト",
-    win: "1行目だけで価値が伝わること。折り返される前に刺す。",
-    strength: { 認知: 4, 見込み客: 4, 販売: 3, 採用: 3, 信頼: 4 },
-    effort: 1,
-    formats: [
-      { id: "post", label: "単発投稿", cap: 140, spec: "1行目で完結。改行で余白を作る。" },
-      { id: "thread", label: "スレッド", cap: 140, pages: "5〜10投稿", spec: "1本目で結論と本数を提示。各投稿を単体で読めるように。" },
-      { id: "long", label: "長文投稿", cap: 3000, spec: "冒頭140文字で読ませきる。以降に詳細。" },
-    ],
-  },
-  {
-    id: "note", label: "note", en: "NOTE", tone: "#0E9F73", soft: "#E7F6F1",
-    hashtag: "3〜5個",
-    times: ["07:00"], kpi: "スキ・フォロー・読了率",
-    win: "見出しだけ読んでも筋が通ること。",
-    strength: { 認知: 2, 見込み客: 5, 販売: 3, 採用: 3, 信頼: 5 },
-    effort: 3,
-    formats: [
-      { id: "article", label: "記事", cap: 8000, spec: "冒頭200字で読む理由を提示。見出しは疑問形か結論形で。" },
-      { id: "paid", label: "有料記事", cap: 12000, spec: "無料部分で価値を証明し、有料部分に実践手順を置く。" },
-    ],
-  },
-];
-
-/* =============================== 選択肢 ================================= */
-
-const INDUSTRIES = [
-  { id: "btob", label: "BtoBサービス", pillars: ["導入前後の変化", "業界の課題整理", "自社の運用の裏側"], bias: ["x", "note", "youtube"] },
-  { id: "shigyo", label: "士業・コンサル", pillars: ["よくある相談と回答", "制度・法改正の解説", "失敗事例の共有"], bias: ["note", "x", "youtube"], legal: "各士業の広告規制（誇大広告・成功報酬の表示など）に注意してください。" },
-  { id: "food", label: "飲食", pillars: ["調理・仕込みの様子", "季節メニュー", "店主の思想"], bias: ["instagram", "tiktok", "yt_shorts"], legal: "「日本一」などの最上級表現には客観的な根拠が必要です（景品表示法）。" },
-  { id: "beauty", label: "美容・サロン", pillars: ["施術のビフォーアフター", "自宅ケアの方法", "スタッフ紹介"], bias: ["instagram", "tiktok", "yt_shorts"], legal: "施術の効果を断定する表現は薬機法に抵触します。ビフォーアフターの掲載条件も要確認。" },
-  { id: "retail", label: "小売・EC", pillars: ["商品の使い方", "選び方ガイド", "お客様の声"], bias: ["instagram", "tiktok", "x"], legal: "価格・割引の表示は二重価格表示に注意（景品表示法）。" },
-  { id: "school", label: "教育・スクール", pillars: ["ミニ講義", "受講生の変化", "学習法の解説"], bias: ["youtube", "instagram", "note"], legal: "合格率・就職率などの実績表示には根拠と算出条件の明示が必要です。" },
-  { id: "estate", label: "不動産", pillars: ["物件の見どころ", "エリア解説", "契約の注意点"], bias: ["youtube", "instagram", "x"], legal: "宅建業法の広告規制（おとり広告・取引態様の明示）に注意してください。" },
-  { id: "health", label: "医療・健康", pillars: ["症状の基礎知識", "受診の目安", "予防の習慣"], bias: ["note", "youtube", "x"], legal: "医療広告ガイドライン・薬機法の対象です。効果効能の断定、体験談の掲載は原則できません。検査は必ず「厳格」を選んでください。" },
-  { id: "creative", label: "制作・クリエイティブ", pillars: ["制作過程", "ビフォーアフター", "使っている道具"], bias: ["instagram", "x", "yt_shorts"] },
-  { id: "other", label: "その他", pillars: ["専門知識の共有", "現場の様子", "お客様との対話"], bias: ["x", "instagram", "note"] },
-];
-
-const GOALS = [
-  { id: "認知", label: "認知を広げる", note: "まず知ってもらう" },
-  { id: "見込み客", label: "見込み客を集める", note: "問い合わせにつなげる" },
-  { id: "販売", label: "商品を売る", note: "購入・申込を増やす" },
-  { id: "採用", label: "採用したい", note: "応募を集める" },
-  { id: "信頼", label: "信頼を積む", note: "専門性を示す" },
-];
-
-const RESOURCES = [
-  { id: "low", label: "ほぼ取れない", note: "週1時間未満", max: 1, cad: "週2本", eff: 2 },
-  { id: "mid", label: "少し取れる", note: "週2〜3時間", max: 2, cad: "週3〜4本", eff: 3 },
-  { id: "high", label: "しっかり取れる", note: "週5時間以上", max: 3, cad: "毎日", eff: 5 },
-];
-
-const TONES = ["丁寧・ですます", "フランク", "断定的・力強い", "専門的・硬め", "やわらかい・共感"];
-const STRUCTS = ["PREP法（結論→理由→例→結論）", "ストーリー型", "リスト型（○選）", "比較型", "実演・手順型", "Q&A型", "逆説型"];
-const HOOKS = ["数字を出す", "否定から入る", "疑問形で問う", "実体験を語る", "常識を覆す", "損失を示す", "実績で示す"];
-const PERSONS = ["私", "僕", "弊社", "当社", "使わない"];
-const EMOJI = ["使わない", "控えめ", "適度に"];
-const CTAS = ["プロフィールのリンクへ", "DMで相談", "コメントを促す", "LPへ誘導", "保存を促す", "CTAなし"];
-const EXTRAS = ["ハッシュタグ案", "フック案（冒頭）", "サムネ文言", "字幕テキスト", "投稿の狙い・解説", "CTA文案", "次回投稿の案"];
-const VARIANTS = [
-  { id: "1", label: "1案", note: "すぐ使いたいとき" },
-  { id: "3", label: "3案", note: "比較して選びたい（推奨）" },
-  { id: "5", label: "5案", note: "方向性から探りたい" },
-];
-const QA_LEVELS = [
-  { id: "standard", label: "標準検査", note: "事実関係と表現の一次確認" },
-  { id: "strict", label: "厳格検査", note: "薬機法・景表法・著作権まで二重確認（納品用）" },
-];
-
-/* ===================== 画像の指示文を自動で書く ========================= */
-
-const IMG_LIGHT = ["朝の斜光", "曇天のやわらかい拡散光", "窓から差す逆光", "夕方の低い光", "均一なスタジオ照明"];
-const IMG_ANGLE = ["やや俯瞰", "目線の高さ", "低い位置から見上げる", "真上からの俯瞰", "斜め45度"];
-const IMG_MOOD = {
-  認知: "目を引く強いコントラスト",
-  見込み客: "落ち着いて信頼感のある静かなトーン",
-  販売: "明るく前向きで、手に取りたくなる質感",
-  採用: "人の気配が感じられるあたたかい空気",
-  信頼: "余白の多い、端正で静かな構成",
-};
-const IMG_SUBJECT = {
-  btob: ["誰もいない朝のオフィスで、モニターだけが淡く光っている机", "積み上がった書類の山が奥に向かって薄れて消えていく様子", "整然と並んだ机と、時計だけが動いている静かな室内"],
-  shigyo: ["万年筆と閉じられた書類が置かれた木製のデスク", "窓辺に置かれた分厚い専門書と眼鏡", "整理された書棚と、差し込む午後の光"],
-  food: ["湯気の立つ調理場の手元と、仕込み中の食材", "カウンターに並べられた器と、朝の仕込みの風景", "季節の食材が並んだまな板の俯瞰"],
-  beauty: ["清潔なサロンの施術台と、整えられた道具", "並べられたケア用品と、やわらかい布の質感", "鏡越しに映る、明るく整った室内"],
-  retail: ["棚に整然と並んだ商品と、やわらかい照明", "包装された商品と、開封される直前の様子", "手のひらに乗せた商品の質感を映した接写"],
-  school: ["黒板と、書きかけのノートが置かれた机", "並んだ椅子と、朝の教室に差す光", "ノートとペンを俯瞰でとらえた学習の風景"],
-  estate: ["朝の光が入る、家具のない部屋", "窓から見える街並みと、室内の余白", "鍵と間取り図が置かれたテーブル"],
-  health: ["清潔で明るい待合室の椅子と観葉植物", "整えられた器具と、白を基調とした室内", "窓辺の水差しと、静かな午前の光"],
-  creative: ["制作途中の机の上、道具が散らばった手元", "画面に映る作りかけのデザインと、余白のある机", "並べられた色見本とスケッチ"],
-  other: ["静かな作業机と、途中まで進んだ仕事の痕跡", "整えられた道具が並ぶ棚", "窓辺の机と、差し込む自然光"],
-};
-
-function pickOne(arr, seed) {
-  return arr[Math.abs(seed) % arr.length];
+  }
+  if (!d.キー.制作) msg += "\n▲ 制作キーが未登録です。setup を実行してください。";
+  if (!d.トリガー.length) msg += "\n▲ 自動実行のトリガーがありません。setup を実行してください。";
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 /**
- * テーマ・業種・目的から、画像の指示文を3案つくります。
- * 通信もAPI費用も発生しません。これを下書きにして、送信後にAIが
- * 英語の詳細プロンプトへ仕上げます（2段階方式）。
+ * 失敗した依頼を、もう一度処理できる状態に戻します。
+ * キーを入れ直したあとや、一時的な失敗のあとに実行してください。
  */
-function suggestImagePrompts(ctx, style, ratio, theme, seed) {
-  const ind = ctx.industry || "other";
-  const subjects = IMG_SUBJECT[ind] || IMG_SUBJECT.other;
-  const mood = IMG_MOOD[ctx.goal] || IMG_MOOD.認知;
-  const t = (theme || "").trim();
-  const vertical = String(ratio).indexOf("9:16") >= 0 || String(ratio).indexOf("4:5") >= 0;
-  const frame = vertical ? "縦位置。主役を上寄せにして、下半分に文字を載せる余白を残す" : "横位置。中央から右に余白を残す";
-
-  const a = {
-    label: "状況を切り取る",
-    note: "いちばん外しにくい。実務の空気が伝わります",
-    text:
-      pickOne(subjects, seed) + "。" +
-      pickOne(IMG_ANGLE, seed + 1) + "の構図。" +
-      pickOne(IMG_LIGHT, seed + 2) + "。" +
-      mood + "。" + frame + "。人物の顔は写さない。",
-  };
-  const b = {
-    label: "たとえで見せる",
-    note: "抽象的なテーマ向き。印象に残ります",
-    text:
-      (t ? "「" + t + "」を象徴する物を1つだけ置いた、" : "テーマを象徴する物を1つだけ置いた、") +
-      "余白の多いミニマルな構図。背景は無地に近く、影はやわらかい。" +
-      pickOne(IMG_LIGHT, seed + 3) + "。" + mood + "。" + frame + "。文字は入れない。",
-  };
-  const c = {
-    label: "図解にする",
-    note: "手順や仕組みの説明向き",
-    text:
-      (t ? "「" + t + "」の流れを表す、" : "処理の流れを表す、") +
-      "3つのブロックが左から右へつながる図。細い線と大きな余白。色は2色まで。" +
-      "背景は淡い単色。立体感は付けず、平面的に。" + frame + "。文字は入れない。",
-  };
-
-  const arr = [a, b, c];
-  if (style === "図解・ダイアグラム") return [c, a, b];
-  if (style === "イラスト" || style === "フラットデザイン") return [b, c, a];
-  return arr;
+function 再実行() {
+  const n = retryFailed();
+  const msg = n > 0
+    ? n + " 件を再実行の対象に戻しました。\n\n続けて 今すぐ処理 を実行してください。"
+    : "再実行が必要な依頼はありませんでした。";
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
-/* ========================= AI推奨エンジン（内蔵） ======================== */
-
-function recommend({ industry, goal, resource, budgetVideo }) {
-  const ind = INDUSTRIES.find((i) => i.id === industry) || INDUSTRIES[9];
-  const res = RESOURCES.find((r) => r.id === resource) || RESOURCES[1];
-
-  const scored = PLATFORMS.map((p) => {
-    let s = (p.strength[goal] || 2) * 10;
-    const bi = ind.bias.indexOf(p.id);
-    if (bi >= 0) s += 18 - bi * 5;
-    if (p.effort > res.eff) s -= (p.effort - res.eff) * 9;
-    if (!budgetVideo && p.effort >= 4) s -= 14;
-    return { ...p, score: s };
-  }).sort((a, b) => b.score - a.score);
-
-  const picked = scored.slice(0, res.max).map((p, i) => {
-    const fmt = pickFormat(p, goal, res);
-    return {
-      id: p.id,
-      label: p.label,
-      format: fmt.id,
-      formatLabel: fmt.label,
-      rank: i + 1,
-      why: whyPlatform(p, goal, ind, res, i),
-    };
-  });
-
-  const tone =
-    goal === "採用" ? "やわらかい・共感"
-    : goal === "信頼" ? "専門的・硬め"
-    : goal === "販売" ? "断定的・力強い"
-    : industry === "health" || industry === "shigyo" ? "丁寧・ですます"
-    : "丁寧・ですます";
-
-  const times = Array.from(new Set(picked.flatMap((p) => PLATFORMS.find((x) => x.id === p.id).times))).sort().slice(0, 3);
-
-  return {
-    platforms: picked,
-    cadence: res.cad,
-    times,
-    tone,
-    struct: goal === "販売" ? "PREP法（結論→理由→例→結論）" : goal === "認知" ? "リスト型（○選）" : "ストーリー型",
-    hook: goal === "認知" ? "数字を出す" : goal === "信頼" ? "実績で示す" : goal === "販売" ? "損失を示す" : "疑問形で問う",
-    cta: goal === "見込み客" ? "DMで相談" : goal === "販売" ? "LPへ誘導" : goal === "認知" ? "保存を促す" : "プロフィールのリンクへ",
-    variants: res.id === "low" ? "3" : "3",
-    qa: industry === "health" || industry === "shigyo" || industry === "estate" ? "strict" : "standard",
-    pillars: ind.pillars,
-    kpi: PLATFORMS.find((x) => x.id === picked[0].id).kpi,
-    legal: ind.legal || "",
-    reason: `${ind.label}で「${GOALS.find((g) => g.id === goal).label}」を狙う場合、${picked[0].label}が最も効きます。使える時間が${res.note}なので、無理なく続く範囲として${res.max}媒体・${res.cad}を上限にしています。`,
-  };
-}
-
-function pickFormat(p, goal, res) {
-  const f = p.formats;
-  if (p.id === "instagram") return goal === "認知" ? f[0] : goal === "販売" ? f[2] : goal === "採用" ? f[1] : f[2];
-  if (p.id === "x") return goal === "見込み客" || goal === "信頼" ? f[1] : f[0];
-  if (p.id === "note") return f[0];
-  if (p.id === "youtube") return res.eff >= 5 ? f[0] : f[2];
-  if (p.id === "tiktok") return f[0];
-  if (p.id === "yt_shorts") return f[0];
-  return f[0];
-}
-
-function whyPlatform(p, goal, ind, res, rank) {
-  const g = GOALS.find((x) => x.id === goal).label;
-  if (rank === 0) return `${ind.label}と「${g}」の相性が最も良く、${p.kpi}で成果を測れます。`;
-  if (p.effort <= 2) return `手間が軽いので、主軸の投稿を転用して負担なく広げられます。`;
-  return `主軸を補完し、${p.kpi}という別の角度で接点を増やせます。`;
-}
-
-/* ===================== アカウント初期設定の生成 ========================= */
-
-function buildProfile({ company, service, target, goal, cta }) {
-  const g = GOALS.find((x) => x.id === goal);
-  return [
-    `${target || "◯◯でお悩みの方"}へ｜${company || "（社名）"}`,
-    `${service || "（サービス内容）"}`,
-    `▼${g ? g.note : "詳しくはこちら"}`,
-    `${cta === "LPへ誘導" ? "リンクからご覧ください" : cta === "DMで相談" ? "DMでお気軽にご相談ください" : "プロフィールのリンクへ"}`,
-  ].join("\n");
-}
-
-/* =============================== 部品 =================================== */
-
-function Sic({ name, size = 18 }) {
-  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
-  const p = {
-    send: (<><path d="M21.5 2.5 11 13" {...s} /><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4z" {...s} /></>),
-    loader: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.9 2.9M15.5 15.5l2.9 2.9M18.4 5.6l-2.9 2.9M8.5 15.5l-2.9 2.9" {...s} />,
-    spark: (<><path d="M12 3.5 13.9 9.3 19.7 11.2 13.9 13.1 12 18.9 10.1 13.1 4.3 11.2 10.1 9.3Z" {...s} /><path d="M18.5 3.5v3M20 5h-3" {...s} /></>),
-    clock: (<><circle cx="12" cy="12" r="9" {...s} /><path d="M12 7v5.3l3.4 2" {...s} /></>),
-    check: (<><circle cx="12" cy="12" r="9" {...s} /><path d="m8 12.3 2.8 2.8L16 9.8" {...s} /></>),
-    warn: (<><path d="M12 3.6 21.4 20H2.6Z" {...s} /><path d="M12 10v4.2M12 17.4v.1" {...s} /></>),
-    trash: (<><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" {...s} /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2A1.5 1.5 0 0 0 16.6 19l.9-12.5" {...s} /></>),
-    doc: (<><path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} /><path d="M14 2.8V7h4M8.5 12h7M8.5 16h5" {...s} /></>),
-    image: (<><rect x="3" y="4.5" width="18" height="15" rx="2.6" {...s} /><circle cx="8.6" cy="10" r="1.9" {...s} /><path d="m4 17 4.6-4.4 3.4 3.2 3.4-3.6L20 17" {...s} /></>),
-    map: (<><path d="M9 3.5 3.5 6v14.5L9 18l6 2.5 5.5-2.5V3.5L15 6Z" {...s} /><path d="M9 3.5V18M15 6v14.5" {...s} /></>),
-    copy: (<><rect x="8.5" y="8.5" width="12" height="12" rx="2.4" {...s} /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" {...s} /></>),
-  };
-  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.check}</svg>;
-}
-
-function Field({ label, hint, children, ai }) {
-  return (
-    <label className="stF">
-      <span className="stF__l">
-        {label}
-        {ai && <em className="stAiTag">AI推奨</em>}
-      </span>
-      {children}
-      {hint && <span className="stF__h">{hint}</span>}
-    </label>
-  );
-}
-
-function Chips({ options, value, onChange, multi }) {
-  const on = (o) => {
-    if (!multi) return onChange(o);
-    onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
-  };
-  return (
-    <div className="stChips">
-      {options.map((o) => (
-        <button key={o} type="button" className={(multi ? value.includes(o) : value === o) ? "is-on" : ""} onClick={() => on(o)}>{o}</button>
-      ))}
-    </div>
-  );
-}
-
-/* =============================== 本体 =================================== */
-
-function Studio({ pushLog }) {
-  const [step, setStep] = useState(1);
-  const { accounts } = useAccounts();
-  const { settings } = useSettings();
-  const endpoint = resolveEndpoint(settings);
-  const live = accounts.filter((a) => a.status === "運用中");
-  const [acctId, setAcctId] = useState("");
-  const acct = live.find((a) => a.id === acctId) || live[0] || null;
-  const mode = acct && acct.ownerType === "client" ? "CLIENT" : "OWNER";
-
-  /* STEP1 前提 */
-  const [ctx, setCtx] = useState({
-    company: "", industry: "btob", goal: "見込み客", resource: "mid",
-    service: "", target: "", pain: "", strength: "", price: "", ng: "", ref: "", budgetVideo: false, raw: "",
-  });
-  const [plan, setPlan] = useState(null);
-  const [touched, setTouched] = useState({});
-
-  /* STEP2 制作条件 */
-  const [pfId, setPfId] = useState("instagram");
-  const [fmtId, setFmtId] = useState("carousel");
-  const [tone, setTone] = useState("丁寧・ですます");
-  const [struct, setStruct] = useState("ストーリー型");
-  const [hook, setHook] = useState("疑問形で問う");
-  const [person, setPerson] = useState("私");
-  const [emoji, setEmoji] = useState("控えめ");
-  const [cta, setCta] = useState("プロフィールのリンクへ");
-  const [len, setLen] = useState("");
-  const [extras, setExtras] = useState(["ハッシュタグ案", "フック案（冒頭）"]);
-  const [variants, setVariants] = useState("3");
-  const [qa, setQa] = useState("standard");
-  const [theme, setTheme] = useState("");
-  const [points, setPoints] = useState("");
-  const [subTab, setSubTab] = useState("content");
-  const [imgDesc, setImgDesc] = useState("");
-  const [imgStyle, setImgStyle] = useState("写真風");
-  const [ideas, setIdeas] = useState([]);
-  const [seed, setSeed] = useState(1);
-
-  /* STEP3 */
-  const [schedule, setSchedule] = useState({ at: "", repeat: "なし" });
-
-  const [sending, setSending] = useState(false);
-  const [flash, setFlash] = useState(null);
-  const [jobs, setJobs] = useState([]);
-  const [copied, setCopied] = useState(false);
-
-  const pf = useMemo(() => PLATFORMS.find((p) => p.id === pfId) || PLATFORMS[0], [pfId]);
-  const fmt = useMemo(() => pf.formats.find((f) => f.id === fmtId) || pf.formats[0], [pf, fmtId]);
-  const ind = INDUSTRIES.find((i) => i.id === ctx.industry);
-
-  const note = useCallback((l) => { if (typeof pushLog === "function") pushLog(l); }, [pushLog]);
-  const mark = (k) => setTouched((t) => ({ ...t, [k]: true }));
-
-  /* ---- AI推奨を実行 ---- */
-  const runPlan = () => {
-    const r = recommend(ctx);
-    setPlan(r);
-    setTouched({});
-    const p0 = r.platforms[0];
-    setPfId(p0.id);
-    setFmtId(p0.format);
-    setTone(r.tone);
-    setStruct(r.struct);
-    setHook(r.hook);
-    setCta(r.cta);
-    setVariants(r.variants);
-    setQa(r.qa);
-    note(`[${new Date().toLocaleTimeString()}] PLAN GENERATED: ${r.platforms.map((p) => p.label).join(" / ")} ／ ${r.cadence}`);
-  };
-
-  /* ---- 送信 ---- */
-  const buildMessage = (job) => {
-    const billing = mode === "OWNER" ? "無料（社内利用）" : "課金対象";
-    const L = [`【事業】STUDIO／【JOB】${job}／【課金】${billing}`];
-
-    if (job === "PLAN") {
-      L.push(`【依頼】SNS運用設計書の作成`);
-      L.push(`【会社】${ctx.company}／【業種】${ind.label}／【目的】${ctx.goal}／【使える時間】${RESOURCES.find((r) => r.id === ctx.resource).note}`);
-      L.push(`【商品・サービス】${ctx.service}／【価格帯】${ctx.price}`);
-      L.push(`【ターゲット】${ctx.target}／【顧客の悩み】${ctx.pain}／【自社の強み】${ctx.strength}`);
-      if (ctx.ref) L.push(`【参考アカウント】${ctx.ref}`);
-      if (ctx.ng) L.push(`【NG】${ctx.ng}`);
-      if (plan) {
-        L.push(`【一次案（社内エンジン）】媒体=${plan.platforms.map((p) => `${p.label}:${p.formatLabel}`).join(" / ")}／頻度=${plan.cadence}／時間帯=${plan.times.join(",")}／柱=${plan.pillars.join(" / ")}`);
-      }
-      L.push(`【出力してほしいもの】媒体ごとの運用方針・プロフィール文案・固定投稿案・30日分の投稿テーマ案・KPIと計測方法・法令上の注意点`);
-      if (acct) L.push(`【対象アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}）／【現在の方針】${acct.note || "未設定"}`);
-      if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
-      if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
-      return L.join("／");
+function retryFailed() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ");
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const rows = sh.getDataRange().getValues();
+  let n = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const st = String(rows[i][6] || "");
+    if (st === "エラー" || st === "保留" || st === "制作中") {
+      sh.getRange(i + 1, 7).setValue("受付");
+      sh.getRange(i + 1, 12).setValue("");
+      n++;
     }
+  }
+  return n;
+}
 
-    L.push(`【媒体】${pf.label}／【形式】${fmt.label}` +
-      (fmt.ratio ? `／【比率】${fmt.ratio}` : "") + (fmt.dur ? `／【尺】${fmt.dur}` : "") +
-      (fmt.cap ? `／【文字数上限】${fmt.cap}` : "") + (fmt.pages ? `／【枚数・本数】${fmt.pages}` : ""));
-    L.push(`【媒体仕様】${fmt.spec}／【勝ち筋】${pf.win}／【KPI】${pf.kpi}／【ハッシュタグ方針】${pf.hashtag}`);
-    L.push(`【業種】${ind.label}／【目的】${ctx.goal}／【ターゲット】${ctx.target || "未指定"}`);
-    if (ctx.pain) L.push(`【顧客の悩み】${ctx.pain}`);
-    if (ctx.strength) L.push(`【自社の強み】${ctx.strength}`);
-    L.push(`【トーン】${tone}／【構成】${struct}／【フックの型】${hook}／【一人称】${person}／【絵文字】${emoji}／【CTA】${cta}`);
-    if (len) L.push(`【目安文字数】${len}`);
-    if (ctx.ng) L.push(`【NG】${ctx.ng}`);
-    L.push(`【案数】${variants}案／【検査】${qa === "strict" ? "厳格（薬機法・景表法・著作権まで二重確認）" : "標準"}`);
-    if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
-
-    if (job === "CONTENT") {
-      L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
-      L.push(`【テーマ】${theme}`);
-      if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
-    }
-    if (job === "IMAGE") {
-      L.push(`【画像スタイル】${imgStyle}／【描画内容】${imgDesc}`);
-    }
-    if (job === "POST") {
-      L.push(`【投稿日時】${schedule.at}／【繰り返し】${schedule.repeat}／【本文】${theme}`);
-    }
-    if (acct) L.push(`【投稿先アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}${acct.handle ? " @" + acct.handle : ""}）／【持ち主】${acct.owner}／【アカウント方針】${acct.note || "指定なし"}`);
-    if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
-    return L.join("／");
-  };
-
-  const send = async (job, label) => {
-    if (sending) return;
-    if (!acct) return setFlash({ ok: false, msg: "先にアカウント管理でアカウントを登録してください。" });
-    if (job === "CONTENT" && !theme.trim()) return setFlash({ ok: false, msg: "テーマを入力してください。" });
-    if (job === "IMAGE" && !imgDesc.trim()) return setFlash({ ok: false, msg: "画像の内容を入力してください。" });
-    if (job === "POST") {
-      if (!theme.trim()) return setFlash({ ok: false, msg: "投稿本文を入力してください。" });
-      if (!schedule.at) return setFlash({ ok: false, msg: "投稿日時を指定してください。" });
-      if (new Date(schedule.at).getTime() < Date.now()) return setFlash({ ok: false, msg: "過去の日時は指定できません。" });
-      if (fmt.cap && theme.length > fmt.cap) return setFlash({ ok: false, msg: `上限 ${fmt.cap} 文字を超えています。` });
-    }
-
-    setSending(true); setFlash(null);
-    const t0 = Date.now();
-    const payload = {
-      client_name: acct ? (acct.ownerType === "own" ? `${OWNER.name}／${acct.name}` : `${acct.owner}／${acct.name}`) : OWNER.name,
-      client_email: acct && acct.email ? acct.email : OWNER.email,
-      message: buildMessage(job),
-    };
-    let ok = true;
-    let detail = "";
-    if (settings.liveSubmit !== false) {
-      try {
-        const r = await fetch(endpoint.url, {
-          method: "POST",
-          headers: { "Content-Type": endpoint.contentType },
-          body: JSON.stringify(payload),
-        });
-        ok = r.ok;
-        if (ok && endpoint.isGas) {
-          // GASはエラーでもHTTP 200を返すため、中身を確認します
-          try {
-            const d = JSON.parse(await r.text());
-            if (d && d.ok === false) {
-              ok = false;
-              detail = String(d.error || "").slice(0, 200);
-            }
-          } catch (e2) {
-            /* 応答が読めなくても、送信自体は届いているとみなします */
-          }
-        }
-      } catch (e) {
-        ok = false;
-        detail = "通信に失敗しました";
-      }
-    }
-    await new Promise((r) => setTimeout(r, Math.max(0, 1100 - (Date.now() - t0))));
-
-    const now = new Date();
-    setJobs((j) => [{
-      id: String(now.getTime()), pf: job === "PLAN" ? "運用設計" : pf.label, tone: job === "PLAN" ? "#7C5CD6" : pf.tone,
-      soft: job === "PLAN" ? "#F1EDFC" : pf.soft, kind: label,
-      title: (job === "IMAGE" ? imgDesc : job === "PLAN" ? ctx.company || "自社" : theme).slice(0, 40),
-      at: job === "POST" ? schedule.at.replace("T", " ") : now.toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
-      status: ok ? (job === "POST" ? "予約済み" : "制作中") : "送信失敗",
-      billing: acct && acct.ownerType === "client" ? "課金" : "無料", isPost: job === "POST",
-    }, ...j].slice(0, 40));
-
-    note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}`);
-    setFlash({
-      ok,
-      msg: ok
-        ? job === "POST"
-          ? "予約しました。予約投稿タブで確認できます。"
-          : "依頼を受け付けました。5分以内に処理が始まり、完成するとメールとGoogle Driveに届きます。"
-        : "送信できませんでした。" + (detail ? "（" + detail + "）" : "接続設定で状態を確認してください。"),
+/**
+ * Difyに実際につないで、返ってくる内容をそのまま表示します。
+ * 生成されない原因を突き止めるときは、まずこれを実行してください。
+ */
+function Difyテスト() {
+  const key = creativeKey();
+  if (!key) {
+    try { SpreadsheetApp.getUi().alert("KEY_CREATIVE が空です。コード冒頭にキーを貼り付けてください。"); } catch (e) {}
+    return;
+  }
+  const t0 = Date.now();
+  let msg = "";
+  try {
+    const res = UrlFetchApp.fetch("https://api.dify.ai/v1/chat-messages", {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + key },
+      payload: JSON.stringify({
+        inputs: { task_description: "テストです。「こんにちは」とだけ返してください。" },
+        query: "テストです。「こんにちは」とだけ返してください。",
+        response_mode: "blocking",
+        user: "sashiwa-test",
+      }),
+      muteHttpExceptions: true,
     });
-    if (job === "CONTENT") { setTheme(""); setPoints(""); }
-    if (job === "IMAGE") setImgDesc("");
-    if (job === "POST") { setTheme(""); setSchedule({ at: "", repeat: "なし" }); }
-    setSending(false);
-    setTimeout(() => setFlash(null), 7000);
-  };
-
-  const scheduled = jobs.filter((j) => j.isPost && j.status === "予約済み");
-  const profileText = buildProfile({ company: ctx.company, service: ctx.service, target: ctx.target, goal: ctx.goal, cta });
-
-  return (
-    <div className="stRoot" style={{ "--t": pf.tone, "--s": pf.soft }}>
-      <style>{CSS_STUDIO}</style>
-
-      <header className="stHead">
-        <p className="stHead__en">PRODUCTION STUDIO</p>
-        <h1>制作スタジオ</h1>
-        <p className="stHead__s">最適な条件をAIが提案し、そこから調整して制作します。</p>
-      </header>
-
-      {!endpoint.isGas && (
-        <div className="stAlert">
-          <Sic name="warn" size={17} />
-          <p>
-            バックエンドが未接続です。このまま送信しても<b>成果物は保存・納品されません</b>。
-            左メニューの「接続設定」からGoogle Apps Scriptを接続してください。
-          </p>
-        </div>
-      )}
-
-      {/* 投稿先アカウント */}
-      <div className="stAcct">
-        {live.length === 0 ? (
-          <div className="stAcct__none">
-            <Sic name="warn" size={17} />
-            <p>運用中のアカウントがありません。左メニューの<b>「アカウント管理」</b>から登録してください。</p>
-          </div>
-        ) : (
-          <>
-            <span className="stAcct__k">投稿先</span>
-            <select className="stAcct__s" value={acct ? acct.id : ""} onChange={(e) => setAcctId(e.target.value)}>
-              {live.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.owner}／{a.name}（{(PLATFORM_META[a.platform] || {}).label || a.platform}）
-                </option>
-              ))}
-            </select>
-            {acct && (
-              <span className={`stAcct__b ${acct.ownerType === "own" ? "is-own" : ""}`}>
-                {acct.ownerType === "own" ? "社内利用（無料）" : "お客様案件（課金）"}
-              </span>
-            )}
-            {acct && acct.handle && <span className="stAcct__h">@{acct.handle}</span>}
-          </>
-        )}
-      </div>
-
-      {/* ステップ */}
-      <div className="stSteps">
-        {[
-          { n: 1, l: "運用設計", s: "何をどこにどれだけ" },
-          { n: 2, l: "制作", s: "条件を詰めて生成" },
-          { n: 3, l: "投稿予約", s: "キューに積む" },
-        ].map((s) => (
-          <button key={s.n} className={`stStep ${step === s.n ? "is-on" : ""} ${step > s.n ? "is-done" : ""}`} onClick={() => setStep(s.n)}>
-            <span className="stStep__n">{step > s.n ? <Sic name="check" size={15} /> : s.n}</span>
-            <span><b>{s.l}</b><em>{s.s}</em></span>
-          </button>
-        ))}
-      </div>
-
-      <div className="stGrid">
-        <section className="stCard">
-          {/* ============== STEP 1 ============== */}
-          {step === 1 && (
-            <>
-              <div className="stRow">
-                <Field label="会社・屋号">
-                  <input type="text" value={ctx.company} onChange={(e) => setCtx({ ...ctx, company: e.target.value })} placeholder="株式会社SASHIWA" />
-                </Field>
-                <Field label="業種">
-                  <select value={ctx.industry} onChange={(e) => setCtx({ ...ctx, industry: e.target.value })}>
-                    {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
-                  </select>
-                </Field>
-              </div>
-
-              <Field label="いちばんの目的">
-                <div className="stCards">
-                  {GOALS.map((g) => (
-                    <button key={g.id} type="button" className={ctx.goal === g.id ? "is-on" : ""} onClick={() => setCtx({ ...ctx, goal: g.id })}>
-                      <b>{g.label}</b><em>{g.note}</em>
-                    </button>
-                  ))}
-                </div>
-              </Field>
-
-              <Field label="運用に使える時間" hint="無理のない範囲を選んでください。続かない計画は意味がありません">
-                <div className="stCards">
-                  {RESOURCES.map((r) => (
-                    <button key={r.id} type="button" className={ctx.resource === r.id ? "is-on" : ""} onClick={() => setCtx({ ...ctx, resource: r.id })}>
-                      <b>{r.label}</b><em>{r.note}</em>
-                    </button>
-                  ))}
-                </div>
-              </Field>
-
-              <div className="stRow">
-                <Field label="商品・サービス"><input type="text" value={ctx.service} onChange={(e) => setCtx({ ...ctx, service: e.target.value })} placeholder="AI社員構築代行" /></Field>
-                <Field label="価格帯"><input type="text" value={ctx.price} onChange={(e) => setCtx({ ...ctx, price: e.target.value })} placeholder="30万円〜" /></Field>
-              </div>
-              <div className="stRow">
-                <Field label="ターゲット"><input type="text" value={ctx.target} onChange={(e) => setCtx({ ...ctx, target: e.target.value })} placeholder="従業員10〜50名の中小企業の経営者" /></Field>
-                <Field label="参考にしたいアカウント" hint="任意"><input type="text" value={ctx.ref} onChange={(e) => setCtx({ ...ctx, ref: e.target.value })} placeholder="@example" /></Field>
-              </div>
-              <Field label="顧客が抱えている悩み"><textarea rows={2} value={ctx.pain} onChange={(e) => setCtx({ ...ctx, pain: e.target.value })} placeholder="人手が足りないが、採用する余裕もない" /></Field>
-              <Field label="自社の強み・他と違う点"><textarea rows={2} value={ctx.strength} onChange={(e) => setCtx({ ...ctx, strength: e.target.value })} placeholder="自社の業務を実際に100%AIで回している" /></Field>
-              <Field label="NG・避けたい表現"><input type="text" value={ctx.ng} onChange={(e) => setCtx({ ...ctx, ng: e.target.value })} placeholder="煽り表現、効果の断定" /></Field>
-              <label className="stCheck">
-                <input type="checkbox" checked={ctx.budgetVideo} onChange={(e) => setCtx({ ...ctx, budgetVideo: e.target.checked })} />
-                <span>動画制作もできる（撮影・編集の手が確保できる）</span>
-              </label>
-              <Field label="依頼文をそのまま貼り付け" hint="任意。メールやチャットの原文をそのまま入れて構いません">
-                <textarea rows={3} value={ctx.raw} onChange={(e) => setCtx({ ...ctx, raw: e.target.value })} placeholder="お客様からいただいたご要望をそのまま貼り付けてください。" />
-              </Field>
-
-              <button className="stBig" onClick={runPlan}>
-                <Sic name="spark" size={17} />
-                AIに最適な運用プランを提案させる
-              </button>
-
-              {plan && (
-                <div className="stPlan">
-                  <p className="stPlan__k"><Sic name="spark" size={14} />AIの提案</p>
-                  <p className="stPlan__r">{plan.reason}</p>
-
-                  <div className="stPlan__pf">
-                    {plan.platforms.map((p) => {
-                      const P = PLATFORMS.find((x) => x.id === p.id);
-                      return (
-                        <div className="stPlan__c" key={p.id} style={{ "--t": P.tone, "--s": P.soft }}>
-                          <div className="stPlan__ch">
-                            <span className="stPlan__rank">{p.rank === 1 ? "主軸" : `第${p.rank}`}</span>
-                            <b>{p.label}</b>
-                            <em>{p.formatLabel}</em>
-                          </div>
-                          <p>{p.why}</p>
-                          <button className="stPlan__use" onClick={() => { setPfId(p.id); setFmtId(p.format); setStep(2); }}>
-                            この媒体で制作する →
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="stPlan__g">
-                    <Field label="投稿頻度" ai={!touched.cad}>
-                      <input type="text" value={plan.cadence} onChange={(e) => { setPlan({ ...plan, cadence: e.target.value }); mark("cad"); }} />
-                    </Field>
-                    <Field label="投稿する時間帯" ai={!touched.times}>
-                      <input type="text" value={plan.times.join(", ")} onChange={(e) => { setPlan({ ...plan, times: e.target.value.split(",").map((x) => x.trim()) }); mark("times"); }} />
-                    </Field>
-                  </div>
-
-                  <Field label="コンテンツの柱" ai={!touched.pillars} hint="この3本を軸に投稿を作り分けます。書き換えられます">
-                    <textarea rows={3} value={plan.pillars.join("\n")} onChange={(e) => { setPlan({ ...plan, pillars: e.target.value.split("\n") }); mark("pillars"); }} />
-                  </Field>
-
-                  <Field label="プロフィール文案" hint="そのままコピーして各SNSのプロフィール欄に貼れます">
-                    <textarea rows={4} value={profileText} readOnly />
-                  </Field>
-                  <button
-                    className="stCopy"
-                    onClick={() => {
-                      try {
-                        navigator.clipboard.writeText(profileText);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 2000);
-                      } catch (e) {
-                        setFlash({ ok: false, msg: "コピーできませんでした。手動で選択してください。" });
-                      }
-                    }}
-                  >
-                    <Sic name={copied ? "check" : "copy"} size={14} />
-                    {copied ? "コピーしました" : "プロフィール文をコピー"}
-                  </button>
-
-                  {plan.legal && (
-                    <div className="stWarn">
-                      <Sic name="warn" size={17} />
-                      <p><b>{ind.label}の広告規制について</b>{plan.legal}</p>
-                    </div>
-                  )}
-
-                  <div className="stPlan__f">
-                    <button className="stSend" onClick={() => send("PLAN", "運用設計書")} disabled={sending}>
-                      <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "map"} size={16} /></span>
-                      {sending ? "送信中..." : "詳細な運用設計書をAIに作らせる"}
-                    </button>
-                    <button className="stNext" onClick={() => setStep(2)}>この条件で制作に進む →</button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* ============== STEP 2 ============== */}
-          {step === 2 && (
-            <>
-              {!plan && (
-                <div className="stHint">
-                  <Sic name="spark" size={16} />
-                  <p>
-                    先に<b>STEP1「運用設計」</b>でAIに提案させると、媒体・トーン・構成・検査レベルが自動で設定されます。
-                    このまま手動で指定して進めることもできます。
-                  </p>
-                  <button onClick={() => setStep(1)}>設計する →</button>
-                </div>
-              )}
-              <div className="stPf">
-                {PLATFORMS.map((p) => (
-                  <button key={p.id} className={`stPf__b ${pfId === p.id ? "is-on" : ""}`} style={{ "--t": p.tone, "--s": p.soft }}
-                    onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); }}>
-                    <span className="stPf__d" /><b>{p.label}</b>
-                    {plan && plan.platforms.some((x) => x.id === p.id) && <em className="stAiTag">推奨</em>}
-                  </button>
-                ))}
-              </div>
-
-              <Field label="形式">
-                <div className="stChips">
-                  {pf.formats.map((f) => (
-                    <button key={f.id} type="button" className={fmtId === f.id ? "is-on" : ""} onClick={() => setFmtId(f.id)}>{f.label}</button>
-                  ))}
-                </div>
-              </Field>
-
-              <div className="stTabs">
-                {[{ id: "content", label: "コンテンツ", ic: "doc" }, { id: "image", label: "画像・サムネ", ic: "image" }].map((t) => (
-                  <button key={t.id} className={subTab === t.id ? "is-on" : ""} onClick={() => { setSubTab(t.id); setFlash(null); }}>
-                    <Sic name={t.ic} size={15} />{t.label}
-                  </button>
-                ))}
-              </div>
-
-              {subTab === "content" ? (
-                <>
-                  <Field label="テーマ" hint="何について発信するか。1行で">
-                    <input type="text" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="問い合わせ対応を自動化したら何時間浮いたか" />
-                  </Field>
-                  <Field label="伝えたい要点" hint="1行ずつ。構成に反映されます">
-                    <textarea rows={4} value={points} onChange={(e) => setPoints(e.target.value)} placeholder={"深夜の問い合わせにも即返信\n担当者の確認は朝1回だけ\n月20時間が浮いた"} />
-                  </Field>
-
-                  <div className="stDetail">
-                    <p className="stDetail__k">細かい条件</p>
-                    <Field label="トーン" ai={plan && !touched.tone}><Chips options={TONES} value={tone} onChange={(v) => { setTone(v); mark("tone"); }} /></Field>
-                    <Field label="構成の型" ai={plan && !touched.struct}><Chips options={STRUCTS} value={struct} onChange={(v) => { setStruct(v); mark("struct"); }} /></Field>
-                    <Field label="冒頭フックの型" ai={plan && !touched.hook}><Chips options={HOOKS} value={hook} onChange={(v) => { setHook(v); mark("hook"); }} /></Field>
-                    <div className="stRow">
-                      <Field label="一人称"><Chips options={PERSONS} value={person} onChange={setPerson} /></Field>
-                      <Field label="絵文字"><Chips options={EMOJI} value={emoji} onChange={setEmoji} /></Field>
-                    </div>
-                    <Field label="CTA（読後にしてほしいこと）" ai={plan && !touched.cta}><Chips options={CTAS} value={cta} onChange={(v) => { setCta(v); mark("cta"); }} /></Field>
-                    <div className="stRow">
-                      <Field label="目安文字数" hint={fmt.cap ? `上限 ${fmt.cap} 文字` : "指定なし"}>
-                        <input type="text" value={len} onChange={(e) => setLen(e.target.value)} placeholder={fmt.cap ? String(Math.round(fmt.cap * 0.6)) : "800"} />
-                      </Field>
-                      <Field label="一緒に出す成果物"><Chips options={EXTRAS} value={extras} onChange={setExtras} multi /></Field>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Field label="スタイル"><Chips options={["写真風", "イラスト", "フラットデザイン", "図解・ダイアグラム", "文字主体"]} value={imgStyle} onChange={setImgStyle} /></Field>
-                  <div className="stIdeaBar">
-                    <button className="stIdeaBtn" onClick={() => { setIdeas(suggestImagePrompts(ctx, imgStyle, fmt.ratio || "1:1", theme, seed)); setSeed(seed + 1); }}>
-                      <Sic name="spark" size={15} />
-                      {ideas.length ? "別の案を出す" : "AIに指示文を書かせる"}
-                    </button>
-                    <span className="stIdeaBar__n">
-                      テーマ・業種・目的から3案つくります。選んでそのまま送れます。
-                    </span>
-                  </div>
-
-                  {ideas.length > 0 && (
-                    <div className="stIdeas">
-                      {ideas.map((it, i) => (
-                        <button
-                          key={it.label + i}
-                          className={`stIdea ${imgDesc === it.text ? "is-on" : ""}`}
-                          onClick={() => setImgDesc(it.text)}
-                        >
-                          <span className="stIdea__h">
-                            <b>{it.label}</b>
-                            <em>{it.note}</em>
-                          </span>
-                          <span className="stIdea__t">{it.text}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <Field label="描いてほしい内容" hint="上の案を選ぶと入ります。そのまま編集できます。送信後、AIが英語の詳細プロンプトに仕上げます">
-                    <textarea rows={4} value={imgDesc} onChange={(e) => setImgDesc(e.target.value)} placeholder="朝のオフィス。誰もいないデスクでモニターだけが光っている。俯瞰気味、寒色系。" />
-                  </Field>
-                  <div className="stWarn">
-                    <Sic name="warn" size={17} />
-                    <p>実在の人物・キャラクター・企業ロゴは指定できません。納品前に、生成物が既存の作品に似すぎていないか必ず目視で確認してください。</p>
-                  </div>
-                </>
-              )}
-
-              <div className="stQ">
-                <p className="stQ__k">品質オプション</p>
-                <div className="stQ__g">
-                  <div>
-                    <span className="stQ__l">生成する案の数{plan && !touched.var && <em className="stAiTag">AI推奨</em>}</span>
-                    <div className="stSeg">
-                      {VARIANTS.map((v) => <button key={v.id} className={variants === v.id ? "is-on" : ""} onClick={() => { setVariants(v.id); mark("var"); }}>{v.label}</button>)}
-                    </div>
-                    <span className="stQ__n">{VARIANTS.find((v) => v.id === variants).note}</span>
-                  </div>
-                  <div>
-                    <span className="stQ__l">検査レベル{plan && !touched.qa && <em className="stAiTag">AI推奨</em>}</span>
-                    <div className="stSeg">
-                      {QA_LEVELS.map((q) => <button key={q.id} className={qa === q.id ? "is-on" : ""} onClick={() => { setQa(q.id); mark("qa"); }}>{q.label}</button>)}
-                    </div>
-                    <span className="stQ__n">{QA_LEVELS.find((q) => q.id === qa).note}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="stFoot">
-                <p className="stFoot__c">
-                  <button className="stBack" onClick={() => setStep(1)}>← 運用設計に戻る</button>
-                  <span>納品前</span>{qa === "strict" ? "QA_Ethics_AIが二重検査します" : "QA_Ethics_AIが一次検査します"}
-                  {(pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") && (
-                    <em className="stNoteInline">映像は台本→自動書き出し（未設定時は台本のみ納品）</em>
-                  )}
-                </p>
-                <button className="stSend" onClick={() => send(subTab === "content" ? "CONTENT" : "IMAGE", subTab === "content" ? `${fmt.label}・${variants}案` : "画像")} disabled={sending}>
-                  <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "send"} size={16} /></span>
-                  {sending ? "送信中..." : subTab === "content" ? `${variants}案の制作を依頼` : "画像の制作を依頼"}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ============== STEP 3 ============== */}
-          {step === 3 && (
-            <>
-              <Field label="投稿先">
-                <div className="stChips">
-                  {PLATFORMS.map((p) => (
-                    <button key={p.id} type="button" className={pfId === p.id ? "is-on" : ""} onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); }}>{p.label}</button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="投稿本文">
-                <textarea rows={6} value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="投稿する本文をそのまま入力してください。" />
-              </Field>
-              {fmt.cap > 0 && <p className={`stCount ${theme.length > fmt.cap ? "is-over" : ""}`}>{theme.length} / {fmt.cap} 文字</p>}
-              <div className="stRow">
-                <Field label="投稿日時"><input type="datetime-local" value={schedule.at} onChange={(e) => setSchedule({ ...schedule, at: e.target.value })} /></Field>
-                <Field label="繰り返し">
-                  <select value={schedule.repeat} onChange={(e) => setSchedule({ ...schedule, repeat: e.target.value })}>
-                    <option>なし</option><option>毎日</option><option>平日のみ</option><option>毎週</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="stWarn">
-                <Sic name="warn" size={17} />
-                <p>各SNSの自動投稿に関する規約は変更されることがあります。運用開始前と規約改定時には必ずご確認ください。</p>
-              </div>
-              <div className="stFoot">
-                <p className="stFoot__c">
-                  <button className="stBack" onClick={() => setStep(2)}>← 制作に戻る</button>
-                  <span>配信</span>指定時刻の直近の配信タイミングで投稿されます
-                </p>
-                <button className="stSend" onClick={() => send("POST", "予約投稿")} disabled={sending}>
-                  <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "clock"} size={16} /></span>
-                  {sending ? "送信中..." : "予約する"}
-                </button>
-              </div>
-            </>
-          )}
-
-          {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
-        </section>
-
-        {/* ---------- 右カラム ---------- */}
-        <aside className="stSide">
-          {step !== 1 && (
-            <section className="stCard stCard--sm stSpec">
-              <h2 className="stCardT">{pf.label} ／ {fmt.label}<em>SPEC</em></h2>
-              <dl className="stSpec__l">
-                {fmt.ratio && <div><dt>比率</dt><dd>{fmt.ratio}</dd></div>}
-                {fmt.dur && <div><dt>尺</dt><dd>{fmt.dur}</dd></div>}
-                {fmt.pages && <div><dt>枚数・本数</dt><dd>{fmt.pages}</dd></div>}
-                {fmt.cap > 0 && <div><dt>文字数上限</dt><dd>{fmt.cap}</dd></div>}
-                <div><dt>ハッシュタグ</dt><dd>{pf.hashtag}</dd></div>
-                <div><dt>狙い目の時間</dt><dd>{pf.times.join(" / ")}</dd></div>
-                <div><dt>KPI</dt><dd>{pf.kpi}</dd></div>
-              </dl>
-              <p className="stSpec__s"><b>制作ルール</b>{fmt.spec}</p>
-              <p className="stSpec__w"><b>この媒体の勝ち筋</b>{pf.win}</p>
-            </section>
-          )}
-
-          {plan && (
-            <section className="stCard stCard--sm">
-              <h2 className="stCardT">現在のプラン<em>PLAN</em></h2>
-              <ul className="stMini">
-                <li><span>媒体</span>{plan.platforms.map((p) => p.label).join(" / ")}</li>
-                <li><span>頻度</span>{plan.cadence}</li>
-                <li><span>時間帯</span>{plan.times.join(" / ")}</li>
-                <li><span>KPI</span>{plan.kpi}</li>
-              </ul>
-            </section>
-          )}
-
-          <section className="stCard stCard--sm">
-            <h2 className="stCardT">予約中の投稿<em>{scheduled.length}</em></h2>
-            {scheduled.length === 0 ? <p className="stEmpty">予約された投稿はありません。</p> : (
-              <ul className="stSch">
-                {scheduled.map((j) => (
-                  <li key={j.id}>
-                    <span className="stSch__t"><Sic name="clock" size={13} />{j.at}</span>
-                    <span className="stSch__d">{j.pf}／{j.title}</span>
-                    <button className="stSch__x" aria-label="取り消す" onClick={() => setJobs((v) => v.filter((x) => x.id !== j.id))}><Sic name="trash" size={13} /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="stCard stCard--sm">
-            <h2 className="stCardT">送信した依頼<em>{jobs.length}</em></h2>
-            {jobs.length === 0 ? <p className="stEmpty">まだ依頼がありません。</p> : (
-              <ul className="stJobs">
-                {jobs.map((j) => (
-                  <li key={j.id} style={{ "--t": j.tone, "--s": j.soft }}>
-                    <div className="stJobs__h"><em className="stJobs__k">{j.pf}</em><span className={`stJobs__s ${j.status === "送信失敗" ? "is-ng" : ""}`}>{j.status}</span></div>
-                    <p className="stJobs__t">{j.kind}／{j.title}</p>
-                    <p className="stJobs__m">{j.at}<span>{j.billing}</span></p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </aside>
-      </div>
-    </div>
-  );
+    const sec = Math.round((Date.now() - t0) / 1000);
+    const code = res.getResponseCode();
+    const text = res.getContentText();
+    let answer = "";
+    try { answer = JSON.parse(text).answer || ""; } catch (e) {}
+    msg =
+      "Difyへの接続テスト\n────────────────\n" +
+      "  応答コード：" + code + "\n" +
+      "  所要時間：" + sec + " 秒" + (sec > 45 ? "  ← 60秒に近く危険です" : "") + "\n\n" +
+      (code === 200
+        ? "返ってきた内容：\n" + String(answer || text).slice(0, 400)
+        : explainError(String(code) + " " + text));
+    if (sec > 45) {
+      msg +=
+        "\n\n▲ 応答が遅すぎます。Dify で Creative_PR_AI のモデルを" +
+        "gpt-4o-mini などの速いものに変えるか、Reasoning Effort を low にしてください。";
+    }
+  } catch (err) {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    msg = "接続に失敗しました（" + sec + "秒）\n\n" + explainError(String(err));
+  }
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { Logger.log(msg); }
 }
 
-/* ================================ CSS_STUDIO ================================== */
-
-const CSS_STUDIO = `
-.stRoot{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;
-  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
-.stRoot *,.stRoot *::before,.stRoot *::after{box-sizing:border-box;}
-.stRoot h1,.stRoot h2,.stRoot p,.stRoot ul,.stRoot li,.stRoot dl,.stRoot dd,.stRoot dt{margin:0;padding:0;}
-.stRoot ul{list-style:none;}
-.stRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
-.stRoot :focus-visible{outline:2px solid var(--t);outline-offset:2px;}
-.stSpin{display:inline-flex;animation:stSpin 1s linear infinite;}
-@keyframes stSpin{to{transform:rotate(360deg);}}
-.stAiTag{font-style:normal;font-size:9px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:2px 7px;margin-left:7px;letter-spacing:.04em;}
-
-.stHead{margin-bottom:20px;}
-.stHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--t);font-weight:700;margin-bottom:8px;}
-.stHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
-.stHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
-
-.stMode{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
-.stMode__l{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;}
-.stMode__l button{font-size:12.5px;font-weight:700;padding:8px 17px;border-radius:999px;color:var(--muted);transition:all .2s;}
-.stMode__l button.is-on{background:var(--ink);color:#fff;}
-.stMode__n{font-size:12px;color:var(--muted);}
-.stMode__c{display:flex;gap:8px;flex:1;min-width:280px;flex-wrap:wrap;}
-.stMode__c input{flex:1;min-width:130px;background:var(--bg);border:1.5px solid transparent;border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;}
-.stMode__c input:focus{outline:none;border-color:var(--t);background:var(--white);}
-
-/* ステップ */
-.stSteps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
-.stStep{display:flex;align-items:center;gap:11px;background:var(--white);border:1.5px solid var(--line);border-radius:16px;padding:13px 16px;transition:all .2s;}
-.stStep:hover{border-color:var(--ai);}
-.stStep.is-on{border-color:var(--ai);background:#F5F1FE;}
-.stStep__n{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--bg);color:var(--muted);font-family:var(--mono);font-size:13px;font-weight:700;flex-shrink:0;}
-.stStep.is-on .stStep__n{background:var(--ai);color:#fff;}
-.stStep.is-done .stStep__n{background:#E8F7F0;color:#0E9F73;}
-.stStep b{display:block;font-size:13.5px;font-weight:700;}
-.stStep em{font-style:normal;font-size:10.5px;color:var(--muted);}
-@media (max-width:760px){.stSteps{grid-template-columns:1fr;}}
-
-.stGrid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
-@media (max-width:1150px){.stGrid{grid-template-columns:1fr;}}
-.stCard{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:22px;}
-.stCard--sm{padding:18px;margin-bottom:13px;}
-.stCardT{font-size:13px;font-weight:700;margin-bottom:13px;display:flex;align-items:center;gap:8px;}
-.stCardT em{font-style:normal;font-family:var(--mono);font-size:9px;color:var(--t);background:var(--s);border-radius:999px;padding:2px 9px;margin-left:auto;}
-
-.stF{display:block;margin-bottom:17px;}
-.stF__l{display:flex;align-items:center;font-size:12px;font-weight:700;margin-bottom:8px;}
-.stF__h{display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7;}
-.stRoot input[type=text],.stRoot input[type=email],.stRoot input[type=datetime-local],.stRoot textarea,.stRoot select{
-  width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;padding:12px 14px;
-  font-family:var(--sans);font-size:14px;line-height:1.8;color:var(--ink);resize:vertical;transition:all .2s;}
-.stRoot textarea::placeholder,.stRoot input::placeholder{color:#9BA3B1;}
-.stRoot input:focus,.stRoot textarea:focus,.stRoot select:focus{outline:none;background:var(--white);border-color:var(--t);box-shadow:0 0 0 4px var(--s);}
-.stRow{display:grid;grid-template-columns:1fr 1fr;gap:13px;}
-@media (max-width:640px){.stRow{grid-template-columns:1fr;}}
-
-.stChips{display:flex;flex-wrap:wrap;gap:7px;}
-.stChips button{font-size:12.5px;border:1.5px solid var(--line);border-radius:999px;padding:7px 15px;color:var(--muted);transition:all .2s;}
-.stChips button:hover{border-color:var(--t);color:var(--t);}
-.stChips button.is-on{background:var(--t);border-color:var(--t);color:#fff;font-weight:700;}
-
-.stCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;}
-.stCards button{border:1.5px solid var(--line);border-radius:13px;padding:12px 14px;transition:all .2s;}
-.stCards button:hover{border-color:var(--ai);}
-.stCards button.is-on{border-color:var(--ai);background:#F5F1FE;}
-.stCards b{display:block;font-size:13px;font-weight:700;margin-bottom:2px;}
-.stCards em{font-style:normal;font-size:11px;color:var(--muted);}
-
-.stCheck{display:flex;align-items:center;gap:10px;font-size:13.5px;margin-bottom:17px;cursor:pointer;}
-.stCheck input{width:18px;height:18px;accent-color:var(--ai);}
-.stCount{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right;margin:-9px 0 17px !important;}
-.stCount.is-over{color:var(--sig);font-weight:700;}
-.stWarn{display:flex;gap:11px;align-items:flex-start;background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:13px 15px;margin-bottom:17px;}
-.stWarn svg{color:#B47C10;margin-top:3px;}
-.stWarn p{font-size:12px;line-height:1.9;color:#7A5A12;}
-.stWarn b{display:block;margin-bottom:3px;}
-
-/* 大ボタン */
-.stBig{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:var(--ai);color:#fff;font-size:14.5px;font-weight:700;border-radius:14px;padding:16px;transition:all .2s;box-shadow:0 14px 28px -16px rgba(124,92,214,.85);}
-.stBig:hover{filter:brightness(.94);transform:translateY(-1px);}
-
-/* 提案 */
-.stPlan{margin-top:20px;padding-top:20px;border-top:2px dashed var(--line);}
-.stPlan__k{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--ai);margin-bottom:10px;}
-.stPlan__r{font-size:13px;line-height:1.95;color:var(--muted);background:#F5F1FE;border-radius:12px;padding:14px 16px;margin-bottom:16px;}
-.stPlan__pf{display:grid;gap:10px;margin-bottom:18px;}
-.stPlan__c{border:1.5px solid var(--line);border-left:3px solid var(--t);border-radius:12px;padding:14px 16px;}
-.stPlan__ch{display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;}
-.stPlan__rank{font-size:9.5px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 9px;}
-.stPlan__ch b{font-size:14px;font-weight:700;}
-.stPlan__ch em{font-style:normal;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
-.stPlan__c p{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:8px;}
-.stPlan__use{font-size:12px;font-weight:700;color:var(--t);}
-.stPlan__g{display:grid;grid-template-columns:1fr 1fr;gap:13px;}
-@media (max-width:640px){.stPlan__g{grid-template-columns:1fr;}}
-.stPlan__f{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px;}
-.stNext{font-size:13px;font-weight:700;color:var(--ai);padding:12px 18px;border:1.5px solid var(--ai);border-radius:999px;transition:all .2s;}
-.stNext:hover{background:var(--ai);color:#fff;}
-
-/* 詳細条件 */
-.stDetail{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
-.stDetail__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);margin-bottom:13px;}
-.stDetail .stF:last-child{margin-bottom:0;}
-
-.stPf{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;}
-.stPf__b{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;white-space:nowrap;transition:all .2s;}
-.stPf__b:hover{border-color:var(--t);}
-.stPf__b.is-on{border-color:var(--t);background:var(--s);}
-.stPf__d{width:8px;height:8px;border-radius:50%;background:var(--t);}
-.stPf__b b{font-size:13px;font-weight:700;}
-.stPf::-webkit-scrollbar{height:5px;}
-.stPf::-webkit-scrollbar-thumb{background:#CBD2DC;border-radius:6px;}
-
-.stTabs{display:flex;gap:6px;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:20px;}
-.stTabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:700;padding:10px;border-radius:9px;color:var(--muted);transition:all .2s;}
-.stTabs button.is-on{background:var(--white);color:var(--t);box-shadow:0 1px 4px rgba(26,34,51,.1);}
-
-.stQ{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
-.stQ__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);margin-bottom:12px;}
-.stQ__g{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
-.stQ__l{display:flex;align-items:center;font-size:11.5px;font-weight:700;margin-bottom:8px;}
-.stQ__n{display:block;font-size:11px;color:var(--muted);margin-top:7px;line-height:1.7;}
-.stSeg{display:flex;gap:5px;flex-wrap:wrap;}
-.stSeg button{font-size:12px;font-weight:700;border:1.5px solid var(--line);background:var(--white);border-radius:999px;padding:7px 14px;color:var(--muted);transition:all .2s;}
-.stSeg button.is-on{background:var(--t);border-color:var(--t);color:#fff;}
-@media (max-width:640px){.stQ__g{grid-template-columns:1fr;}}
-
-.stFoot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding-top:17px;border-top:1px solid var(--line);}
-.stFoot__c{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.stFoot__c span{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;border:1px solid var(--line);border-radius:999px;padding:3px 9px;}
-.stSend{display:inline-flex;align-items:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:13px 26px;transition:all .2s;}
-.stSend:hover:not(:disabled){filter:brightness(.92);transform:translateY(-1px);}
-.stSend:disabled{opacity:.45;cursor:not-allowed;transform:none;}
-.stFlash{margin-top:13px;font-size:12.5px;line-height:1.85;color:var(--t);background:var(--s);border-radius:10px;padding:12px 15px;}
-.stFlash.is-ng{color:var(--sig);background:#FDECEA;}
-
-.stSpec{border-top:3px solid var(--t);}
-.stSpec__l > div{display:grid;grid-template-columns:88px 1fr;gap:10px;padding:8px 0;align-items:baseline;}
-.stSpec__l > div + div{border-top:1px solid var(--line);}
-.stSpec__l dt{font-size:11px;color:var(--muted);}
-.stSpec__l dd{font-size:12.5px;font-weight:500;line-height:1.7;}
-.stSpec__s,.stSpec__w{font-size:12px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 14px;margin-top:12px;}
-.stSpec__w{background:var(--s);color:var(--ink);}
-.stSpec__s b,.stSpec__w b{display:block;font-size:10px;font-weight:700;color:var(--t);margin-bottom:5px;letter-spacing:.06em;}
-
-.stMini li{display:grid;grid-template-columns:66px 1fr;gap:10px;padding:7px 0;font-size:12.5px;align-items:baseline;}
-.stMini li + li{border-top:1px solid var(--line);}
-.stMini li span{font-size:10.5px;color:var(--muted);}
-
-.stEmpty{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:16px;text-align:center;}
-.stSch li{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:11px 0;align-items:center;}
-.stSch li + li{border-top:1px solid var(--line);}
-.stSch__t{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--t);font-weight:700;}
-.stSch__d{grid-column:1;font-size:12.5px;line-height:1.6;}
-.stSch__x{grid-row:1/3;grid-column:2;color:#B9C0CB;padding:6px;border-radius:8px;transition:all .2s;}
-.stSch__x:hover{color:var(--sig);background:#FDECEA;}
-
-.stJobs li{border-left:2px solid var(--t);padding:9px 0 9px 11px;margin-bottom:9px;background:linear-gradient(90deg,var(--s),transparent 62%);border-radius:0 10px 10px 0;}
-.stJobs__h{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
-.stJobs__k{font-style:normal;font-size:9.5px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 9px;}
-.stJobs__s{font-size:11px;color:var(--muted);margin-left:auto;}
-.stJobs__s.is-ng{color:var(--sig);font-weight:700;}
-.stJobs__t{font-size:12.5px;line-height:1.65;margin-bottom:4px;}
-.stJobs__m{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;gap:8px;align-items:center;}
-.stJobs__m span{border:1px solid var(--line);border-radius:999px;padding:1px 7px;}
-
-.stCopy{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ai);border:1.5px solid var(--ai);border-radius:999px;padding:8px 16px;margin:-8px 0 18px;transition:all .2s;}
-.stCopy:hover{background:var(--ai);color:#fff;}
-.stBack{font-size:12px;font-weight:700;color:var(--muted);padding:6px 12px;border:1px solid var(--line);border-radius:999px;transition:all .2s;}
-.stBack:hover{border-color:var(--ink);color:var(--ink);}
-.stHint{display:flex;align-items:center;gap:12px;background:#F5F1FE;border:1px solid #DCD0F7;border-radius:14px;padding:14px 16px;margin-bottom:16px;flex-wrap:wrap;}
-.stHint svg{color:var(--ai);flex-shrink:0;}
-.stHint p{flex:1;min-width:200px;font-size:12.5px;line-height:1.85;color:#4A3A75;}
-.stHint b{font-weight:700;}
-.stHint button{font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;white-space:nowrap;}
-
-.stAcct{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:16px;padding:13px 16px;margin-bottom:14px;flex-wrap:wrap;}
-.stAcct__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;}
-.stAcct__s{flex:1;min-width:220px;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:10px 13px;font:inherit;font-size:13.5px;font-weight:700;}
-.stAcct__s:focus{outline:none;background:var(--white);border-color:var(--ai);}
-.stAcct__b{font-size:11.5px;font-weight:700;color:#fff;background:var(--sig);border-radius:999px;padding:5px 13px;}
-.stAcct__b.is-own{background:#0E9F73;}
-.stAcct__h{font-family:var(--mono);font-size:12px;color:var(--muted);}
-.stAcct__none{display:flex;align-items:center;gap:11px;width:100%;}
-.stAcct__none svg{color:#B47C10;flex-shrink:0;}
-.stAcct__none p{font-size:12.5px;line-height:1.85;color:#7A5A12;}
-
-.stAlert{display:flex;align-items:center;gap:11px;background:#FDECEA;border:1px solid #F5C4BF;border-radius:14px;padding:13px 16px;margin-bottom:14px;}
-.stAlert svg{color:var(--sig);flex-shrink:0;}
-.stAlert p{font-size:12.5px;line-height:1.85;color:#8C2A22;}
-.stAlert b{font-weight:700;}
-`;
-
-/* ========================= 4. コントロール本体 =========================== */
-
-/* ============================================================================
-   株式会社SASHIWA — コントロールダッシュボード（社長専用）
-   配置：src/Dashboard.jsx
-   表示：#/dashboard （App.jsx 側に3行追加。手順は導入ガイド参照）
-
-   依存パッケージなし（React のみ）。lucide-react は使わず SVG を内蔵しています。
-   ============================================================================ */
-
-/* ================================ 設定 ================================== */
-
-// ① ダッシュボードの簡易パスコード。必ず変更してください。
-//    ※これはフロント側だけの目隠しです。本気の認証ではありません。
-const PASSCODE = "sashiwa0713";
-
-// ② 既存 Make の Webhook（App.jsx と同じもの）。指示送信で実際にAI社員が動きます。
-const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv";
-
-// ③ 実データ連携。Google スプレッドシートを「ウェブに公開（CSV）」したURLを入れると
-//    デモデータではなく実際の処理履歴を表示します。空文字ならデモモード。
-//    想定カラム：timestamp, run_id, client_name, agent, status, summary
-const SHEET_CSV_URL = "";
-
-// ④ true にすると指示送信で本当に Make が起動します（1回あたり約7オペレーション消費）。
-//    無料プランのオペレーション残量に注意。false なら画面上だけのシミュレーション。
-const LIVE_COMMAND = true;
-
-/* ================================ データ ================================ */
-
-/* 3事業ブランド。Webhook の message 先頭 【事業】XXX と対応します。 */
-const SERVICES = [
-  { code: "AGENT", name: "AI社員構築代行", theme: "#E0402F", soft: "#FDECEA" },
-  { code: "STUDIO", name: "文書・動画 自動制作", theme: "#2456C8", soft: "#E8EEFB" },
-  { code: "SOCIAL", name: "SNSアカウント運用", theme: "#7C5CD6", soft: "#F1EDFC" },
-];
-
-const DEPARTMENTS = [
-  {
-    id: "exec",
-    name: "統括室",
-    en: "EXECUTIVE",
-    theme: "#E0402F",
-    soft: "#FDECEA",
-    desc: "依頼を読み解き、担当を決め、実行計画を立てる司令塔。",
-    agents: [
-      {
-        id: "ceo",
-        name: "CEO_AI",
-        role: "統括責任者",
-        tier: "高推論",
-        difyApp: "SASHIWA_CEO_AI",
-        mission: "依頼内容の構造化・担当エージェントの選定・実行計画の策定",
-        status: "稼働中",
-        currentTask: "受信した依頼の要件を構造化し、担当を選定中",
-        skills: ["要件定義", "作業分解", "進行管理", "優先度判定"],
-      },
-    ],
-  },
-  {
-    id: "creative",
-    name: "制作・広報部",
-    en: "CREATIVE & PR",
-    theme: "#7C5CD6",
-    soft: "#F1EDFC",
-    desc: "原稿・構成・デザイン方針・広報文をつくる。",
-    agents: [
-      {
-        id: "creative",
-        name: "Creative_PR_AI",
-        role: "クリエイティブ責任者",
-        tier: "高推論",
-        difyApp: "Creative_PR_AI",
-        mission: "コピー、構成設計、デザイン方針、広報文の作成",
-        status: "稼働中",
-        currentTask: "コーポレートサイトの改稿案を生成中",
-        skills: ["原稿執筆", "構成設計", "広報", "SNS運用"],
-      },
-    ],
-  },
-  {
-    id: "engineering",
-    name: "技術・運用部",
-    en: "ENGINEERING",
-    theme: "#0E9F73",
-    soft: "#E7F6F1",
-    desc: "実装・技術調査・稼働監視を担当する。",
-    agents: [
-      {
-        id: "engineer",
-        name: "Engineer_DevOps_AI",
-        role: "技術responsible",
-        tier: "高推論",
-        difyApp: "Engineer_DevOps_AI",
-        mission: "コード実装、技術調査、稼働監視、障害対応",
-        status: "稼働中",
-        currentTask: "Make シナリオのタイムアウト設定を点検中",
-        skills: ["実装", "技術選定", "運用監視", "自動化設計"],
-      },
-    ],
-  },
-  {
-    id: "qa",
-    name: "品質・倫理部",
-    en: "QA & ETHICS",
-    theme: "#2F6FD0",
-    soft: "#E9F1FC",
-    desc: "全成果物を検査し、基準を満たさないものを差し戻す。",
-    agents: [
-      {
-        id: "qa",
-        name: "QA_Ethics_AI",
-        role: "監査責任者",
-        tier: "高推論",
-        difyApp: "QA_Ethics_AI",
-        mission: "成果物の品質検査、表現・法令上のリスク確認、差戻し判断",
-        status: "待機中",
-        currentTask: "次の検査対象を待機中",
-        skills: ["品質検査", "倫理審査", "リスク評価", "差戻し判断"],
-      },
-    ],
-  },
-  {
-    id: "finance",
-    name: "原価・資源部",
-    en: "FINANCE",
-    theme: "#D08A16",
-    soft: "#FBF2E1",
-    desc: "工数とコストを算出し、資源配分を管理する。",
-    agents: [
-      {
-        id: "cfo",
-        name: "CFO_Resource_AI",
-        role: "原価管理責任者",
-        tier: "軽量",
-        difyApp: "CFO_Resource_AI",
-        mission: "工数の試算、コストの算出、資源配分の提案",
-        status: "待機中",
-        currentTask: "月次のAPIコスト集計を待機中",
-        skills: ["工数見積", "原価計算", "資源配分"],
-      },
-    ],
-  },
-];
-
-/* デモ用の処理履歴。SHEET_CSV_URL を設定すると実データに置き換わります。 */
-const DEMO_TASKS = [
-  {
-    service: "SOCIAL",
-    timestamp: "2026-08-06 22:00",
-    run_id: "s-260806",
-    client_name: "自社アカウント",
-    agent: "Creative_PR_AI",
-    status: "完了",
-    summary: "翌日分の投稿5本を生成し、予約配信を設定",
-  },
-  {
-    service: "SOCIAL",
-    timestamp: "2026-08-06 05:30",
-    run_id: "s-260806a",
-    client_name: "自社アカウント",
-    agent: "CEO_AI",
-    status: "完了",
-    summary: "業界ニュースを収集し、投稿テーマ12件を抽出",
-  },
-  {
-    service: "STUDIO",
-    timestamp: "2026-08-06 22:00",
-    run_id: "w-260806",
-    client_name: "サンプル商事",
-    agent: "Creative_PR_AI",
-    status: "完了",
-    summary: "SEO記事「業務自動化の始め方」2,800字を納品",
-  },
-  {
-    service: "STUDIO",
-    timestamp: "2026-08-06 22:00",
-    run_id: "w-260806",
-    client_name: "サンプル商事",
-    agent: "QA_Ethics_AI",
-    status: "完了",
-    summary: "表現検査を通過（薬機法・景表法の抵触なし）",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-05 21:00",
-    run_id: "32753b2c",
-    client_name: "指輪 直人",
-    agent: "CEO_AI",
-    status: "完了",
-    summary: "問い合わせの要件を構造化し、4体へ展開",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-05 21:00",
-    run_id: "32753b2c",
-    client_name: "指輪 直人",
-    agent: "Creative_PR_AI",
-    status: "完了",
-    summary: "サイト改稿の構成案を出力",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-05 21:00",
-    run_id: "32753b2c",
-    client_name: "指輪 直人",
-    agent: "Engineer_DevOps_AI",
-    status: "完了",
-    summary: "実装方針とタイムアウト設定を提案",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-05 21:00",
-    run_id: "32753b2c",
-    client_name: "指輪 直人",
-    agent: "QA_Ethics_AI",
-    status: "完了",
-    summary: "表現リスクなし。通過判定",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-05 21:00",
-    run_id: "32753b2c",
-    client_name: "指輪 直人",
-    agent: "CFO_Resource_AI",
-    status: "完了",
-    summary: "想定工数 3.5h / 概算 ¥4,200",
-  },
-  {
-    service: "AGENT",
-    timestamp: "2026-08-04 14:22",
-    run_id: "a91c4de0",
-    client_name: "テスト送信",
-    agent: "CEO_AI",
-    status: "完了",
-    summary: "テスト依頼を受領し解析",
-  },
-];
-
-const SEED_LOG = [
-  "SASHIWA CONTROL CONSOLE v1.0",
-  "connecting to orchestration layer ...",
-  "dify: 5 apps reachable",
-  "make: scenario SASHIWA_Core_Routing = ACTIVE",
-  "ready.",
-];
-
-/* ================================ 部品 ================================== */
-
-function Ico({ name, size = 18 }) {
-  const s = {
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.7,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-  };
-  const p = {
-    grid: (
-      <>
-        <rect x="3" y="3" width="7.5" height="7.5" rx="2" {...s} />
-        <rect x="13.5" y="3" width="7.5" height="7.5" rx="2" {...s} />
-        <rect x="3" y="13.5" width="7.5" height="7.5" rx="2" {...s} />
-        <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" {...s} />
-      </>
-    ),
-    bot: (
-      <>
-        <rect x="4" y="8" width="16" height="12" rx="4" {...s} />
-        <path d="M12 4.6V8" {...s} />
-        <circle cx="12" cy="3.2" r="1.4" {...s} />
-        <circle cx="9.2" cy="13.6" r="1.1" fill="currentColor" stroke="none" />
-        <circle cx="14.8" cy="13.6" r="1.1" fill="currentColor" stroke="none" />
-      </>
-    ),
-    send: (
-      <>
-        <path d="M21.5 2.5 11 13" {...s} />
-        <path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4z" {...s} />
-      </>
-    ),
-    loader: (
-      <>
-        <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.9 2.9M15.5 15.5l2.9 2.9M18.4 5.6l-2.9 2.9M8.5 15.5l-2.9 2.9" {...s} />
-      </>
-    ),
-    pulse: (
-      <>
-        <path d="M2.5 12h4l2.5-7 4.5 14 2.5-7h5.5" {...s} />
-      </>
-    ),
-    yen: (
-      <>
-        <path d="m7.5 5.5 4.5 6.5 4.5-6.5M8 13h8M8 16h8M12 12v6.5" {...s} />
-      </>
-    ),
-    clock: (
-      <>
-        <circle cx="12" cy="12" r="9" {...s} />
-        <path d="M12 7v5.3l3.4 2" {...s} />
-      </>
-    ),
-    check: (
-      <>
-        <circle cx="12" cy="12" r="9" {...s} />
-        <path d="m8 12.3 2.8 2.8L16 9.8" {...s} />
-      </>
-    ),
-    back: <path d="M15 5l-7 7 7 7" {...s} />,
-    lock: (
-      <>
-        <rect x="4.5" y="10.5" width="15" height="10" rx="3" {...s} />
-        <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" {...s} />
-      </>
-    ),
-    refresh: (
-      <>
-        <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" {...s} />
-        <path d="M20.5 4.5V10H15" {...s} />
-      </>
-    ),
-    out: (
-      <>
-        <path d="M14.5 3.5h4a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-4" {...s} />
-        <path d="M9.5 16 5.5 12l4-4M5.5 12H15" {...s} />
-      </>
-    ),
-  };
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>
-      {p[name] || p.check}
-    </svg>
-  );
+/** 今すぐ1件だけ処理します（トリガーを待たずに試したいとき） */
+function 今すぐ処理() {
+  processJobs();
+  showStatus();
 }
 
-/* かんたんCSVパーサ（引用符・改行対応） */
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cur = "";
-  let q = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (q) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else q = false;
-      } else cur += c;
-    } else if (c === '"') q = true;
-    else if (c === ",") {
-      row.push(cur);
-      cur = "";
-    } else if (c === "\n") {
-      row.push(cur);
-      rows.push(row);
-      row = [];
-      cur = "";
-    } else if (c !== "\r") cur += c;
+function ensureSheet(ss, name, headers) {
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  const first = sh.getRange(1, 1, 1, headers.length).getValues()[0];
+  if (first.join("") !== headers.join("")) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#EFF1F4");
+    sh.setFrozenRows(1);
   }
-  if (cur !== "" || row.length) {
-    row.push(cur);
-    rows.push(row);
-  }
-  if (!rows.length) return [];
-  const head = rows[0].map((h) => h.trim().toLowerCase());
-  return rows.slice(1).filter((r) => r.some((v) => v && v.trim())).map((r) => {
-    const o = {};
-    head.forEach((h, i) => (o[h] = (r[i] || "").trim()));
-    return o;
+  return sh;
+}
+
+function installTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    const f = t.getHandlerFunction();
+    if (f === "processJobs" || f === "runSchedule") ScriptApp.deleteTrigger(t);
   });
+  ScriptApp.newTrigger("processJobs").timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger("runSchedule").timeBased().everyMinutes(15).create();
 }
 
-/** 「【キー】値」からタグを取り出します */
-/** デモ行を詳細表示できる形に変換します */
-function toJob(t) {
+/* ========================= 進捗メール ================================= */
+
+/**
+ * 進捗を都度メールでお知らせします。
+ * 自分（NOTIFY_EMAIL）には全工程、お客様には節目だけを送ります。
+ * お客様への進捗連絡を止めたい場合は、スクリプトプロパティに
+ * CLIENT_PROGRESS = off を設定してください。
+ */
+function notifyStep(step, info) {
+  const me = notifyEmail();
+  const client = String(info.clientEmail || "").trim();
+  const toClient =
+    client &&
+    client.indexOf("@") > 0 &&
+    client !== me &&
+    PropertiesService.getScriptProperties().getProperty("CLIENT_PROGRESS") !== "off";
+
+  const acct = info.account || "-";
+  const kind = info.kind || "制作物";
+  const id = info.jobId || "";
+
+  const T = {
+    received: {
+      subject: "【SASHIWA】ご依頼を受け付けました（" + kind + "）",
+      client:
+        "ご依頼を受け付けました。\n\n" +
+        "　内容：" + kind + "\n" +
+        "　対象：" + acct + "\n" +
+        "　受付番号：" + id + "\n\n" +
+        "AIエージェントが順に処理いたします。完成しましたら、改めてご連絡いたします。\n",
+      own:
+        "新しい依頼を受け付けました。\n\n　種別：" + kind + "\n　対象：" + acct +
+        "\n　受付番号：" + id + "\n　依頼元：" + (info.owner || "-") + "\n",
+      clientOk: true,
+    },
+    start: {
+      subject: "【SASHIWA】制作を開始しました（" + kind + "）",
+      client:
+        "制作を開始しました。\n\n" +
+        "　内容：" + kind + "\n" +
+        "　対象：" + acct + "\n" +
+        "　受付番号：" + id + "\n\n" +
+        "完成まで数分お待ちください。\n",
+      own: "制作を開始しました。\n\n　受付番号：" + id + "\n　種別：" + kind + "\n",
+      clientOk: true,
+    },
+    qa: {
+      subject: "【SASHIWA】検査工程に入りました（" + id + "）",
+      own:
+        "本文の生成が完了し、品質・倫理の検査に入りました。\n\n　受付番号：" + id +
+        "\n　文字数：" + (info.length || "-") + "\n",
+      clientOk: false,
+    },
+    done: {
+      subject: "【SASHIWA】" + kind + "が完成しました（" + acct + "）",
+      client:
+        "ご依頼の" + kind + "が完成しました。\n\n" +
+        "▼ 成果物\n" + (info.url || "") + "\n\n" +
+        "　対象：" + acct + "\n" +
+        "　受付番号：" + id + "\n\n" +
+        "内容をご確認のうえ、ご不明な点がございましたら本メールにご返信ください。\n\n" +
+        "──────────────\n株式会社SASHIWA\nhttps://sashiwa-inc.vercel.app\n──────────────\n",
+      own:
+        "納品しました。\n\n　受付番号：" + id + "\n　種別：" + kind + "\n　対象：" + acct +
+        "\n\n▼ 成果物\n" + (info.url || "") + "\n",
+      clientOk: true,
+    },
+    error: {
+      subject: "【SASHIWA】処理でエラーが発生しました（" + id + "）",
+      own:
+        "処理中にエラーが発生しました。\n\n　受付番号：" + id + "\n　種別：" + kind +
+        "\n　内容：" + (info.error || "") + "\n\n" +
+        "スプレッドシートの「ジョブ」シートで状態をご確認ください。\n",
+      clientOk: false,
+    },
+  };
+
+  const t = T[step];
+  if (!t) return;
+  try {
+    if (t.own) MailApp.sendEmail(me, t.subject, t.own);
+    if (t.clientOk && toClient && t.client) MailApp.sendEmail(client, t.subject, t.client);
+  } catch (e) {
+    /* メール送信に失敗しても処理は続けます */
+  }
+}
+
+/* ========================= ② 依頼の受け口 ============================= */
+
+function doPost(e) {
+  try {
+    ensureSheets();
+    const body = JSON.parse(e.postData.contents);
+    const msg = String(body.message || "");
+    const jobId = "J" + new Date().getTime();
+
+    const isPost = msg.indexOf("【JOB】POST") >= 0;
+    const kind =
+      msg.indexOf("【JOB】PLAN") >= 0 ? "運用設計"
+      : msg.indexOf("【JOB】IMAGE") >= 0 ? "画像"
+      : isPost ? "予約投稿"
+      : msg.indexOf("【JOB】") < 0 ? "問い合わせ"
+      : "コンテンツ";
+
+    const acct = pick(msg, "投稿先アカウント") || pick(msg, "運用アカウント") || "-";
+    const owner = pick(msg, "持ち主") || String(body.client_name || "-");
+    const media = pick(msg, "媒体") || "-";
+
+    if (isPost) {
+      SpreadsheetApp.getActiveSpreadsheet().getSheetByName("投稿キュー").appendRow([
+        jobId,
+        pick(msg, "投稿日時") || "",
+        acct,
+        media,
+        pick(msg, "本文") || "",
+        "",
+        pick(msg, "繰り返し") || "なし",
+        "予約",
+        "",
+      ]);
+    } else {
+      if (kind === "問い合わせ") {
+        const notify = PropertiesService.getScriptProperties().getProperty("NOTIFY_EMAIL");
+        if (notify) {
+          MailApp.sendEmail(
+            notify,
+            "【SASHIWA】新規のお問い合わせ：" + String(body.client_name || ""),
+            "お名前：" + String(body.client_name || "") + "\n" +
+              "メール：" + String(body.client_email || "") + "\n\n" +
+              msg
+          );
+        }
+      }
+      notifyStep("received", { jobId: jobId, kind: kind, account: acct, owner: owner, clientEmail: String(body.client_email || "") });
+      SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ").appendRow([
+        jobId,
+        new Date(),
+        kind,
+        acct,
+        owner,
+        media,
+        "受付",
+        msg,
+        "",
+        "",
+        String(body.client_email || ""),
+        "",
+      ]);
+
+      // 進捗①：受付のご連絡
+      if (kind !== "問い合わせ") {
+        notifyProgress("受付", {
+          jobId: jobId,
+          kind: kind,
+          acct: acct,
+          media: media,
+          to: String(body.client_email || ""),
+        });
+      }
+    }
+
+    // トリガーが無いと永久に処理されないため、その場で用意します
+    ensureTriggers();
+    return json({ ok: true, job_id: jobId, kind: kind, version: SASHIWA_VERSION });
+  } catch (err) {
+    return json({ ok: false, error: String(err), version: SASHIWA_VERSION });
+  }
+}
+
+/**
+ * ダッシュボードからの読み取り。
+ *   ?action=jobs   … 制作履歴（納品先メールは返しません）
+ *   ?action=queue  … 予約投稿の一覧
+ *   （指定なし）    … 接続確認
+ */
+function doGet(e) {
+  const action = e && e.parameter ? String(e.parameter.action || "") : "";
+  try {
+    if (action === "jobs") return json({ ok: true, jobs: listJobs() });
+    if (action === "queue") return json({ ok: true, queue: listQueue() });
+    if (action === "diag") return json({ ok: true, service: "SASHIWA Studio Backend", diag: diagnose() });
+    if (action === "retry") {
+      const n = retryFailed();
+      processJobs();
+      return json({ ok: true, retried: n, diag: diagnose() });
+    }
+    if (action === "run") {
+      // ダッシュボードから「今すぐ処理」を押したとき
+      ensureTriggers();
+      processJobs();
+      return json({ ok: true, ran: true, diag: diagnose() });
+    }
+    if (action === "retry") {
+      const n = retryFailed();
+      processJobs();
+      return json({ ok: true, retried: n, diag: diagnose() });
+    }
+    if (action === "run") {
+      ensureTriggers();
+      const lock = LockService.getScriptLock();
+      if (!lock.tryLock(1000)) return json({ ok: true, skipped: "既に処理中です" });
+      try {
+        processJobs();
+      } finally {
+        lock.releaseLock();
+      }
+      return json({ ok: true, ran: true, diag: diagnose() });
+    }
+    return json({ ok: true, service: "SASHIWA Studio Backend", version: SASHIWA_VERSION });
+  } catch (err) {
+    return json({ ok: false, error: String(err) });
+  }
+}
+
+/** 設定の状態をまとめて返します */
+function diagnose() {
+  const p = PropertiesService.getScriptProperties();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const jobs = ss.getSheetByName("ジョブ");
+  const queue = ss.getSheetByName("投稿キュー");
+  let triggers = [];
+  try {
+    triggers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  } catch (e) {}
+  const waiting = [];
+  if (jobs && jobs.getLastRow() > 1) {
+    const rows = jobs.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      const st = String(rows[i][6] || "");
+      if (st === "受付" || st === "制作中" || st === "エラー" || st === "保留") {
+        waiting.push({ id: String(rows[i][0]), 状態: st, 備考: String(rows[i][11] || rows[i][8] || "").slice(0, 200) });
+      }
+    }
+  }
   return {
-    job_id: t.run_id || "-",
-    受信日時: t.timestamp,
-    種別: t.agent,
-    投稿先アカウント: t.client_name,
-    持ち主: t.client_name,
-    媒体: "-",
-    状態: t.status,
-    指示内容: `【事業】${t.service || "AGENT"}／【内容】${t.summary}`,
-    成果物URL: "",
-    完了日時: t.timestamp,
+    version: SASHIWA_VERSION,
+    シート: { ジョブ: !!jobs, 投稿キュー: !!queue, 件数: jobs ? Math.max(0, jobs.getLastRow() - 1) : 0 },
+    キー: {
+      制作: !!creativeKey(),
+      検査: !!qaKey(),
+      画像: !!openaiKey(),
+      動画: !!videoKey(),
+      X投稿: !!p.getProperty("X_CONSUMER_KEY"),
+    },
+    通知先: notifyEmail(),
+    トリガー: triggers,
+    未処理: waiting.slice(-5),
   };
 }
 
-function pickTag(text, key) {
-  const m = String(text || "").match(new RegExp("【" + key + "】([^／]*)"));
+/** 画面から状態を確認するとき用 */
+function 診断() { showStatus(); }
+
+function listJobs() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ");
+  if (!sh || sh.getLastRow() < 2) return [];
+  const rows = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    out.push({
+      job_id: String(rows[i][0]),
+      受信日時: toStr(rows[i][1]),
+      種別: String(rows[i][2] || ""),
+      投稿先アカウント: String(rows[i][3] || ""),
+      持ち主: String(rows[i][4] || ""),
+      媒体: String(rows[i][5] || ""),
+      状態: String(rows[i][6] || ""),
+      指示内容: String(rows[i][7] || ""),
+      成果物URL: String(rows[i][8] || ""),
+      完了日時: toStr(rows[i][9]),
+      // 納品先メールは、URLが漏れた場合に備えて返しません
+    });
+  }
+  return out.reverse().slice(0, 300);
+}
+
+function listQueue() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("投稿キュー");
+  if (!sh || sh.getLastRow() < 2) return [];
+  const rows = sh.getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    out.push({
+      post_id: String(rows[i][0]),
+      予定日時: toStr(rows[i][1]),
+      アカウント: String(rows[i][2] || ""),
+      媒体: String(rows[i][3] || ""),
+      本文: String(rows[i][4] || ""),
+      繰り返し: String(rows[i][6] || ""),
+      状態: String(rows[i][7] || ""),
+      実行日時: toStr(rows[i][8]),
+      投稿リンク: intentUrl(String(rows[i][3] || ""), String(rows[i][4] || "")),
+    });
+  }
+  return out.reverse().slice(0, 200);
+}
+
+function toStr(v) {
+  if (!v) return "";
+  if (Object.prototype.toString.call(v) === "[object Date]") return fmt(v, true);
+  return String(v);
+}
+
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
+
+/** 【キー】値／ の形から値を取り出す */
+function pick(text, key) {
+  const m = String(text).match(new RegExp("【" + key + "】([^／]*)"));
   return m ? m[1].trim() : "";
 }
 
-/* ================================ 認証ゲート ============================ */
+/**
+ * 進捗のご連絡を送ります。受付 → 制作中 → 完了 の3段階です。
+ * お客様案件（納品先メールあり）は、受付と完了をお客様にもお送りします。
+ */
+function notifyProgress(stage, o) {
+  const notify = notifyEmail();
+  const to = String(o.to || "");
+  const toClient = to.indexOf("@") > 0 && to.indexOf("sashiwa.local") < 0 ? to : "";
+  const label = o.acct && o.acct !== "-" ? "（" + o.acct + "）" : "";
+  const foot = "\n──────────────\n株式会社SASHIWA\nhttps://sashiwa-inc.vercel.app\n";
 
-function Gate({ onPass }) {
-  const [v, setV] = useState("");
-  const [err, setErr] = useState(false);
-  const submit = () => {
-    if (v === PASSCODE) onPass();
-    else {
-      setErr(true);
-      setV("");
-    }
+  const M = {};
+  M["受付"] = {
+    s: "【SASHIWA】ご依頼を受け付けました" + label,
+    b:
+      "ご依頼を受け付けました。\n\n" +
+      "  種別：" + (o.kind || "") + "\n" +
+      (o.media && o.media !== "-" ? "  媒体：" + o.media + "\n" : "") +
+      "  受付番号：" + o.jobId + "\n\n" +
+      "これより担当のAIエージェントが制作に入ります。\n" +
+      "完成しましたら、あらためてご連絡いたします。\n",
   };
-  return (
-    <div className="dbGate">
-      <div className="dbGate__c">
-        <svg viewBox="0 0 128 152" className="dbGateRing" aria-hidden="true">
-          <path d="M64 8 L80 27 L64 46 L48 27 Z" fill="#FFE3DF" stroke="#E0402F" strokeWidth="3.4" strokeLinejoin="round" />
-          <circle cx="64" cy="98" r="38" fill="none" stroke="#E0402F" strokeWidth="17" />
-          <circle cx="64" cy="98" r="29.5" fill="#FFFFFF" />
-          <circle cx="53" cy="94" r="4.2" fill="#1A2233" />
-          <circle cx="75" cy="94" r="4.2" fill="#1A2233" />
-          <path d="M56 106 q8 8 16 0" stroke="#1A2233" strokeWidth="3.4" fill="none" strokeLinecap="round" />
-        </svg>
-        <h1>SASHIWA CONTROL</h1>
-        <p>社長専用のコントロールダッシュボードです。</p>
-        <input
-          type="password"
-          value={v}
-          placeholder="パスコード"
-          onChange={(e) => {
-            setV(e.target.value);
-            setErr(false);
-          }}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          autoFocus
-        />
-        {err && <p className="dbGate__e">パスコードが違います。</p>}
-        <button onClick={submit}>入室する</button>
-        <a href="#/">← サイトに戻る</a>
-      </div>
-    </div>
-  );
+  M["制作中"] = {
+    s: "【SASHIWA】制作を開始しました" + label,
+    b:
+      "担当のAIエージェントが制作を開始しました。\n\n" +
+      "  種別：" + (o.kind || "") + "\n" +
+      "  受付番号：" + o.jobId + "\n\n" +
+      "制作後、品質・倫理の検査を通してからお届けします。\n",
+  };
+  M["完了"] = {
+    s: "【SASHIWA】" + (o.kind || "成果物") + "が完成しました" + label,
+    b:
+      (o.kind || "成果物") + "が完成しました。\n\n" +
+      "▼ 成果物\n" + (o.url || "") + "\n\n" +
+      "  受付番号：" + o.jobId + "\n\n" +
+      "内容についてご要望がございましたら、本メールにご返信ください。\n",
+  };
+  M["エラー"] = {
+    s: "【SASHIWA】処理でエラーが発生しました" + label,
+    b:
+      "処理中にエラーが発生しました。\n\n" +
+      "  受付番号：" + o.jobId + "\n" +
+      "  内容：" + (o.error || "") + "\n",
+  };
+
+  const m = M[stage];
+  if (!m) return;
+
+  try {
+    MailApp.sendEmail({ to: notify, subject: m.s, body: m.b + foot });
+    if (toClient && (stage === "受付" || stage === "完了")) {
+      MailApp.sendEmail({ to: toClient, cc: notify, subject: m.s, body: m.b + foot });
+    }
+  } catch (e) {
+    /* メールが送れなくても処理は止めません */
+  }
 }
 
-/* ================================ 本体 ================================== */
+/** よくある失敗を、対処法つきの日本語に変換します */
+function explainError(raw) {
+  const t = String(raw);
+  if (/Timeout|timed out|タイムアウト|DEADLINE|Address unavailable|Exceeded maximum execution/i.test(t)) {
+    return (
+      "Difyの応答が時間内に返りませんでした。Apps Scriptの通信は約60秒で打ち切られます。" +
+      "Dify側で Creative_PR_AI のモデルを軽いもの（gpt-4o-mini など）に変えるか、" +
+      "Reasoning Effort を low に下げてください。／原文：" + t.slice(0, 150)
+    );
+  }
+  if (/401|Unauthorized|invalid.*key/i.test(t)) {
+    return "DifyのAPIキーが正しくありません。アプリの「アクセスAPI」で発行し直して、KEY_CREATIVE に貼り直してください。／原文：" + t.slice(0, 150);
+  }
+  if (/400/.test(t)) {
+    return (
+      "Difyが入力を受け付けませんでした。アプリの入力変数名が task_description になっているか、" +
+      "必須変数が他にないかをご確認ください。／原文：" + t.slice(0, 200)
+    );
+  }
+  if (/404/.test(t)) {
+    return "Difyのアプリが見つかりません。キーが別のアプリのものである可能性があります。／原文：" + t.slice(0, 150);
+  }
+  if (/429|quota|credit/i.test(t)) {
+    return "Difyの利用上限に達しています。Dify側でご自身のモデルAPIキーが設定されているかご確認ください。／原文：" + t.slice(0, 150);
+  }
+  return t;
+}
 
-export default function Dashboard() {
-  const [authed, setAuthed] = useState(false);
+/* ========================= ③ 制作の実行 =============================== */
 
-  /* --- マスターデータを State に移管（UIから書き換え可能にするため） --- */
-  const [company, setCompany] = useState(DEPARTMENTS);
-  const [tasks, setTasks] = useState(DEMO_TASKS);
-  const [logs, setLogs] = useState(SEED_LOG);
-  const { settings } = useSettings();
-  const gasUrl = settings.gasUrl;
-  const [live, setLive] = useState(false); // 実データ取得成功フラグ
-  const [loadingData, setLoadingData] = useState(false);
-
-  const [view, setView] = useState("org"); // org | studio | accounts | settings | library
-  const [libFilter, setLibFilter] = useState("all");
-  const [detail, setDetail] = useState(null);
-  const [deptId, setDeptId] = useState(null);
-  const [agentId, setAgentId] = useState(null);
-  const [navOpen, setNavOpen] = useState(false);
-
-  const dept = useMemo(() => company.find((d) => d.id === deptId) || null, [company, deptId]);
-  const agent = useMemo(
-    () => (dept ? dept.agents.find((a) => a.id === agentId) || null : null),
-    [dept, agentId]
-  );
-
-  const pushLog = useCallback((line) => {
-    setLogs((l) => [...l.slice(-120), line]);
-  }, []);
-
-  /* --- 実データ取得 --- */
-  const loadData = useCallback(async () => {
-    if (!gasUrl) return;
-    setLoadingData(true);
-    try {
-      const r = await fetch(`${gasUrl}?action=jobs`);
-      const data = await r.json();
-      if (!data || !data.ok || !Array.isArray(data.jobs)) throw new Error("形式が違います");
-      const rows = data.jobs.map((j) => ({
-        service: pickTag(j.指示内容, "事業") || "AGENT",
-        timestamp: j.受信日時,
-        run_id: j.job_id,
-        client_name: j.持ち主,
-        agent: j.種別,
-        status: j.状態,
-        summary: jobTitle(j),
-        raw: j,
-      }));
-      setTasks(rows);
-      setLive(true);
-      pushLog(`[${new Date().toLocaleTimeString()}] DATA SYNCED: ${rows.length} records`);
-    } catch (e) {
-      setLive(false);
-      pushLog(`[${new Date().toLocaleTimeString()}] SYNC FAILED — デモデータを表示中`);
-    } finally {
-      setLoadingData(false);
+function processJobs() {
+  const props = PropertiesService.getScriptProperties();
+  const cKey = creativeKey();
+  const qKey = qaKey();
+  const notify = notifyEmail();
+  if (!cKey) {
+    // キーが未登録のときは「保留」にします。キーを入れれば自動で再開します。
+    const sh0 = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ");
+    if (sh0) {
+      const rr = sh0.getDataRange().getValues();
+      for (let k = 1; k < rr.length; k++) {
+        if (rr[k][6] === "受付") {
+          sh0.getRange(k + 1, 7).setValue("保留");
+          sh0.getRange(k + 1, 12).setValue(
+            "Difyの制作キーが未登録です。Apps Scriptの冒頭にある KEY_CREATIVE = \"\" の中に、" +
+              "Creative_PR_AI のAPIキー（app-...）を貼り付けて保存してください。"
+          );
+        }
+      }
     }
-  }, [gasUrl, pushLog]);
+    return;
+  }
 
-  useEffect(() => {
-    if (authed) loadData();
-  }, [authed, loadData]);
+  // 先に、レンダリング中の動画が仕上がっていないか確認します
+  checkRenders();
 
-  useEffect(() => {
-    if (typeof document !== "undefined") document.title = "CONTROL｜株式会社SASHIWA";
-  }, []);
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ");
+  const rows = sh.getDataRange().getValues();
 
-  /* --- 指示アサイン --- */
-  const assign = useCallback(
-    async (targetDept, targetAgent, text, priority) => {
-      const started = Date.now();
-      const payload = {
-        client_name: "社長（コントロールダッシュボード）",
-        client_email: "control@sashiwa.local",
-        message: `【指示先】${targetAgent.name}／【優先度】${priority}／【内容】${text}`,
-      };
+  for (let i = 1; i < rows.length; i++) {
+    const st0 = String(rows[i][6] || "");
+    if (st0 !== "受付" && st0 !== "保留") continue;
 
-      let ok = true;
-      if (LIVE_COMMAND) {
+    // 同時に走らないよう、先に印を付ける
+    sh.getRange(i + 1, 7).setValue("制作中");
+    SpreadsheetApp.flush();
+
+    const jobId = rows[i][0];
+    const kind = rows[i][2];
+    const acct = rows[i][3];
+    const instruction = String(rows[i][7]);
+    const clientEmail = String(rows[i][10] || "");
+    const ctx = { jobId: jobId, kind: kind, account: acct, clientEmail: clientEmail };
+    notifyStep("start", ctx);
+
+    try {
+      // 種別が「画像」なら、画像生成のルートへ
+      if (kind === "画像") {
+        const imgKey = openaiKey();
+        if (!imgKey) throw new Error("画像生成にはOpenAIのAPIキーが必要です。setup を実行して登録してください。");
+        // まず制作担当に、画像生成向けの詳しい英語プロンプトを作らせます
+        let imgPrompt = "";
         try {
-          const r = await fetch(WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          ok = r.ok;
+          imgPrompt = callDify(
+            cKey,
+            "あなたは画像生成AI向けのプロンプト設計担当です。以下の条件から、" +
+              "画像生成AIに渡す英語のプロンプトを1つだけ出力してください。\n" +
+              "・被写体、構図、カメラアングル、レンズ感、光の向きと質、色調、質感、雰囲気を具体的に書くこと\n" +
+              "・実在の人物名、キャラクター名、企業名、ロゴ、商標、既存作品の名前は一切含めないこと\n" +
+              "・画像内に文字を入れないよう指示を含めること\n" +
+              "・説明や前置きは書かず、プロンプト本文だけを英語で出力すること\n\n" +
+              "--- 条件 ---\n" + instruction
+          );
         } catch (e) {
-          ok = false;
+          imgPrompt = "";
+        }
+        const url = generateImage(imgKey, instruction, acct, imgPrompt);
+        sh.getRange(i + 1, 7).setValue("完了");
+        sh.getRange(i + 1, 9).setValue(url);
+        sh.getRange(i + 1, 10).setValue(new Date());
+        notifyStep("done", { jobId: jobId, kind: "画像", account: acct, clientEmail: clientEmail, url: url });
+        return;
+      }
+
+      // 種別が「動画」なら、台本を作ってからレンダリングへ
+      if (kind === "動画") {
+        const script = callDify(cKey, instruction);
+        const docUrl = makeDoc("SASHIWA_動画台本_" + acct + "_" + fmt(new Date()), acct, script);
+        const vKey = videoKey();
+
+        if (!vKey) {
+          sh.getRange(i + 1, 7).setValue("完了");
+          sh.getRange(i + 1, 9).setValue(docUrl);
+          sh.getRange(i + 1, 10).setValue(new Date());
+          sh.getRange(i + 1, 12).setValue("動画キー未設定のため台本のみ");
+          MailApp.sendEmail({
+            to: clientEmail || notify,
+            subject: "【SASHIWA】動画の台本が完成しました（" + acct + "）",
+            body: "動画の企画・構成・台本が完成しました。\n\n▼ 台本\n" + docUrl +
+              "\n\n※映像の書き出しは未設定です。setup を実行して JSON2Video のキーを登録すると、動画まで自動生成されます。\n",
+          });
+          return;
+        }
+
+        const projectId = submitRender(vKey, instruction, script);
+        sh.getRange(i + 1, 7).setValue("レンダリング中");
+        sh.getRange(i + 1, 9).setValue(docUrl);
+        sh.getRange(i + 1, 12).setValue("PROJECT:" + projectId);
+        return;
+      }
+
+      const strict = instruction.indexOf("【検査】厳格") >= 0;
+
+      // 1) 厳格モードのときは、先に構成を設計させます
+      let outline = "";
+      if (strict) {
+        outline = callDify(
+          cKey,
+          "あなたは構成設計の担当です。以下の条件で作る成果物の【構成案】だけを出してください。" +
+            "本文は書かないでください。見出しの並び、各パートで何を言うか、冒頭のフック、" +
+            "締めのCTAを箇条書きで示してください。\n\n--- 条件 ---\n" + instruction
+        );
+      }
+
+      // 2) 制作
+      const draft = callDify(
+        cKey,
+        instruction +
+          (outline ? "\n\n--- 先に設計した構成（これに沿って書いてください）---\n" + outline : "") +
+          "\n\n--- 出力ルール ---\n" +
+          "・前置き、解説、「承知しました」等は一切書かず、成果物の本文だけを出力すること\n" +
+          "・JSONやMarkdownの記号で包まず、そのまま貼り付けて使える日本語のテキストで出力すること\n" +
+          "・複数案を求められている場合は【案1】【案2】…で区切ること\n" +
+          "・指定された文字数上限を絶対に超えないこと"
+      );
+
+      // 3) 検査 → 差し戻しがあれば制作担当が修正します
+      let checked = draft;
+      let qaNote = "";
+      if (qKey) {
+        const qaPrompt =
+          "次の成果物を検査してください。確認する観点は、事実として疑わしい記述、" +
+          "薬機法・景品表示法に触れる表現、著作権や商標の侵害、指定文字数の超過です。\n\n" +
+          "--- 制作条件 ---\n" + instruction +
+          "\n\n--- 成果物 ---\n" + draft;
+        let qaRaw = "";
+        try { qaRaw = callDify(qKey, qaPrompt); } catch (e) { qaRaw = ""; }
+
+        if (qaRaw) {
+          const qa = readQaResult(qaRaw);
+          if (qa.rejected && qa.feedback) {
+            // 差し戻し。制作担当に直させます（これが最終稿になります）
+            qaNote = qa.feedback;
+            try {
+              const fixed = callDify(
+                cKey,
+                "あなたが書いた原稿に、検査担当から修正の指示が届きました。\n" +
+                  "指示にすべて従って書き直し、修正後の完成原稿だけを出力してください。\n" +
+                  "講評、言い訳、前置き、「承知しました」などは一切書かないこと。\n" +
+                  "JSONやコードブロックで包まず、そのまま投稿できる日本語のテキストで出力すること。\n" +
+                  "複数案がある場合は【案1】【案2】…の区切りを保つこと。\n\n" +
+                  "--- 制作条件 ---\n" + instruction +
+                  "\n\n--- 検査担当からの指示 ---\n" + qa.feedback +
+                  "\n\n--- 修正する原稿 ---\n" + draft
+              );
+              const f = readQaResult(fixed);
+              if (!f.rejected && f.text && f.text.length > 30) checked = f.text;
+            } catch (e) {
+              /* 修正に失敗した場合は、元の原稿をそのまま使います */
+            }
+          } else if (qa.text && qa.text.length > 30) {
+            checked = qa.text;
+          }
         }
       }
 
-      // 最低1.2秒はローディングを見せる
-      const wait = Math.max(0, 1200 - (Date.now() - started));
-      await new Promise((res) => setTimeout(res, wait));
-
-      // AI社員のタスクとステータスを書き換え
-      setCompany((prev) =>
-        prev.map((d) =>
-          d.id !== targetDept.id
-            ? d
-            : {
-                ...d,
-                agents: d.agents.map((a) =>
-                  a.id !== targetAgent.id
-                    ? a
-                    : { ...a, currentTask: text, status: priority === "High" ? "高負荷" : "稼働中" }
-                ),
-              }
-        )
+      // 4) ドキュメント化（本文が先、制作メモは末尾）
+      const url = makeDeliveryDoc(
+        "SASHIWA_" + kind + "_" + acct + "_" + fmt(new Date()),
+        acct,
+        checked,
+        { instruction: instruction, qaNote: qaNote }
       );
 
-      const t = new Date().toLocaleTimeString();
-      pushLog(`[${t}] COMMAND DEPLOYED: "${text}" (PRIORITY: ${priority})`);
-      pushLog(
-        ok
-          ? `[${t}] → ${targetAgent.name} acknowledged. routing via Make ...`
-          : `[${t}] ! webhook unreachable — ローカル反映のみ`
-      );
+      // 4) 記録と通知
+      sh.getRange(i + 1, 7).setValue("完了");
+      sh.getRange(i + 1, 9).setValue(url);
+      sh.getRange(i + 1, 10).setValue(new Date());
 
-      setTasks((prev) => [
-        {
-          service: "AGENT",
-          timestamp: new Date().toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
-          run_id: "manual",
-          client_name: "社長",
-          agent: targetAgent.name,
-          status: ok ? "送信済" : "失敗",
-          summary: text.length > 40 ? text.slice(0, 40) + "…" : text,
-        },
-        ...prev,
-      ]);
+      notifyStep("done", { jobId: jobId, kind: kind, account: acct, clientEmail: clientEmail, url: url });
+    } catch (err) {
+      const em = explainError(String(err));
+      sh.getRange(i + 1, 7).setValue("エラー");
+      sh.getRange(i + 1, 12).setValue(em.slice(0, 400));
+      notifyProgress("エラー", { jobId: jobId, kind: kind, acct: acct, error: em, to: "" });
+    }
 
-      return ok;
-    },
-    [pushLog]
-  );
+    return; // 1回の実行で1件ずつ。実行時間の上限を避けます
+  }
+}
 
-  /* --- KPI --- */
-  const kpi = useMemo(() => {
-    const all = company.flatMap((d) => d.agents);
+/**
+ * Difyの回答からJSONが返ってきた場合に、人が読める本文だけを取り出します。
+ * report_body → answer → text → content の順で探し、無ければ原文を返します。
+ */
+function extractBody(raw) {
+  const t = String(raw || "").trim();
+  const m = t.match(/\{[\s\S]*\}/);
+  if (!m) return t;
+  try {
+    const o = JSON.parse(m[0]);
+    // feedback や status は講評なので、本文としては採用しません
+    if (o.feedback && !o.report_body && !o.本文 && !o.output) return t;
+    const keys = ["report_body", "本文", "output", "answer", "text", "content", "body"];
+    for (let i = 0; i < keys.length; i++) {
+      if (o[keys[i]] && String(o[keys[i]]).length > 20) return String(o[keys[i]]);
+    }
+    // 配列で複数案が返る形にも対応します
+    if (Array.isArray(o.variants) && o.variants.length) {
+      return o.variants
+        .map(function (v, i) { return "【案" + (i + 1) + "】\n" + (typeof v === "string" ? v : v.text || JSON.stringify(v)); })
+        .join("\n\n");
+    }
+    return t;
+  } catch (e) {
+    return t;
+  }
+}
+
+/**
+ * 検査担当の応答が「差し戻しの講評」かどうかを判定します。
+ * 講評であれば {rejected:true, feedback:"..."} を返します。
+ */
+function readQaResult(raw) {
+  const t = String(raw || "").trim();
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      const o = JSON.parse(m[0]);
+      const st = String(o.status || o.judgement || o.result || "").toUpperCase();
+      const fb = o.feedback || o.comment || o.reason || o.issues || "";
+      if (fb || st.indexOf("REJECT") >= 0 || st.indexOf("NG") >= 0) {
+        return { rejected: st.indexOf("APPROV") < 0 && st.indexOf("OK") < 0, feedback: String(fb || t) };
+      }
+      const body = o.report_body || o.本文 || o.output || o.text || o.content || o.body;
+      if (body && String(body).length > 20) return { rejected: false, text: String(body) };
+    } catch (e) {
+      /* JSONとして読めない場合は、下の判定へ */
+    }
+  }
+  // 講評でよく使われる語が多い場合も、講評とみなします
+  if (/修正してください|変更してください|差し戻|抵触|表現のため|へ変更/.test(t) && t.length < 3000) {
+    return { rejected: true, feedback: t };
+  }
+  return { rejected: false, text: t };
+}
+
+function callDify(appKey, message) {
+  const res = UrlFetchApp.fetch("https://api.dify.ai/v1/chat-messages", {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + appKey },
+    payload: JSON.stringify({
+      inputs: { task_description: message },
+      query: message,
+      response_mode: "blocking",
+      user: "sashiwa-studio",
+    }),
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code !== 200) throw new Error("Dify応答エラー " + code + "：" + text.slice(0, 200));
+  const data = JSON.parse(text);
+  return extractBody(data.answer || text);
+}
+
+/* ========================= 動画の生成 ================================= */
+
+/**
+ * 台本から動画のレンダリングを依頼します（JSON2Video）。
+ * 返り値はプロジェクトIDで、仕上がりは checkRenders が拾います。
+ *
+ * ※JSON2Videoのスキーマは更新されることがあります。うまく動かない場合は
+ *   https://json2video.com/docs/ を確認して、下のpayloadを調整してください。
+ */
+function submitRender(apiKey, instruction, script) {
+  const ratio = pick(instruction, "比率") || "9:16";
+  const vertical = ratio.indexOf("9:16") >= 0 || ratio.indexOf("縦") >= 0;
+  const resolution = vertical ? "instagram-story" : "full-hd";
+
+  // 台本を場面に分割します（空行、または「・」「■」の行頭で区切ります）
+  const lines = String(script)
+    .split(/\n+/)
+    .map(function (t) { return t.replace(/^[・■\-\*\d\.\s]+/, "").trim(); })
+    .filter(function (t) { return t.length > 4 && t.length < 200; })
+    .slice(0, 8);
+
+  const scenes = lines.map(function (line, idx) {
     return {
-      agents: all.length,
-      active: all.filter((a) => a.status !== "待機中").length,
-      high: all.filter((a) => a.status === "高負荷").length,
-      tasks: tasks.length,
-      done: tasks.filter((t) => (t.status || "").includes("完了")).length,
+      "background-color": idx % 2 === 0 ? "#0A0D13" : "#1A2233",
+      elements: [
+        {
+          type: "text",
+          text: line,
+          style: "003",
+          settings: {
+            "font-family": "Noto Sans JP",
+            "font-size": vertical ? "68px" : "54px",
+            "font-weight": "700",
+            color: "#FFFFFF",
+            "text-align": "center",
+          },
+          position: "center-center",
+          duration: -1,
+        },
+        {
+          type: "voice",
+          text: line,
+          voice: "ja-JP-NanamiNeural",
+          model: "azure",
+        },
+      ],
     };
-  }, [company, tasks]);
+  });
 
-  if (!authed) return (
-    <div className="dbRoot">
-      <style>{CSS_DASHBOARD}</style>
-      <Gate onPass={() => setAuthed(true)} />
-    </div>
-  );
+  if (scenes.length === 0) throw new Error("台本から場面を作れませんでした。台本の形式をご確認ください。");
 
-  const goDept = (id) => {
-    setView("org");
-    setDeptId(id);
-    setAgentId(null);
-    setNavOpen(false);
+  const res = UrlFetchApp.fetch("https://api.json2video.com/v2/movies", {
+    method: "post",
+    contentType: "application/json",
+    headers: { "x-api-key": apiKey },
+    payload: JSON.stringify({ resolution: resolution, quality: "high", scenes: scenes }),
+    muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code !== 200 && code !== 201) throw new Error("動画APIエラー " + code + "：" + text.slice(0, 250));
+
+  const data = JSON.parse(text);
+  const pid = data.project || (data.movie && data.movie.project) || data.id;
+  if (!pid) throw new Error("プロジェクトIDが返りませんでした：" + text.slice(0, 200));
+  return pid;
+}
+
+/** レンダリング中の動画が仕上がっていないか確認します */
+function checkRenders() {
+  const props = PropertiesService.getScriptProperties();
+  const key = videoKey();
+  const notify = notifyEmail();
+  if (!key) return;
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ");
+  const rows = sh.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][6] !== "レンダリング中") continue;
+    const memo = String(rows[i][11] || "");
+    if (memo.indexOf("PROJECT:") !== 0) continue;
+    const pid = memo.replace("PROJECT:", "").trim();
+
+    try {
+      const res = UrlFetchApp.fetch("https://api.json2video.com/v2/movies?project=" + encodeURIComponent(pid), {
+        method: "get",
+        headers: { "x-api-key": key },
+        muteHttpExceptions: true,
+      });
+      const data = JSON.parse(res.getContentText());
+      const movie = data.movie || data;
+      const status = String(movie.status || "");
+
+      if (status === "done" && movie.url) {
+        sh.getRange(i + 1, 7).setValue("完了");
+        sh.getRange(i + 1, 10).setValue(new Date());
+        sh.getRange(i + 1, 12).setValue("動画：" + movie.url);
+        MailApp.sendEmail({
+          to: String(rows[i][10] || "") || notify,
+          cc: rows[i][10] ? notify : "",
+          subject: "【SASHIWA】動画が完成しました（" + rows[i][3] + "）",
+          body: "動画の書き出しが完了しました。\n\n▼ 動画\n" + movie.url +
+            "\n\n▼ 台本\n" + String(rows[i][8] || "") +
+            "\n\n※公開前に、内容と音源のライセンスをご確認ください。\n",
+        });
+      } else if (status === "error") {
+        sh.getRange(i + 1, 7).setValue("エラー");
+        sh.getRange(i + 1, 12).setValue("動画エラー：" + String(movie.message || "").slice(0, 200));
+        if (notify) MailApp.sendEmail(notify, "【SASHIWA】動画の書き出しでエラー", String(movie.message || ""));
+      }
+    } catch (err) {
+      sh.getRange(i + 1, 7).setValue("エラー");
+      sh.getRange(i + 1, 12).setValue(String(err).slice(0, 200));
+    }
+    return; // 1回につき1件
+  }
+}
+
+/**
+ * 納品用のドキュメントを作ります。
+ * 冒頭に「そのまま投稿できる本文」、末尾に制作メモを置きます。
+ */
+function makeDeliveryDoc(title, account, body, meta) {
+  const doc = DocumentApp.create(title);
+  const b = doc.getBody();
+
+  b.appendParagraph(title).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  b.appendParagraph("作成日時：" + fmt(new Date(), true) + "／投稿先：" + account);
+  b.appendHorizontalRule();
+
+  b.appendParagraph("■ そのまま投稿できる本文").setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  b.appendParagraph("下記をコピーして、そのままご使用いただけます。").setItalic(true);
+
+  // 【案1】などで区切って読みやすくします
+  const parts = String(body).split(/(?=【案\s*\d+】)/);
+  parts.forEach(function (part, idx) {
+    const t = part.trim();
+    if (!t) return;
+    if (idx > 0) b.appendHorizontalRule();
+    t.split("\n").forEach(function (line) {
+      const l = line.replace(/^\s*[#*`]+\s*/, "");
+      if (/^【案\s*\d+】/.test(l.trim())) {
+        b.appendParagraph(l.trim()).setHeading(DocumentApp.ParagraphHeading.HEADING3);
+      } else {
+        b.appendParagraph(l);
+      }
+    });
+  });
+
+  if (meta && (meta.qaNote || meta.instruction)) {
+    b.appendPageBreak();
+    b.appendParagraph("── 以下は制作メモです（投稿には使いません）──")
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    if (meta.qaNote) {
+      b.appendParagraph("【検査担当からの指摘と、反映した内容】");
+      String(meta.qaNote).split("\n").forEach(function (l) { b.appendParagraph(l); });
+      b.appendParagraph("");
+    }
+    if (meta.instruction) {
+      b.appendParagraph("【制作条件】");
+      String(meta.instruction).split("／").forEach(function (l) { b.appendParagraph(l); });
+    }
+  }
+
+  b.appendHorizontalRule();
+  b.appendParagraph(
+    "※本成果物はAIが生成したものです。内容の正確性を保証するものではありません。公開前に必ずご確認ください。"
+  ).setItalic(true);
+
+  doc.saveAndClose();
+  DriveApp.getFileById(doc.getId()).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return doc.getUrl();
+}
+
+/** 文章をGoogleドキュメントにして共有リンクを返します */
+function makeDoc(title, account, text) {
+  const doc = DocumentApp.create(title);
+  const b = doc.getBody();
+  b.appendParagraph(title).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  b.appendParagraph("作成日時：" + fmt(new Date(), true));
+  b.appendParagraph("投稿先：" + account);
+  b.appendHorizontalRule();
+  String(text).split("\n").forEach(function (line) { b.appendParagraph(line); });
+  b.appendHorizontalRule();
+  b.appendParagraph(
+    "※本成果物はAIが生成したものです。内容の正確性を保証するものではありません。公開前に必ずご確認ください。"
+  ).setItalic(true);
+  doc.saveAndClose();
+  DriveApp.getFileById(doc.getId()).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return doc.getUrl();
+}
+
+/* ========================= 画像の生成 ================================= */
+
+/**
+ * OpenAI の画像APIで画像を作り、Googleドライブに保存して共有リンクを返します。
+ */
+function generateImage(apiKey, instruction, account, aiPrompt) {
+  const desc = pick(instruction, "描画内容") || pick(instruction, "内容") || "抽象的なビジネスイメージ";
+  const style = pick(instruction, "画像スタイル") || "写真風";
+  const ratio = pick(instruction, "比率") || pick(instruction, "縦横比") || "1:1";
+
+  let size = "1024x1024";
+  if (ratio.indexOf("9:16") >= 0 || ratio.indexOf("4:5") >= 0) size = "1024x1536";
+  else if (ratio.indexOf("16:9") >= 0) size = "1536x1024";
+
+  const base =
+    aiPrompt && String(aiPrompt).length > 30
+      ? String(aiPrompt)
+      : desc + "。スタイル：" + style + "。";
+
+  const prompt =
+    base +
+    " No text, no letters, no logos, no watermarks. " +
+    "Do not depict real people, existing characters, brand marks or trademarks. " +
+    "Do not imitate any existing artwork.";
+
+  const res = UrlFetchApp.fetch("https://api.openai.com/v1/images/generations", {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + apiKey },
+    payload: JSON.stringify({ model: "gpt-image-1", prompt: prompt, size: size, n: 1 }),
+    muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code !== 200) throw new Error("画像APIエラー " + code + "：" + text.slice(0, 250));
+
+  const data = JSON.parse(text);
+  const item = data.data && data.data[0];
+  if (!item) throw new Error("画像が返りませんでした：" + text.slice(0, 200));
+
+  let blob;
+  if (item.b64_json) {
+    blob = Utilities.newBlob(Utilities.base64Decode(item.b64_json), "image/png");
+  } else if (item.url) {
+    blob = UrlFetchApp.fetch(item.url).getBlob();
+  } else {
+    throw new Error("画像データの形式が不明です。");
+  }
+
+  blob.setName("SASHIWA_画像_" + account + "_" + fmt(new Date()) + ".png");
+  const file = DriveApp.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return file.getUrl();
+}
+
+/* ========================= ④ 予約投稿の配信 =========================== */
+
+/**
+ * 予約時刻が来た投稿を処理します。
+ *
+ * 【動作】
+ *   X（旧Twitter）… setupX でキーを登録済みなら、実際に自動投稿します。
+ *   その他の媒体   … 完成した投稿文をメールで届けます（貼り付けるだけの状態）。
+ */
+function runSchedule() {
+  const props = PropertiesService.getScriptProperties();
+  const notify = notifyEmail();
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("投稿キュー");
+  const rows = sh.getDataRange().getValues();
+  const now = new Date();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][7] !== "予約") continue;
+    const at = new Date(rows[i][1]);
+    if (isNaN(at.getTime()) || at > now) continue;
+
+    const acct = rows[i][2];
+    const media = rows[i][3];
+    const body = String(rows[i][4]);
+    const repeat = String(rows[i][6] || "なし");
+
+    try {
+      const posted = postToPlatform(media, acct, body);
+
+      const link = intentUrl(media, body);
+      MailApp.sendEmail({
+        to: notify,
+        subject: "【SASHIWA】投稿の時間です：" + acct + "（" + media + "）",
+        body:
+          (posted
+            ? "自動投稿を実行しました。\n\n"
+            : link
+            ? "▼ このリンクを開くと、本文が入力された状態で投稿画面が開きます\n" + link + "\n\n"
+            : "下記をコピーして投稿してください。\n\n") +
+          "───── 投稿本文 ─────\n" +
+          body +
+          "\n──────────────\n\n" +
+          "アカウント：" + acct + "\n" +
+          "媒体：" + media + "\n" +
+          "予定時刻：" + fmt(at, true) + "\n",
+      });
+
+      if (repeat === "なし") {
+        sh.getRange(i + 1, 8).setValue(posted ? "投稿済み" : "配信済み");
+      } else {
+        const next = new Date(at.getTime());
+        if (repeat === "毎日") next.setDate(next.getDate() + 1);
+        else if (repeat === "平日のみ") {
+          do { next.setDate(next.getDate() + 1); } while (next.getDay() === 0 || next.getDay() === 6);
+        } else if (repeat === "毎週") next.setDate(next.getDate() + 7);
+        sh.getRange(i + 1, 2).setValue(next);
+      }
+      sh.getRange(i + 1, 9).setValue(new Date());
+    } catch (err) {
+      sh.getRange(i + 1, 8).setValue("エラー");
+      MailApp.sendEmail(notify, "【SASHIWA】予約投稿でエラー", String(err));
+    }
+
+    return; // 1回につき1件
+  }
+}
+
+/**
+ * 各SNSへの直接投稿。
+ * API申請とトークン取得が済んだら、ここに実装してください。
+ * 実装するまでは false を返し、メールでの下書き配信のみになります。
+ *
+ * 例（Xの場合）：
+ *   const token = PropertiesService.getScriptProperties().getProperty("X_BEARER");
+ *   UrlFetchApp.fetch("https://api.twitter.com/2/tweets", {
+ *     method: "post", contentType: "application/json",
+ *     headers: { Authorization: "Bearer " + token },
+ *     payload: JSON.stringify({ text: body })
+ *   });
+ *   return true;
+ */
+function postToPlatform(media, account, body) {
+  const m = String(media || "");
+  if (m.indexOf("X") === 0 || m.indexOf("Twitter") >= 0 || m.indexOf("ツイッター") >= 0) {
+    return postToX(body);
+  }
+  // 他の媒体はメールでの下書き配信のみ（API申請が済んだらここに追加します）
+  return false;
+}
+
+/* ========================= X（旧Twitter）への投稿 ===================== */
+
+/**
+ * Xの開発者ポータルで発行した4つの値を使って投稿します。
+ * 設定は setupX() を実行してください。
+ * キーが未登録の場合は false を返し、メールでの下書き配信になります。
+ */
+function postToX(text) {
+  const c = xCreds();
+  if (!c) return false;
+  const res = xFetch("POST", "https://api.twitter.com/2/tweets", c, JSON.stringify({ text: String(text) }));
+  const code = res.getResponseCode();
+  if (code === 200 || code === 201) return true;
+  throw new Error(xExplain(code, res.getContentText()));
+}
+
+function xCreds() {
+  const p = PropertiesService.getScriptProperties();
+  const c = {
+    ck: p.getProperty("X_CONSUMER_KEY"),
+    cs: p.getProperty("X_CONSUMER_SECRET"),
+    at: p.getProperty("X_ACCESS_TOKEN"),
+    as: p.getProperty("X_ACCESS_SECRET"),
   };
-  const goAgent = (dId, aId) => {
-    setView("org");
-    setDeptId(dId);
-    setAgentId(aId);
-    setNavOpen(false);
+  return c.ck && c.cs && c.at && c.as ? c : null;
+}
+
+/** RFC3986のパーセントエンコード（OAuth署名に必要です） */
+function enc(v) {
+  return encodeURIComponent(String(v))
+    .replace(/\!/g, "%21")
+    .replace(/\*/g, "%2A")
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+}
+
+/** OAuth 1.0a で署名したリクエストを送ります */
+function xFetch(method, url, c, payload) {
+  const oauth = {
+    oauth_consumer_key: c.ck,
+    oauth_nonce: Utilities.getUuid().replace(/-/g, ""),
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_token: c.at,
+    oauth_version: "1.0",
   };
+  const keys = Object.keys(oauth).sort();
+  const paramStr = keys.map(function (k) { return enc(k) + "=" + enc(oauth[k]); }).join("&");
+  const baseStr = method + "&" + enc(url) + "&" + enc(paramStr);
+  const signKey = enc(c.cs) + "&" + enc(c.as);
+  oauth.oauth_signature = Utilities.base64Encode(
+    Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_1, baseStr, signKey)
+  );
+  const header =
+    "OAuth " +
+    Object.keys(oauth).sort().map(function (k) { return enc(k) + '="' + enc(oauth[k]) + '"'; }).join(", ");
 
-  return (
-    <div className="dbRoot">
-      <style>{CSS_DASHBOARD}</style>
+  const opt = { method: method.toLowerCase(), headers: { Authorization: header }, muteHttpExceptions: true };
+  if (payload) {
+    opt.contentType = "application/json";
+    opt.payload = payload;
+  }
+  return UrlFetchApp.fetch(url, opt);
+}
 
-      <div className="dbShell">
-        {/* ---------------- サイドバー ---------------- */}
-        <aside className={`dbSide ${navOpen ? "is-open" : ""}`}>
-          <div className="dbSide__hd">
-            <a className="dbBrand" href="#/">
-              <span className="dbBrand__m">
-                <svg viewBox="0 0 24 24" width="17" height="17">
-                  <path d="M5 18 12 6l7 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-                  <circle cx="12" cy="5.4" r="2.3" fill="currentColor" />
-                </svg>
-              </span>
-              <span>
-                SASHIWA<em>CONTROL</em>
-              </span>
-            </a>
-          </div>
+/** エラーコードを日本語で説明します */
+function xExplain(code, body) {
+  if (code === 401) {
+    return "X投稿エラー 401：認証に失敗しました。よくある原因は" +
+      "「App permissions を Read and write に変えたあとで、トークンを再発行していない」です。" +
+      "開発者ポータルで Access Token を Regenerate して、setupX をやり直してください。";
+  }
+  if (code === 403) {
+    return "X投稿エラー 403：権限が足りないか、同じ文面を重複投稿しています。" +
+      "App permissions が Read only のままでないかご確認ください。（詳細：" + String(body).slice(0, 150) + "）";
+  }
+  if (code === 429) {
+    return "X投稿エラー 429：投稿数の上限に達しました。時間をおいて再実行してください。";
+  }
+  return "X投稿エラー " + code + "：" + String(body).slice(0, 250);
+}
 
-          <nav className="dbSide__nav">
-            <button
-              className={`dbNavAll ${view === "org" && !deptId ? "is-cur" : ""}`}
-              onClick={() => {
-                setView("org");
-                goDept(null);
-              }}
-            >
-              <Ico name="grid" size={17} />
-              全社ダッシュボード
-            </button>
-            <button
-              className={`dbNavAll dbNavStudio ${view === "accounts" ? "is-cur" : ""}`}
-              onClick={() => { setView("accounts"); setNavOpen(false); }}
-            >
-              <Ico name="bot" size={16} />
-              アカウント管理
-            </button>
-            <button
-              className={`dbNavAll ${view === "library" ? "is-cur" : ""}`}
-              onClick={() => { setView("library"); setLibFilter("all"); setNavOpen(false); }}
-            >
-              <Ico name="check" size={16} />
-              成果物ライブラリ
-            </button>
-            <button
-              className={`dbNavAll ${view === "settings" ? "is-cur" : ""}`}
-              onClick={() => { setView("settings"); setNavOpen(false); }}
-            >
-              <Ico name="refresh" size={16} />
-              接続設定
-            </button>
-            <button
-              className={`dbNavAll dbNavStudio ${view === "studio" ? "is-cur" : ""}`}
-              onClick={() => {
-                setView("studio");
-                setNavOpen(false);
-              }}
-            >
-              <Ico name="send" size={16} />
-              制作スタジオ
-              <em>NEW</em>
-            </button>
+/**
+ * Xの設定を診断します。投稿はしません。安心して実行できます。
+ */
+function checkX() {
+  const ui = SpreadsheetApp.getUi();
+  const c = xCreds();
+  if (!c) {
+    ui.alert("Xのキーが未登録です。\n\nsetupX を実行して、4つの値を登録してください。");
+    return;
+  }
+  const res = xFetch("GET", "https://api.twitter.com/2/users/me", c, null);
+  const code = res.getResponseCode();
+  if (code === 200) {
+    let name = "";
+    try {
+      const d = JSON.parse(res.getContentText());
+      name = (d.data && (d.data.username || d.data.name)) || "";
+    } catch (e) {}
+    ui.alert(
+      "接続できました。\n\n" +
+        "  アカウント：" + (name ? "@" + name : "取得済み") + "\n\n" +
+        "投稿できるかどうかは testX で確認できます（実際に投稿されます）。"
+    );
+  } else {
+    ui.alert("接続できませんでした。\n\n" + xExplain(code, res.getContentText()));
+  }
+}
 
-            <p className="dbSide__k">部署 / DEPARTMENTS</p>
-            {company.map((d) => (
-              <div key={d.id} className="dbNavGroup">
-                <button
-                  className={`dbNavD ${deptId === d.id && !agentId ? "is-cur" : ""}`}
-                  onClick={() => goDept(d.id)}
-                  style={{ "--t": d.theme }}
-                >
-                  <span className="dbNavD__dot" />
-                  <span className="dbNavD__n">{d.name}</span>
-                  <span className="dbNavD__c">{d.agents.length}</span>
-                </button>
-                {deptId === d.id &&
-                  d.agents.map((a) => (
-                    <button
-                      key={a.id}
-                      className={`dbNavA ${agentId === a.id ? "is-cur" : ""}`}
-                      onClick={() => goAgent(d.id, a.id)}
-                      style={{ "--t": d.theme }}
-                    >
-                      <span className={`dbSt dbSt--${a.status}`} />
-                      {a.name}
-                    </button>
-                  ))}
-              </div>
-            ))}
-          </nav>
-
-          <div className="dbSide__ft">
-            <div className={`dbSync ${live ? "is-live" : ""}`}>
-              <span className="dbSync__d" />
-              {live ? "実データ連携中" : "デモデータ表示中"}
-            </div>
-            <div className="dbSide__links">
-              <a href="#/" className="dbSide__site">
-                <Ico name="grid" size={14} />
-                公開サイトを見る
-              </a>
-              <button className="dbSide__out" onClick={() => setAuthed(false)}>
-                <Ico name="out" size={15} />
-                退室
-              </button>
-            </div>
-          </div>
-        </aside>
-
-        <div className="dbMain">
-          {/* ---------------- トップバー ---------------- */}
-          <div className="dbTop">
-            <button className="dbBurger" onClick={() => setNavOpen((v) => !v)} aria-label="メニュー">
-              <span />
-              <span />
-              <span />
-            </button>
-            <div className="dbTop__bc">
-              {view === "studio" ? (
-                <span>制作スタジオ</span>
-              ) : view === "accounts" ? (
-                <span>アカウント管理</span>
-              ) : view === "settings" ? (
-                <span>接続設定</span>
-              ) : view === "library" ? (
-                <span>成果物ライブラリ</span>
-              ) : (
-                <button onClick={() => goDept(null)}>全社</button>
-              )}
-              {view === "org" && dept && (
-                <>
-                  <em>/</em>
-                  <button onClick={() => goDept(dept.id)}>{dept.name}</button>
-                </>
-              )}
-              {view === "org" && agent && (
-                <>
-                  <em>/</em>
-                  <span>{agent.name}</span>
-                </>
-              )}
-            </div>
-            <button className="dbTop__rf" onClick={loadData} disabled={loadingData || !SHEET_CSV_URL}>
-              <span className={loadingData ? "dbSpin" : ""}>
-                <Ico name="refresh" size={15} />
-              </span>
-              {SHEET_CSV_URL ? "再取得" : "デモ"}
-            </button>
-          </div>
-
-          <div className="dbBody">
-            {view === "accounts" && <AccountsView pushLog={pushLog} />}
-            {view === "settings" && <SettingsView pushLog={pushLog} />}
-            {view === "library" && <LibraryView pushLog={pushLog} initialFilter={libFilter} />}
-            {view === "studio" && <Studio pushLog={pushLog} />}
-            {view === "org" && !dept && (
-              <ViewAll
-                company={company}
-                kpi={kpi}
-                tasks={tasks}
-                logs={logs}
-                goDept={goDept}
-                goAgent={goAgent}
-                openLibrary={(f) => { setLibFilter(f); setView("library"); }}
-                onSelect={setDetail}
-              />
-            )}
-            {view === "org" && dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} onSelect={setDetail} />}
-            {view === "org" && dept && agent && (
-              <ViewAgent dept={dept} agent={agent} tasks={tasks} logs={logs} assign={assign} onSelect={setDetail} />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {detail && <JobDetail job={detail.raw || toJob(detail)} onClose={() => setDetail(null)} />}
-      {navOpen && <div className="dbScrim" onClick={() => setNavOpen(false)} />}
-    </div>
+/**
+ * Xへの自動投稿を設定します。開発者ポータルの「Keys and tokens」で
+ * 4つの値を発行してから、この関数を実行してください。
+ */
+function setupX() {
+  const ui = SpreadsheetApp.getUi();
+  const r = ui.prompt(
+    "Xへの自動投稿を設定",
+    "X開発者ポータルの「Keys and tokens」で発行した4つの値を、\n" +
+      "この順番でカンマ区切りで貼り付けてください。\n\n" +
+      "  API Key , API Key Secret , Access Token , Access Token Secret\n\n" +
+      "※Access Token には「Read and Write」の権限が必要です。",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  const v = r.getResponseText().split(",").map(function (x) { return x.trim(); });
+  if (v.length !== 4 || v.some(function (x) { return !x; })) {
+    ui.alert("4つの値がそろっていません。カンマで区切って、もう一度実行してください。");
+    return;
+  }
+  const p = PropertiesService.getScriptProperties();
+  p.setProperty("X_CONSUMER_KEY", v[0]);
+  p.setProperty("X_CONSUMER_SECRET", v[1]);
+  p.setProperty("X_ACCESS_TOKEN", v[2]);
+  p.setProperty("X_ACCESS_SECRET", v[3]);
+  ui.alert(
+    "登録しました。\n\n" +
+      "testX を実行すると、テスト投稿が実際にXへ送信されます。\n" +
+      "投稿されたくない場合は実行しないでください。"
   );
 }
 
-/* ============================ View A：全社 ============================== */
-
-function ViewAll({ company, kpi, tasks, logs, goDept, goAgent, openLibrary, onSelect }) {
-  return (
-    <>
-      <header className="dbHead">
-        <p className="dbHead__en">EXECUTIVE OVERVIEW</p>
-        <h1>全社ダッシュボード</h1>
-        <p className="dbHead__s">5部署 / {kpi.agents}体のAI社員が稼働しています。</p>
-      </header>
-
-      <div className="dbKpis">
-        <Kpi icon="bot" label="稼働中のAI社員" value={kpi.active} unit={`/ ${kpi.agents}体`} />
-        <Kpi icon="pulse" label="処理レコード" value={kpi.tasks} unit="件" />
-        <Kpi icon="check" label="完了" value={kpi.done} unit="件" />
-        <Kpi icon="clock" label="高負荷" value={kpi.high} unit="体" tone={kpi.high ? "warn" : ""} />
-      </div>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">事業別の稼働</h2>
-        <div className="dbSvcs">
-          {SERVICES.map((sv) => {
-            const rows = tasks.filter((t) => (t.service || "AGENT") === sv.code);
-            const done = rows.filter((t) => (t.status || "").includes("完了")).length;
-            return (
-              <article
-                key={sv.code}
-                className="dbSvc is-click"
-                style={{ "--t": sv.theme, "--s": sv.soft }}
-                onClick={() => openLibrary && openLibrary(sv.code)}
-              >
-                <div className="dbSvc__hd">
-                  <span className="dbSvc__dot" />
-                  <p className="dbSvc__n">{sv.name}</p>
-                  <span className="dbMono dbSvc__c">{sv.code}</span>
-                </div>
-                <p className="dbMono dbSvc__v">
-                  {rows.length}
-                  <span>件</span>
-                </p>
-                <p className="dbSvc__l">うち完了 {done} 件</p>
-                <div className="dbSvc__bar">
-                  <span style={{ width: rows.length ? `${(done / rows.length) * 100}%` : "0%" }} />
-                </div>
-                <p className="dbSvc__more">成果物を見る →</p>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">部署の稼働状況</h2>
-        <div className="dbDepts">
-          {company.map((d) => (
-            <article key={d.id} className="dbDept" style={{ "--t": d.theme, "--s": d.soft }} onClick={() => goDept(d.id)}>
-              <div className="dbDept__hd">
-                <span className="dbDept__ic">
-                  <Ico name="bot" size={20} />
-                </span>
-                <div>
-                  <p className="dbDept__n">{d.name}</p>
-                  <p className="dbDept__en">{d.en}</p>
-                </div>
-              </div>
-              <p className="dbDept__d">{d.desc}</p>
-              <div className="dbDept__ags">
-                {d.agents.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      goAgent(d.id, a.id);
-                    }}
-                  >
-                    <span className={`dbSt dbSt--${a.status}`} />
-                    {a.name}
-                  </button>
-                ))}
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <div className="dbSplit">
-        <section className="dbSec">
-          <h2 className="dbSecT">直近の処理履歴</h2>
-          <TaskTable tasks={tasks.slice(0, 8)} onSelect={onSelect} />
-        </section>
-        <section className="dbSec">
-          <h2 className="dbSecT">システムログ</h2>
-          <ConsoleLog logs={logs} />
-        </section>
-      </div>
-    </>
+/** 実際にテスト投稿します（本当に投稿されます） */
+function testX() {
+  const ui = SpreadsheetApp.getUi();
+  const ok = ui.alert(
+    "テスト投稿",
+    "実際にXへ投稿します。よろしいですか？",
+    ui.ButtonSet.OK_CANCEL
   );
+  if (ok !== ui.Button.OK) return;
+  try {
+    const done = postToX("SASHIWAの自動投稿テストです。" + fmt(new Date(), true));
+    ui.alert(done ? "投稿しました。Xでご確認ください。" : "キーが未登録です。setupX を先に実行してください。");
+  } catch (e) {
+    ui.alert("失敗しました。\n\n" + String(e));
+  }
 }
 
-function Kpi({ icon, label, value, unit, tone }) {
-  return (
-    <div className={`dbKpi ${tone ? "is-" + tone : ""}`}>
-      <span className="dbKpi__ic">
-        <Ico name={icon} size={18} />
-      </span>
-      <p className="dbKpi__l">{label}</p>
-      <p className="dbKpi__v">
-        {value}
-        <span>{unit}</span>
-      </p>
-    </div>
-  );
+/* ========================= ⑤ 補助 ==================================== */
+
+/** その場で投稿画面を開けるリンクを作ります（API設定が不要な投稿手段） */
+function intentUrl(media, body) {
+  const t = encodeURIComponent(String(body));
+  const m = String(media || "");
+  if (m.indexOf("X") === 0 || m.indexOf("Twitter") >= 0) return "https://x.com/intent/post?text=" + t;
+  if (m.indexOf("Threads") >= 0) return "https://www.threads.net/intent/post?text=" + t;
+  return "";
 }
 
-/* ============================ View B：部署 ============================== */
-
-function ViewDept({ dept, tasks, goAgent, onSelect }) {
-  const rel = tasks.filter((t) => dept.agents.some((a) => a.name === t.agent));
-  return (
-    <div style={{ "--t": dept.theme, "--s": dept.soft }}>
-      <header className="dbHead">
-        <p className="dbHead__en" style={{ color: dept.theme }}>
-          {dept.en}
-        </p>
-        <h1>{dept.name}</h1>
-        <p className="dbHead__s">{dept.desc}</p>
-      </header>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">所属するAI社員</h2>
-        <div className="dbAgs">
-          {dept.agents.map((a) => (
-            <article key={a.id} className="dbAg" onClick={() => goAgent(dept.id, a.id)}>
-              <div className="dbAg__hd">
-                <span className="dbAg__av">
-                  <Ico name="bot" size={22} />
-                </span>
-                <div>
-                  <p className="dbAg__n">{a.name}</p>
-                  <p className="dbAg__r">{a.role}</p>
-                </div>
-                <span className={`dbBadge dbBadge--${a.status}`}>{a.status}</span>
-              </div>
-              <p className="dbAg__k">現在のタスク</p>
-              <p className="dbAg__t">{a.currentTask}</p>
-              <div className="dbAg__sk">
-                {a.skills.map((s) => (
-                  <span key={s}>{s}</span>
-                ))}
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">この部署の処理履歴</h2>
-        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
-      </section>
-    </div>
-  );
+function fmt(d, withTime) {
+  const p = function (n) { return ("0" + n).slice(-2); };
+  const s = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  return withTime ? s + " " + p(d.getHours()) + ":" + p(d.getMinutes()) : s;
 }
 
-/* ============================ View C：個別 ============================== */
-
-function ViewAgent({ dept, agent, tasks, logs, assign, onSelect }) {
-  const rel = tasks.filter((t) => t.agent === agent.name);
-  return (
-    <div style={{ "--t": dept.theme, "--s": dept.soft }}>
-      <header className="dbHead">
-        <p className="dbHead__en" style={{ color: dept.theme }}>
-          {dept.name} / {agent.tier}
-        </p>
-        <h1>{agent.name}</h1>
-        <p className="dbHead__s">{agent.mission}</p>
-      </header>
-
-      <div className="dbProfile">
-        <div className="dbProfile__l">
-          <span className="dbProfile__av">
-            <Ico name="bot" size={30} />
-          </span>
-          <div>
-            <p className="dbProfile__r">{agent.role}</p>
-            <span className={`dbBadge dbBadge--${agent.status}`}>{agent.status}</span>
-          </div>
-        </div>
-        <dl className="dbProfile__m">
-          <div>
-            <dt>Difyアプリ</dt>
-            <dd className="dbMono">{agent.difyApp}</dd>
-          </div>
-          <div>
-            <dt>推論クラス</dt>
-            <dd>{agent.tier}</dd>
-          </div>
-          <div>
-            <dt>処理件数</dt>
-            <dd>{rel.length} 件</dd>
-          </div>
-        </dl>
-      </div>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">現在のタスク</h2>
-        <div className="dbCurrent">
-          <span className="dbCurrent__d" />
-          {agent.currentTask}
-        </div>
-      </section>
-
-      <div className="dbSplit dbSplit--console">
-        <AssignConsole dept={dept} agent={agent} assign={assign} />
-        <section className="dbSec">
-          <h2 className="dbSecT">Live Console Log</h2>
-          <ConsoleLog logs={logs} tall />
-        </section>
-      </div>
-
-      <section className="dbSec">
-        <h2 className="dbSecT">このAI社員の処理履歴</h2>
-        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
-      </section>
-    </div>
-  );
+/** 動作確認用。手動で実行すると、テストのジョブを1件流します。 */
+function testRun() {
+  SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ジョブ").appendRow([
+    "TEST" + new Date().getTime(),
+    new Date(),
+    "コンテンツ",
+    "テストアカウント",
+    "自社",
+    "X（旧Twitter）",
+    "受付",
+    "【媒体】X（旧Twitter）／【形式】単発投稿／【文字数上限】140／【テーマ】AI社員に問い合わせ対応を任せた結果／【トーン】丁寧・ですます／【案数】3案",
+    "", "", "",
+  ]);
+  processJobs();
+  SpreadsheetApp.getUi().alert("テストを実行しました。「ジョブ」シートの状態欄をご確認ください。");
 }
-
-/* ---------------------- タスクアサイン・コンソール ---------------------- */
-
-function AssignConsole({ dept, agent, assign }) {
-  const [text, setText] = useState("");
-  const [priority, setPriority] = useState("Medium");
-  const [sending, setSending] = useState(false);
-  const [flash, setFlash] = useState("");
-
-  const submit = async () => {
-    if (!text.trim() || sending) return;
-    setSending(true);
-    setFlash("");
-    const ok = await assign(dept, agent, text.trim(), priority);
-    setSending(false);
-    setText("");
-    setFlash(ok ? "アサインしました。" : "送信に失敗しました（画面上のみ反映）。");
-    setTimeout(() => setFlash(""), 4000);
-  };
-
-  return (
-    <section className="dbAssign">
-      <h2 className="dbSecT">タスクをアサイン</h2>
-      <div className="dbAssign__c">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="AI社員への新たなプロンプト、または実行命令を入力..."
-          rows={5}
-          disabled={sending}
-        />
-
-        <div className="dbAssign__row">
-          <span className="dbAssign__k">優先度</span>
-          <div className="dbSeg">
-            {["Low", "Medium", "High"].map((p) => (
-              <button
-                key={p}
-                className={priority === p ? "is-on" : ""}
-                onClick={() => setPriority(p)}
-                disabled={sending}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="dbAssign__ft">
-          <p className="dbAssign__n">
-            送信すると {agent.name} の現在タスクを書き換え、Make 経由で実行を依頼します。
-          </p>
-          <button className="dbSend" onClick={submit} disabled={sending || !text.trim()}>
-            <span className={sending ? "dbSpin" : ""}>
-              <Ico name={sending ? "loader" : "send"} size={16} />
-            </span>
-            {sending ? "アサイン中..." : "アサインする"}
-          </button>
-        </div>
-
-        {flash && <p className="dbFlash">{flash}</p>}
-      </div>
-    </section>
-  );
-}
-
-/* ---------------------------- 共通パーツ ------------------------------- */
-
-function TaskTable({ tasks, onSelect }) {
-  return (
-    <div className="dbTable">
-      <div className="dbTable__h">
-        <span>日時</span>
-        <span>事業</span>
-        <span>担当</span>
-        <span>内容</span>
-        <span>状態</span>
-      </div>
-      {tasks.map((t, i) => (
-        <div
-          className={`dbTable__r ${onSelect ? "is-click" : ""}`}
-          key={`${t.run_id}-${t.agent}-${i}`}
-          onClick={() => onSelect && onSelect(t)}
-          role={onSelect ? "button" : undefined}
-          tabIndex={onSelect ? 0 : undefined}
-          onKeyDown={(e) => { if (onSelect && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onSelect(t); } }}
-        >
-          <span className="dbMono dbTable__t">{t.timestamp}</span>
-          <span>
-            <em
-              className="dbSvcTag"
-              style={{
-                "--t":
-                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).theme,
-                "--s":
-                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).soft,
-              }}
-            >
-              {t.service || "AGENT"}
-            </em>
-          </span>
-          <span className="dbTable__a">{t.agent}</span>
-          <span className="dbTable__s">{t.summary}</span>
-          <span>
-            <em className={`dbTag dbTag--${(t.status || "").includes("失敗") || (t.status || "").includes("エラー") ? "ng" : "ok"}`}>{t.status}</em>
-            {onSelect && <em className="dbTable__go">›</em>}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ConsoleLog({ logs, tall }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [logs]);
-  return (
-    <div className={`dbCon ${tall ? "is-tall" : ""}`} ref={ref}>
-      {logs.map((l, i) => (
-        <p key={i} className={l.includes("COMMAND DEPLOYED") ? "is-cmd" : l.startsWith("[") && l.includes("!") ? "is-err" : ""}>
-          <span className="dbCon__p">›</span>
-          {l}
-        </p>
-      ))}
-      <p className="dbCon__cur">
-        <span className="dbCon__p">›</span>
-        <span className="dbCaret" />
-      </p>
-    </div>
-  );
-}
-
-/* ================================ CSS_DASHBOARD ================================== */
-
-const CSS_DASHBOARD = `
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
-
-.dbRoot{
-  --bg:#F4F6F9; --white:#fff; --ink:#1A2233; --muted:#616B7D; --line:#E2E6EC;
-  --sig:#E0402F; --t:#E0402F; --s:#FDECEA;
-  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
-  background:var(--bg);color:var(--ink);font-family:var(--sans);
-  font-size:15px;line-height:1.8;min-height:100vh;-webkit-font-smoothing:antialiased;
-}
-.dbRoot *,.dbRoot *::before,.dbRoot *::after{box-sizing:border-box;}
-.dbRoot h1,.dbRoot h2,.dbRoot p,.dbRoot dl,.dbRoot dd,.dbRoot dt{margin:0;padding:0;}
-.dbRoot a{color:inherit;text-decoration:none;}
-.dbRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
-.dbRoot :focus-visible{outline:2px solid var(--t);outline-offset:2px;}
-.dbMono{font-family:var(--mono);font-feature-settings:"tnum";}
-.dbSpin{display:inline-flex;animation:dbSpin 1s linear infinite;}
-@keyframes dbSpin{to{transform:rotate(360deg);}}
-
-/* gate */
-.dbGate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
-  background:radial-gradient(60% 50% at 50% 0%,rgba(224,64,47,.12),transparent 70%),var(--bg);}
-.dbGate__c{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:44px 36px;width:100%;max-width:400px;text-align:center;box-shadow:0 30px 60px -40px rgba(26,34,51,.5);}
-.dbGateRing{width:104px;height:auto;display:block;margin:0 auto 14px;animation:dbFloat 4.6s ease-in-out infinite;}
-@keyframes dbFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
-.dbGate__ic{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:19px;background:var(--s);color:var(--sig);margin-bottom:18px;}
-.dbGate__c h1{font-size:19px;font-weight:900;letter-spacing:.1em;margin-bottom:8px;}
-.dbGate__c > p{font-size:13px;color:var(--muted);margin-bottom:24px;}
-.dbGate__c input{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;padding:14px 16px;font:inherit;font-family:var(--mono);text-align:center;letter-spacing:.15em;transition:border-color .2s,background .2s;}
-.dbGate__c input:focus{outline:none;border-color:var(--sig);background:var(--white);}
-.dbGate__e{font-size:12.5px;color:var(--sig);margin-top:10px !important;}
-.dbGate__c button{display:block;width:100%;margin-top:16px;background:var(--sig);color:#fff;font-weight:700;font-size:14px;padding:14px;border-radius:999px;text-align:center;transition:background .2s;}
-.dbGate__c button:hover{background:#C4342A;}
-.dbGate__c a{display:inline-block;margin-top:18px;font-size:12.5px;color:var(--muted);}
-
-/* shell */
-.dbShell{display:grid;grid-template-columns:264px 1fr;min-height:100vh;}
-.dbSide{background:#0E1626;color:#96A1B2;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
-.dbSide__hd{padding:22px 20px 14px;border-bottom:1px solid #1E2739;}
-.dbBrand{display:flex;align-items:center;gap:9px;font-weight:900;color:#fff;font-size:14px;letter-spacing:.1em;}
-.dbBrand__m{color:var(--sig);display:flex;}
-.dbBrand em{display:block;font-family:var(--mono);font-style:normal;font-weight:400;font-size:9px;color:#6F7B8B;letter-spacing:.2em;}
-.dbSide__nav{flex:1;overflow-y:auto;padding:14px 12px;}
-.dbNavAll{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border-radius:11px;font-size:13.5px;font-weight:500;color:#B6C0CE;transition:background .2s,color .2s;}
-.dbNavAll:hover{background:#182133;color:#fff;}
-.dbNavAll.is-cur{background:#1D283C;color:#fff;}
-.dbNavStudio{margin-top:6px;}
-.dbNavStudio em{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:#fff;background:var(--sig);border-radius:999px;padding:2px 7px;margin-left:auto;}
-.dbSide__k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:#5D6779;padding:20px 14px 8px;}
-.dbNavGroup{margin-bottom:2px;}
-.dbNavD{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;border-radius:11px;font-size:13.5px;transition:background .2s,color .2s;}
-.dbNavD:hover{background:#182133;color:#fff;}
-.dbNavD.is-cur{background:#1D283C;color:#fff;}
-.dbNavD__dot{width:7px;height:7px;border-radius:50%;background:var(--t);flex-shrink:0;}
-.dbNavD__n{flex:1;}
-.dbNavD__c{font-family:var(--mono);font-size:10px;color:#5D6779;}
-.dbNavA{display:flex;align-items:center;gap:9px;width:100%;padding:8px 14px 8px 32px;border-radius:10px;font-family:var(--mono);font-size:11px;color:#7C8797;transition:background .2s,color .2s;}
-.dbNavA:hover{background:#182133;color:#fff;}
-.dbNavA.is-cur{color:var(--t);background:#182133;}
-.dbSt{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:#4C5768;}
-.dbSt--稼働中{background:#3CCB8E;box-shadow:0 0 0 3px rgba(60,203,142,.18);}
-.dbSt--高負荷{background:#E0402F;box-shadow:0 0 0 3px rgba(224,64,47,.2);animation:dbBlink 1.6s ease-in-out infinite;}
-.dbSt--待機中{background:#6E7A8C;}
-@keyframes dbBlink{50%{opacity:.35;}}
-.dbSide__ft{padding:14px;border-top:1px solid #1E2739;display:flex;flex-direction:column;gap:10px;}
-.dbSync{display:flex;align-items:center;gap:8px;font-size:11px;color:#7C8797;}
-.dbSync__d{width:6px;height:6px;border-radius:50%;background:#6E7A8C;}
-.dbSync.is-live .dbSync__d{background:#3CCB8E;box-shadow:0 0 0 3px rgba(60,203,142,.18);}
-.dbSide__links{display:flex;flex-direction:column;gap:4px;}
-.dbSide__site{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C8797;padding:8px 6px;border-radius:9px;transition:color .2s;}
-.dbSide__site:hover{color:#fff;}
-.dbSide__out{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C8797;padding:8px 6px;border-radius:9px;transition:color .2s;}
-.dbSide__out:hover{color:#fff;}
-
-/* main */
-.dbMain{min-width:0;}
-.dbTop{position:sticky;top:0;z-index:20;background:rgba(244,246,249,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);height:62px;display:flex;align-items:center;gap:14px;padding:0 28px;}
-.dbTop__bc{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);flex:1;min-width:0;}
-.dbTop__bc button:hover{color:var(--ink);}
-.dbTop__bc span{color:var(--ink);font-weight:700;}
-.dbTop__bc em{font-style:normal;color:#B9C0CB;}
-.dbTop__rf{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);border:1px solid var(--line);background:var(--white);border-radius:999px;padding:8px 15px;transition:border-color .2s;}
-.dbTop__rf:hover:not(:disabled){border-color:var(--ink);}
-.dbTop__rf:disabled{opacity:.55;cursor:default;}
-.dbBurger{display:none;flex-direction:column;gap:4px;width:22px;}
-.dbBurger span{height:2px;background:var(--ink);border-radius:2px;}
-.dbBody{padding:32px 28px 64px;}
-.dbScrim{display:none;}
-@media (max-width:1000px){
-  .dbShell{grid-template-columns:1fr;}
-  .dbSide{position:fixed;left:0;top:0;bottom:0;width:264px;z-index:60;transform:translateX(-100%);transition:transform .3s cubic-bezier(.22,1,.36,1);}
-  .dbSide.is-open{transform:none;}
-  .dbBurger{display:flex;}
-  .dbBody{padding:24px 18px 56px;}
-  .dbTop{padding:0 18px;}
-  .dbScrim{display:block;position:fixed;inset:0;background:rgba(10,14,22,.45);z-index:50;}
-}
-
-/* head */
-.dbHead{margin-bottom:28px;}
-.dbHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--sig);font-weight:700;margin-bottom:8px;}
-.dbHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
-.dbHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
-
-/* kpi */
-.dbKpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:34px;}
-.dbKpi{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px 22px 20px;}
-.dbKpi__ic{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:var(--bg);color:var(--muted);margin-bottom:14px;}
-.dbKpi.is-warn .dbKpi__ic{background:var(--s);color:var(--sig);}
-.dbKpi__l{font-size:12px;color:var(--muted);margin-bottom:4px;}
-.dbKpi__v{font-family:var(--mono);font-size:30px;font-weight:500;line-height:1.2;}
-.dbKpi__v span{font-family:var(--sans);font-size:12px;color:var(--muted);margin-left:6px;font-weight:400;}
-@media (max-width:820px){.dbKpis{grid-template-columns:repeat(2,1fr);}}
-
-/* sections */
-.dbSec{margin-bottom:32px;min-width:0;}
-.dbSecT{font-size:14px;font-weight:700;margin-bottom:14px;}
-.dbSplit{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
-.dbSplit--console{grid-template-columns:1fr 1fr;}
-@media (max-width:1100px){.dbSplit{grid-template-columns:1fr;}}
-.dbEmpty{background:var(--white);border:1px dashed var(--line);border-radius:16px;padding:26px;font-size:13px;color:var(--muted);text-align:center;}
-
-/* dept cards */
-.dbDepts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-.dbDept{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
-.dbDept:hover{transform:translateY(-3px);box-shadow:0 24px 44px -32px rgba(26,34,51,.5);border-color:var(--t);}
-.dbDept__hd{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
-.dbDept__ic{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:13px;background:var(--s);color:var(--t);}
-.dbDept__n{font-size:15px;font-weight:700;line-height:1.4;}
-.dbDept__en{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);}
-.dbDept__d{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:14px;}
-.dbDept__ags{display:flex;flex-wrap:wrap;gap:6px;}
-.dbDept__ags button{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:var(--bg);border-radius:999px;padding:5px 11px;transition:background .2s,color .2s;}
-.dbDept__ags button:hover{background:var(--s);color:var(--t);}
-@media (max-width:1100px){.dbDepts{grid-template-columns:repeat(2,1fr);}}
-@media (max-width:640px){.dbDepts{grid-template-columns:1fr;}}
-
-/* agent cards */
-.dbAgs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
-.dbAg{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
-.dbAg:hover{transform:translateY(-3px);box-shadow:0 24px 44px -32px rgba(26,34,51,.5);border-color:var(--t);}
-.dbAg__hd{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
-.dbAg__av{display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:14px;background:var(--s);color:var(--t);}
-.dbAg__n{font-family:var(--mono);font-size:13px;font-weight:700;}
-.dbAg__r{font-size:12px;color:var(--muted);}
-.dbAg__hd > span:last-child{margin-left:auto;}
-.dbAg__k{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);margin-bottom:5px;}
-.dbAg__t{font-size:13px;line-height:1.85;margin-bottom:14px;}
-.dbAg__sk{display:flex;flex-wrap:wrap;gap:6px;}
-.dbAg__sk span{font-size:11px;color:var(--muted);background:var(--bg);border-radius:999px;padding:4px 11px;}
-@media (max-width:820px){.dbAgs{grid-template-columns:1fr;}}
-
-.dbBadge{font-size:11px;font-weight:700;border-radius:999px;padding:4px 12px;white-space:nowrap;}
-.dbBadge--稼働中{background:#E6F7F0;color:#0E9F73;}
-.dbBadge--高負荷{background:#FDECEA;color:#E0402F;}
-.dbBadge--待機中{background:#EEF0F4;color:#616B7D;}
-
-/* profile */
-.dbProfile{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:24px;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:30px;}
-.dbProfile__l{display:flex;align-items:center;gap:16px;}
-.dbProfile__av{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:19px;background:var(--s);color:var(--t);}
-.dbProfile__r{font-size:15px;font-weight:700;margin-bottom:6px;}
-.dbProfile__m{display:flex;gap:34px;flex-wrap:wrap;}
-.dbProfile__m dt{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);margin-bottom:4px;}
-.dbProfile__m dd{font-size:13.5px;font-weight:500;}
-
-.dbCurrent{display:flex;align-items:flex-start;gap:12px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--t);border-radius:14px;padding:18px 22px;font-size:14px;line-height:1.85;}
-.dbCurrent__d{width:8px;height:8px;border-radius:50%;background:var(--t);margin-top:9px;flex-shrink:0;animation:dbBlink 2s ease-in-out infinite;}
-
-/* assign console */
-.dbAssign{min-width:0;}
-.dbAssign__c{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 1px 2px rgba(26,34,51,.04);}
-.dbAssign__c textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:14px;padding:15px 16px;font-family:var(--sans);font-size:14px;line-height:1.85;color:var(--ink);resize:vertical;transition:border-color .2s,box-shadow .2s,background .2s;}
-.dbAssign__c textarea::placeholder{color:#9BA3B1;}
-.dbAssign__c textarea:focus{outline:none;background:var(--white);border-color:var(--t);box-shadow:0 0 0 4px var(--s);}
-.dbAssign__row{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap;}
-.dbAssign__k{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--muted);}
-.dbSeg{display:flex;gap:6px;}
-.dbSeg button{font-family:var(--mono);font-size:11.5px;font-weight:500;border:1px solid var(--line);border-radius:999px;padding:6px 16px;color:var(--muted);transition:background .2s,color .2s,border-color .2s;}
-.dbSeg button:hover:not(.is-on){border-color:var(--t);color:var(--t);}
-.dbSeg button.is-on{background:var(--t);border-color:var(--t);color:#fff;}
-.dbAssign__ft{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);flex-wrap:wrap;}
-.dbAssign__n{font-size:11.5px;line-height:1.8;color:var(--muted);max-width:24em;}
-.dbSend{display:inline-flex;align-items:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:12px 24px;transition:opacity .2s,transform .2s,filter .2s;}
-.dbSend:hover:not(:disabled){filter:brightness(.92);transform:translateY(-1px);}
-.dbSend:disabled{opacity:.45;cursor:not-allowed;transform:none;}
-.dbFlash{margin-top:14px;font-size:12.5px;color:var(--t);background:var(--s);border-radius:10px;padding:10px 14px;}
-
-/* console */
-.dbCon{background:#0B121D;border:1px solid #1B2536;border-radius:18px;padding:18px 20px;font-family:var(--mono);font-size:11.5px;line-height:1.95;color:#7EE6B5;max-height:280px;overflow-y:auto;}
-.dbCon.is-tall{max-height:342px;}
-.dbCon p{display:flex;gap:8px;word-break:break-word;}
-.dbCon__p{color:#3C5468;flex-shrink:0;}
-.dbCon p.is-cmd{color:#FFD48A;}
-.dbCon p.is-err{color:#FF8B7E;}
-.dbCaret{display:inline-block;width:7px;height:14px;background:#7EE6B5;animation:dbBlink 1.1s steps(2) infinite;}
-.dbCon::-webkit-scrollbar{width:6px;}
-.dbCon::-webkit-scrollbar-thumb{background:#243247;border-radius:6px;}
-
-/* table */
-.dbTable{background:var(--white);border:1px solid var(--line);border-radius:18px;overflow:hidden;}
-.dbTable__h,.dbTable__r{display:grid;grid-template-columns:112px 74px 148px 1fr 78px;gap:14px;padding:12px 20px;align-items:center;}
-.dbTable__h{font-size:10.5px;letter-spacing:.1em;color:var(--muted);background:var(--bg);}
-.dbTable__r{border-top:1px solid var(--line);font-size:12.5px;}
-.dbTable__t{font-size:10.5px;color:var(--muted);}
-.dbTable__a{font-family:var(--mono);font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.dbTable__s{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.dbTag{font-style:normal;font-size:10.5px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;}
-.dbTag--ok{background:#E6F7F0;color:#0E9F73;}
-.dbTag--ng{background:#FDECEA;color:#E0402F;}
-@media (max-width:820px){
-  .dbTable__h{display:none;}
-  .dbTable__r{grid-template-columns:1fr auto;gap:6px;padding:14px 16px;}
-  .dbTable__t{grid-column:1;}
-  .dbTable__a{grid-column:1;}
-  .dbTable__s{grid-column:1/-1;white-space:normal;}
-}
-
-/* 事業別 */
-.dbSvcs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-.dbSvc{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:20px 22px;}
-.dbSvc__hd{display:flex;align-items:center;gap:9px;margin-bottom:14px;}
-.dbSvc__dot{width:8px;height:8px;border-radius:50%;background:var(--t);}
-.dbSvc__n{font-size:14px;font-weight:700;flex:1;}
-.dbSvc__c{font-size:9.5px;letter-spacing:.14em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;}
-.dbSvc__v{font-size:30px;font-weight:500;line-height:1.1;}
-.dbSvc__v span{font-family:var(--sans);font-size:12px;color:var(--muted);margin-left:5px;}
-.dbSvc__l{font-size:12px;color:var(--muted);margin-bottom:12px;}
-.dbSvc__bar{height:5px;border-radius:999px;background:var(--bg);overflow:hidden;}
-.dbSvc__bar span{display:block;height:100%;background:var(--t);border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1);}
-@media (max-width:900px){.dbSvcs{grid-template-columns:1fr;}}
-.dbSvcTag{font-style:normal;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;white-space:nowrap;}
-
-.dbSvc.is-click{cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
-.dbSvc.is-click:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);border-color:var(--t);}
-.dbSvc__more{font-size:11.5px;font-weight:700;color:var(--t);margin-top:11px;}
-.dbTable__r.is-click{cursor:pointer;transition:background .18s;}
-.dbTable__r.is-click:hover{background:var(--bg);}
-.dbTable__go{font-style:normal;color:#B9C0CB;margin-left:7px;font-weight:700;}
-
-.stNoteInline{font-style:normal;font-size:11px;color:var(--muted);border:1px dashed var(--line);border-radius:999px;padding:4px 11px;}
-
-.stIdeaBar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
-.stIdeaBtn{display:inline-flex;align-items:center;gap:8px;background:var(--ai);color:#fff;font-size:12.5px;font-weight:700;border-radius:999px;padding:10px 20px;transition:all .2s;box-shadow:0 10px 20px -12px rgba(124,92,214,.9);}
-.stIdeaBtn:hover{filter:brightness(.93);transform:translateY(-1px);}
-.stIdeaBar__n{font-size:11.5px;color:var(--muted);line-height:1.75;flex:1;min-width:180px;}
-.stIdeas{display:grid;gap:9px;margin-bottom:16px;}
-.stIdea{display:block;width:100%;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;transition:all .2s;}
-.stIdea:hover{border-color:var(--ai);}
-.stIdea.is-on{border-color:var(--ai);background:#F7F4FE;}
-.stIdea__h{display:flex;align-items:baseline;gap:9px;margin-bottom:6px;flex-wrap:wrap;}
-.stIdea__h b{font-size:13px;font-weight:700;}
-.stIdea__h em{font-style:normal;font-size:11px;color:var(--muted);}
-.stIdea__t{display:block;font-size:12.5px;line-height:1.9;color:var(--muted);}
-.stIdea.is-on .stIdea__t{color:var(--ink);}
-`;
