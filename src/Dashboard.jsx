@@ -524,6 +524,25 @@ const CSS_ACCOUNTS = `
 .acLog__m{color:var(--muted);word-break:break-word;}
 .acLog__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:11px 14px;margin-top:12px;}
 @media (max-width:900px){.acLog__r{grid-template-columns:1fr;gap:3px;}.acLog__ms{text-align:left;}}
+
+.acUse{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;}
+.acUse__k{display:flex;align-items:center;font-size:12.5px;font-weight:700;margin-bottom:12px;}
+.acUse__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acUse__bar{height:8px;border-radius:999px;background:var(--white);overflow:hidden;margin-bottom:14px;}
+.acUse__bar span{display:block;height:100%;background:linear-gradient(90deg,#0E9F73,#E0A21F 70%,#E0402F);transition:width .5s;}
+.acUse__g{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin-bottom:16px;}
+.acUse__g > div{background:var(--white);border-radius:11px;padding:11px 13px;font-size:13px;font-weight:700;}
+.acUse__g span{display:block;font-size:9.5px;font-weight:400;color:var(--muted);margin-bottom:3px;}
+.acUse__sk{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:9px;}
+.acUse__m{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px;}
+.acUse__m > div{background:var(--white);border-radius:11px;padding:11px 13px;text-align:center;}
+.acUse__m b{display:block;font-size:11.5px;margin-bottom:3px;}
+.acUse__m em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:5px;}
+.acUse__m span{font-size:17px;font-weight:900;color:var(--ai);}
+.acUse__f{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--line);}
+.acUse__f label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;}
+.acUse__f input{width:74px;background:var(--white);border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit;font-size:12.5px;}
+.acUse__f span{flex:1;min-width:220px;font-size:11px;line-height:1.8;color:var(--muted);}
 `;
 
 
@@ -629,7 +648,22 @@ function SettingsView({ pushLog }) {
   };
 
   const [running, setRunning] = useState(false);
+  const [usage2, setUsage2] = useState(null);
   const [logs2, setLogs2] = useState(null);
+
+  const callBudget = async (params) => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    try {
+      const q = new URLSearchParams(params).toString();
+      const r = await fetch(`${u}?${q}`);
+      const d = await r.json();
+      if (d && d.usage) setUsage2(d.usage);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "利用状況を取得できませんでした。" });
+    }
+  };
   const [logging, setLogging] = useState(false);
 
   const loadLog = async () => {
@@ -761,11 +795,91 @@ function SettingsView({ pushLog }) {
           <button className="acGhost" onClick={runRetry} disabled={running}>
             失敗した依頼を再実行
           </button>
+          <button className="acGhost" onClick={() => callBudget({ action: "usage" })}>
+            利用状況を見る
+          </button>
           <button className="acGhost" onClick={loadLog} disabled={logging}>
             {logging ? "取得中..." : "詳細ログを見る"}
           </button>
           <span>生成されない・メールが来ないときは、まずここを押してください。</span>
         </div>
+
+        {usage2 && (
+          <div className="acUse">
+            <p className="acUse__k">
+              OpenAIの利用状況
+              <button onClick={() => setUsage2(null)}>閉じる</button>
+            </p>
+
+            <div className="acUse__bar">
+              <span
+                style={{
+                  width: usage2["予算USD"]
+                    ? `${Math.min(100, (usage2["合計USD"] / usage2["予算USD"]) * 100)}%`
+                    : "0%",
+                }}
+              />
+            </div>
+
+            <div className="acUse__g">
+              {[
+                ["購入した額", usage2["予算USD"] ? `$${usage2["予算USD"]}` : "未登録"],
+                ["使った額", `$${usage2["合計USD"]}`],
+                ["残り", usage2["予算USD"] ? `$${usage2["残りUSD"]}（約${Math.round(usage2["残りUSD"] * 150).toLocaleString()}円）` : "—"],
+                ["今日", `$${usage2["本日USD"]} ／ 上限 $${usage2["日次上限USD"]}`],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <span>{k}</span>
+                  {v}
+                </div>
+              ))}
+            </div>
+
+            <p className="acUse__sk">この残高であと作れる量</p>
+            <div className="acUse__m">
+              {[
+                ["エコ", "eco"],
+                ["標準", "std"],
+                ["高品質", "high"],
+              ].map(([label, id]) => {
+                const m = usage2["モード別"] && usage2["モード別"][id];
+                if (!m) return null;
+                return (
+                  <div key={id}>
+                    <b>{label}</b>
+                    <em>${m["費用"]}／1件</em>
+                    <span>{m["作れる件数"]} 件</span>
+                  </div>
+                );
+              })}
+              <div>
+                <b>画像</b>
+                <em>${usage2["平均"]["画像1枚"]}／1枚</em>
+                <span>{usage2["あと作れる"]["画像"]} 枚</span>
+              </div>
+            </div>
+
+            <div className="acUse__f">
+              <button className="acAdd" onClick={() => callBudget({ action: "budget", add: 10 })}>
+                ＋$10 追加した
+              </button>
+              <label>
+                1日の上限 $
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  defaultValue={usage2["日次上限USD"]}
+                  onBlur={(e) => callBudget({ action: "budget", daily: e.target.value })}
+                />
+              </label>
+              <span>
+                OpenAIは残高を取得できるAPIを公開していないため、購入額から実際の消費を引いて計算しています。
+                10ドル購入するたびに左のボタンを押してください。
+              </span>
+            </div>
+          </div>
+        )}
 
         {logs2 && (
           <div className="acLog">
@@ -1562,6 +1676,12 @@ const VARIANTS = [
   { id: "3", label: "3案", note: "比較して選びたい（推奨）" },
   { id: "5", label: "5案", note: "方向性から探りたい" },
 ];
+const MODES = [
+  { id: "eco", label: "エコ", calls: 1, note: "1回だけ生成。検査・選抜・画像なし。デモや下書きに", tone: "#0E9F73" },
+  { id: "std", label: "標準", calls: 2, note: "生成＋検査。日常の投稿はこれで十分", tone: "#2456C8" },
+  { id: "high", label: "高品質", calls: 5, note: "構成設計＋生成＋検査＋修正＋ベスト選抜。勝負どころに", tone: "#E0402F" },
+];
+
 const QA_LEVELS = [
   { id: "standard", label: "標準検査", note: "事実関係と表現の一次確認" },
   { id: "strict", label: "厳格検査", note: "薬機法・景表法・著作権まで二重確認（納品用）" },
@@ -2068,7 +2188,7 @@ function Studio({ pushLog }) {
   const [refImages, setRefImages] = useState([]);
   const [refVideo, setRefVideo] = useState("");
   const [refVideoNote, setRefVideoNote] = useState("");
-  const [wantImages, setWantImages] = useState(true);
+  const [wantImages, setWantImages] = useState(false);
   const [deliverBest, setDeliverBest] = useState(true);
   const [notePaid, setNotePaid] = useState(true);
   const [noteToX, setNoteToX] = useState(true);
@@ -2079,6 +2199,8 @@ function Studio({ pushLog }) {
   const [autoSet, setAutoSet] = useState(null);
   const [tweak, setTweak] = useState(false);
   const [moreCtx, setMoreCtx] = useState(false);
+  const [qmode, setQmode] = useState("eco");
+  const [usage, setUsage] = useState(null);
   const [themes, setThemes] = useState([]);
   const [themeing, setThemeing] = useState(false);
   const [reviseFor, setReviseFor] = useState(null);
@@ -2157,7 +2279,11 @@ function Studio({ pushLog }) {
     L.push(`【媒体】${pf.label}／【形式】${fmt.label}` +
       (fmt.ratio ? `／【比率】${fmt.ratio}` : "") + (fmt.dur ? `／【尺】${fmt.dur}` : "") +
       (fmt.cap ? `／【文字数上限】${fmt.cap}` : "") + (fmt.pages ? `／【枚数・本数】${fmt.pages}` : ""));
-    L.push(`【媒体仕様】${fmt.spec}／【勝ち筋】${pf.win}／【KPI】${pf.kpi}／【ハッシュタグ方針】${pf.hashtag}`);
+    if (qmode === "eco") {
+      L.push(`【勝ち筋】${pf.win}`);
+    } else {
+      L.push(`【媒体仕様】${fmt.spec}／【勝ち筋】${pf.win}／【KPI】${pf.kpi}／【ハッシュタグ方針】${pf.hashtag}`);
+    }
     L.push(`【業種】${ind.label}／【目的】${ctx.goal}／【ターゲット】${ctx.target || "未指定"}`);
     if (ctx.pain) L.push(`【顧客の悩み】${ctx.pain}`);
     if (ctx.strength) L.push(`【自社の強み】${ctx.strength}`);
@@ -2178,6 +2304,9 @@ function Studio({ pushLog }) {
       }
 
       // お手本（パーツごと）
+      // モードごとに、送るお手本の量を変えます（入力トークンの節約）
+      const REF_CAP = qmode === "eco" ? 500 : qmode === "std" ? 1400 : 3000;
+      let refUsed = 0;
       const acct2 = (refs[pfId] && refs[pfId].account) || "";
       const parts = PART_DEFS[pfId] || PART_DEFS.other;
       const used = parts.filter((pt) => partFilled(getPartRef(pfId, pt.id, prodSlot)));
@@ -2192,11 +2321,13 @@ function Studio({ pushLog }) {
           const st2 = analyzeStyle(texts);
           const bits = [];
           if (st2) bits.push(`実測：${styleToBrief(st2)}`);
-          if (texts.length) {
-            bits.push(
-              `見本${texts.length}本：` +
-                texts.map((t, i) => `〈${i + 1}〉${t.replace(/\n/g, " ⏎ ")}`).join(" ｜ ").slice(0, 1400)
-            );
+          if (texts.length && refUsed < REF_CAP) {
+            const room = REF_CAP - refUsed;
+            const body = texts.map((t, i) => `〈${i + 1}〉${t.replace(/\n/g, " ⏎ ")}`).join(" ｜ ").slice(0, room);
+            refUsed += body.length;
+            bits.push(`見本${texts.length}本：${body}`);
+          } else if (texts.length) {
+            bits.push(`見本${texts.length}本：（実測値のみ参照）`);
           }
           if (r.images.length) bits.push(`参考画像${r.images.length}枚（${r.images.map((im) => im.note || "指定なし").join("／")}）`);
           if (r.video) bits.push(`参考動画：${r.video}（${r.videoNote || "指定なし"}）`);
@@ -2206,6 +2337,7 @@ function Studio({ pushLog }) {
       L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
       L.push(`【テーマ】${theme}`);
       if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
+      L.push(`【品質モード】${(MODES.find((m) => m.id === qmode) || MODES[1]).label}`);
       L.push(`【納品パッケージ】${pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}`);
       L.push(`【画像生成】${wantImages ? "あり" : "なし"}`);
       if (refImages.length) {
@@ -2413,9 +2545,9 @@ function Studio({ pushLog }) {
   );
 
   /** AIにテーマと要点を提案させます */
-  const suggestThemes = useCallback(async () => {
+  const suggestThemes = useCallback(async (auto) => {
     if (!endpoint.isGas) {
-      setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      if (!auto) setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
       return;
     }
     setThemeing(true);
@@ -2435,12 +2567,17 @@ function Studio({ pushLog }) {
       const d = await r.json();
       if (d && d.ok && d.themes && d.themes.length) {
         setThemes(d.themes);
+        // 自動のときは1案目をそのまま記入します
+        if (auto) {
+          setTheme(d.themes[0].theme || "");
+          setPoints((d.themes[0].points || []).join("\n"));
+        }
         if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] THEMES SUGGESTED: ${d.themes.length}`);
-      } else {
-        setFlash({ ok: false, msg: d && d.error ? d.error : "テーマを提案できませんでした。少し時間をおいてお試しください。" });
+      } else if (!auto) {
+        setFlash({ ok: false, msg: d && d.error ? d.error : "テーマを提案できませんでした。空欄のまま依頼すれば、AIが決めて書きます。" });
       }
     } catch (e) {
-      setFlash({ ok: false, msg: "テーマを取得できませんでした。接続設定をご確認ください。" });
+      if (!auto) setFlash({ ok: false, msg: "テーマを取得できませんでした。空欄のままでも依頼できます。" });
     } finally {
       setThemeing(false);
     }
@@ -2482,7 +2619,7 @@ function Studio({ pushLog }) {
     if (sending) return;
     if (!acct) return setFlash({ ok: false, msg: "先にアカウント管理でアカウントを登録してください。" });
     if (job === "REVISE" && (!extra || !extra.feedback)) return setFlash({ ok: false, msg: "修正のご意見を入力してください。" });
-    if (job === "CONTENT" && !theme.trim()) return setFlash({ ok: false, msg: "テーマを入力してください。" });
+
     if (job === "IMAGE" && !imgDesc.trim()) return setFlash({ ok: false, msg: "画像の内容を入力してください。" });
     if (job === "POST") {
       if (!theme.trim()) return setFlash({ ok: false, msg: "投稿本文を入力してください。" });
@@ -3158,6 +3295,9 @@ function Studio({ pushLog }) {
                       }
                     }
                     setStep(3);
+                    // 標準以上のときだけ、お手本を読んでテーマを下書きします
+                    // （エコでは呼び出しを1回に抑えるため、制作時にAIがテーマも決めます）
+                    if (qmode !== "eco") setTimeout(() => suggestThemes(true), 200);
                   }}
                 >
                   <Sic name="send" size={16} />
@@ -3223,13 +3363,21 @@ function Studio({ pushLog }) {
 
               {subTab === "content" ? (
                 <>
-                  <div className="stThemeBar">
-                    <button className="stIdeaBtn" onClick={suggestThemes} disabled={themeing}>
-                      <Sic name={themeing ? "loader" : "spark"} size={15} />
-                      {themeing ? "考えています..." : themes.length ? "別のテーマを出す" : "AIにテーマを提案させる"}
-                    </button>
-                    <span>アカウントの方針・お手本・この時間に出したい内容から、AIが決めます。</span>
-                  </div>
+                  {themeing && (
+                    <div className="stThemeBar">
+                      <span className="stSpin"><Sic name="loader" size={15} /></span>
+                      <span>AIがテーマを考えています。しばらくお待ちください。</span>
+                    </div>
+                  )}
+                  {!themeing && (
+                    <div className="stThemeBar">
+                      <button className="stIdeaBtn" onClick={suggestThemes}>
+                        <Sic name="spark" size={15} />
+                        {themes.length ? "別のテーマを出す" : "テーマを出し直す"}
+                      </button>
+                      <span>空欄のまま依頼すると、AIがテーマを決めて書きます。</span>
+                    </div>
+                  )}
 
                   {themes.length > 0 && (
                     <div className="stThemes">
@@ -3249,10 +3397,10 @@ function Studio({ pushLog }) {
                     </div>
                   )}
 
-                  <Field label="テーマ" hint="何について発信するか。1行で。上の提案から選ぶか、自分で書き換えてください">
+                  <Field label="テーマ" hint="空欄でも構いません。その場合はAIがテーマを決めて書きます">
                     <input type="text" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="問い合わせ対応を自動化したら何時間浮いたか" />
                   </Field>
-                  <Field label="伝えたい要点" hint="1行ずつ。構成に反映されます">
+                  <Field label="伝えたい要点" hint="空欄でも構いません。1行ずつ書くと構成に反映されます">
                     <textarea rows={4} value={points} onChange={(e) => setPoints(e.target.value)} placeholder={"深夜の問い合わせにも即返信\n担当者の確認は朝1回だけ\n月20時間が浮いた"} />
                   </Field>
 
@@ -3353,7 +3501,28 @@ function Studio({ pushLog }) {
               )}
 
               <div className="stQ">
-                <p className="stQ__k">品質オプション</p>
+                <p className="stQ__k">品質モード（費用が変わります）</p>
+                <div className="stModes">
+                  {MODES.map((m) => {
+                    const est = usage && usage["モード別"] && usage["モード別"][m.id];
+                    return (
+                      <button
+                        key={m.id}
+                        className={`stMode ${qmode === m.id ? "is-on" : ""}`}
+                        style={{ "--t": m.tone }}
+                        onClick={() => setQmode(m.id)}
+                      >
+                        <b>{m.label}</b>
+                        <em>{m.note}</em>
+                        <span className="stMode__c">
+                          {est ? `約 $${est["費用"]}（${Math.round(est["費用"] * 150)}円）／1件` : `AI呼び出し ${m.calls}回`}
+                          {est && est["作れる件数"] ? ` ・残高であと${est["作れる件数"]}件` : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="stQ__k" style={{ marginTop: 16 }}>細かい品質オプション</p>
                 <div className="stQ__g">
                   <div>
                     <span className="stQ__l">生成する案の数{plan && !touched.var && <em className="stAiTag">AI推奨</em>}</span>
@@ -3437,6 +3606,19 @@ function Studio({ pushLog }) {
                 </div>
               )}
 
+              {(() => {
+                const chars = buildMessage("CONTENT").length;
+                const m = MODES.find((x) => x.id === qmode) || MODES[1];
+                const est = usage && usage["モード別"] && usage["モード別"][qmode];
+                return (
+                  <p className="stEst">
+                    <span className="stEst__k">この依頼</span>
+                    AI呼び出し {m.calls}回{wantImages ? " ＋ 画像" : ""}／指示文 約{Math.round(chars / 2.2)}トークン
+                    {est ? `／目安 $${est["費用"]}（約${Math.round(est["費用"] * 150)}円）` : ""}
+                  </p>
+                );
+              })()}
+
               <div className="stFoot">
                 <p className="stFoot__c">
                   <button className="stBack" onClick={() => setStep(2)}>← お手本分析に戻る</button>
@@ -3456,6 +3638,84 @@ function Studio({ pushLog }) {
           {/* ============== STEP 3 ============== */}
           {step === 4 && (
             <>
+              <div className="stPrev">
+                <p className="stPrev__k">
+                  できあがったものを確認
+                  <button onClick={loadPreview} disabled={previewing}>
+                    <span className={previewing ? "stSpin" : ""}><Sic name={previewing ? "loader" : "doc"} size={14} /></span>
+                    {previewing ? "読み込み中..." : "最新の成果物を読み込む"}
+                  </button>
+                </p>
+
+                {preview ? (
+                  <>
+                    <div className="stPrev__b">{preview.text}</div>
+                    <div className="stPrev__f">
+                      <span className="stPrev__c">{preview.text.replace(/\s/g, "").length} 文字</span>
+                      <button
+                        className="stPrev__use"
+                        onClick={() => {
+                          const body = preview.text
+                            .replace(/^[\s\S]*?■ そのまま投稿できる本文\n?/, "")
+                            .replace(/^下記をコピーして[^\n]*\n/, "")
+                            .replace(/【案\s*\d+】/g, "")
+                            .trim();
+                          setTheme(body.slice(0, 3000));
+                          setFlash({ ok: true, msg: "本文を下の予約フォームに入れました。必要なら手直ししてください。" });
+                          setTimeout(() => setFlash(null), 4000);
+                        }}
+                      >
+                        この本文で予約する ↓
+                      </button>
+                      <button className="stRevBtn" onClick={() => setReviseFor(preview.url)}>
+                        修正を依頼する
+                      </button>
+                      <a href={preview.url} target="_blank" rel="noopener noreferrer" className="stPrev__link">
+                        原本を開く →
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <p className="stPrev__e">
+                    「最新の成果物を読み込む」を押すと、直近で納品されたものをここで確認できます。
+                    直したいところがあれば、そのまま修正を依頼できます。
+                  </p>
+                )}
+
+                {reviseFor && (
+                  <div className="stRevise">
+                    <p className="stRevise__k">
+                      どこを直しますか
+                      <button onClick={() => { setReviseFor(null); setReviseText(""); }}>×</button>
+                    </p>
+                    <textarea
+                      rows={4}
+                      value={reviseText}
+                      onChange={(e) => setReviseText(e.target.value)}
+                      placeholder={"例：\n・冒頭がありきたりなので、数字から始めてほしい\n・専門用語が多いので、初めての人にも分かる言葉に"}
+                    />
+                    <div className="stRevise__f">
+                      <span>ご意見に沿って書き直し、修正版として納品します。</span>
+                      <button
+                        className="stSend"
+                        disabled={sending || !reviseText.trim()}
+                        onClick={async () => {
+                          const url = reviseFor;
+                          const fb = reviseText.trim();
+                          setReviseFor(null);
+                          setReviseText("");
+                          setPreview(null);
+                          await send("REVISE", "修正版", { url: url, feedback: fb });
+                        }}
+                      >
+                        <Sic name="send" size={16} />
+                        この意見で直してもらう
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Field label="投稿先">
                 <div className="stChips">
                   {PLATFORMS.map((p) => (
@@ -5439,4 +5699,16 @@ const CSS_DASHBOARD = `
 .stRevise__k button{margin-left:auto;color:#9BA3B1;font-size:16px;padding:2px 8px;}
 .stRevise__f{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap;}
 .stRevise__f span{font-size:11.5px;color:var(--muted);}
+
+.stModes{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.stMode{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:var(--white);transition:all .2s;text-align:left;}
+.stMode:hover{border-color:var(--t);}
+.stMode.is-on{border-color:var(--t);background:var(--white);box-shadow:0 0 0 3px color-mix(in srgb,var(--t) 14%,transparent);}
+.stMode b{display:block;font-size:14px;font-weight:900;color:var(--t);margin-bottom:5px;}
+.stMode em{display:block;font-style:normal;font-size:11px;line-height:1.7;color:var(--muted);margin-bottom:8px;min-height:3.4em;}
+.stMode__c{display:block;font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--ink);}
+@media (max-width:760px){.stModes{grid-template-columns:1fr;}.stMode em{min-height:0;}}
+
+.stEst{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--bg);border-radius:11px;padding:11px 14px;margin-bottom:14px;}
+.stEst__k{font-family:var(--sans);font-size:10px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:3px 10px;}
 `;
