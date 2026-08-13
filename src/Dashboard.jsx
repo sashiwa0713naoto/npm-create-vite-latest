@@ -506,6 +506,24 @@ const CSS_ACCOUNTS = `
 .acDiag__job.is-hold{color:#7A5A12;}
 .acDiag__job.is-hold em{background:#B47C10;}
 .acDiag__job span{width:100%;font-family:var(--mono);font-size:10.5px;opacity:.85;}
+
+.acLog{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px;}
+.acLog__k{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;margin-bottom:12px;}
+.acLog__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acLog__e{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:10px;padding:14px;text-align:center;}
+.acLog__t{max-height:330px;overflow-y:auto;border:1px solid var(--line);border-radius:11px;}
+.acLog__r{display:grid;grid-template-columns:110px 140px 74px 54px 1fr;gap:9px;padding:8px 12px;font-size:11.5px;align-items:baseline;}
+.acLog__r + .acLog__r{border-top:1px solid var(--line);}
+.acLog__r.is-ng{background:#FDF3F2;}
+.acLog__d{font-family:var(--mono);font-size:10px;color:var(--muted);}
+.acLog__s{font-weight:700;}
+.acLog__st{font-size:10px;font-weight:700;color:#0E9F73;background:#E6F7F0;border-radius:999px;padding:2px 8px;text-align:center;white-space:nowrap;}
+.acLog__st.is-ng{color:var(--sig);background:#FDECEA;}
+.acLog__ms{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:right;}
+.acLog__ms.is-slow{color:var(--sig);font-weight:700;}
+.acLog__m{color:var(--muted);word-break:break-word;}
+.acLog__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:11px 14px;margin-top:12px;}
+@media (max-width:900px){.acLog__r{grid-template-columns:1fr;gap:3px;}.acLog__ms{text-align:left;}}
 `;
 
 
@@ -611,6 +629,24 @@ function SettingsView({ pushLog }) {
   };
 
   const [running, setRunning] = useState(false);
+  const [logs2, setLogs2] = useState(null);
+  const [logging, setLogging] = useState(false);
+
+  const loadLog = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setLogging(true);
+    try {
+      const r = await fetch(`${u}?action=log&n=80`);
+      const d = await r.json();
+      if (d && Array.isArray(d.log)) setLogs2(d.log);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "ログを取得できませんでした。" });
+    } finally {
+      setLogging(false);
+    }
+  };
 
   const runNow = async () => {
     const u = (gasUrl || settings.gasUrl || "").trim();
@@ -725,8 +761,43 @@ function SettingsView({ pushLog }) {
           <button className="acGhost" onClick={runRetry} disabled={running}>
             失敗した依頼を再実行
           </button>
+          <button className="acGhost" onClick={loadLog} disabled={logging}>
+            {logging ? "取得中..." : "詳細ログを見る"}
+          </button>
           <span>生成されない・メールが来ないときは、まずここを押してください。</span>
         </div>
+
+        {logs2 && (
+          <div className="acLog">
+            <p className="acLog__k">
+              実行ログ（新しい順・{logs2.length}件）
+              <button onClick={() => setLogs2(null)}>閉じる</button>
+            </p>
+            {logs2.length === 0 ? (
+              <p className="acLog__e">まだログがありません。制作を1件依頼すると記録されます。</p>
+            ) : (
+              <div className="acLog__t">
+                {logs2.map((r, i) => {
+                  const ng = /失敗|エラー|待機|省略/.test(r["結果"]);
+                  const slow = Number(r["秒"]) >= 40;
+                  return (
+                    <div className={`acLog__r ${ng ? "is-ng" : ""}`} key={i}>
+                      <span className="acLog__d">{r["日時"]}</span>
+                      <span className="acLog__s">{r["工程"]}</span>
+                      <span className={`acLog__st ${ng ? "is-ng" : ""}`}>{r["結果"]}</span>
+                      <span className={`acLog__ms ${slow ? "is-slow" : ""}`}>{r["秒"] ? r["秒"] + "秒" : ""}</span>
+                      <span className="acLog__m">{r["詳細"]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <p className="acLog__n">
+              「失敗 429」が並ぶ場合はDifyの利用制限です。時間をおくか、Difyの料金プランをご確認ください。
+              所要秒が45秒を超える工程は、Apps Scriptの通信上限（約60秒）に近く危険です。
+            </p>
+          </div>
+        )}
 
         {diag && (
           <div className="acDiag">
@@ -2434,7 +2505,7 @@ function Studio({ pushLog }) {
       billing: acct && acct.ownerType === "client" ? "課金" : "無料", isPost: job === "POST",
     }, ...j].slice(0, 40));
 
-    note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}`);
+    note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}${!ok && detail ? " — " + detail.slice(0, 90) : ""}`);
     setFlash({
       ok,
       msg: ok
@@ -2795,10 +2866,7 @@ function Studio({ pushLog }) {
                   )}
 
                   <div className="stPlan__f">
-                    <button className="stSend" onClick={() => send("PLAN", "運用設計書")} disabled={sending}>
-                      <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "map"} size={16} /></span>
-                      {sending ? "送信中..." : "詳細な運用設計書をAIに作らせる"}
-                    </button>
+
                     <button className="stNext" onClick={() => setStep(2)}>お手本の設定へ進む →</button>
                   </div>
                 </div>
