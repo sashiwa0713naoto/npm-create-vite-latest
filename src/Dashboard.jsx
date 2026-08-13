@@ -2079,6 +2079,10 @@ function Studio({ pushLog }) {
   const [autoSet, setAutoSet] = useState(null);
   const [tweak, setTweak] = useState(false);
   const [moreCtx, setMoreCtx] = useState(false);
+  const [themes, setThemes] = useState([]);
+  const [themeing, setThemeing] = useState(false);
+  const [reviseFor, setReviseFor] = useState(null);
+  const [reviseText, setReviseText] = useState("");
   const [sched, setSched] = useState({});
   const [schedPf, setSchedPf] = useState("x");
   const [refSlot, setRefSlot] = useState("common");
@@ -2121,9 +2125,16 @@ function Studio({ pushLog }) {
   };
 
   /* ---- 送信 ---- */
-  const buildMessage = (job) => {
+  const buildMessage = (job, extra) => {
     const billing = mode === "OWNER" ? "無料（社内利用）" : "課金対象";
     const L = [`【事業】STUDIO／【JOB】${job}／【課金】${billing}`];
+
+    if (job === "REVISE") {
+      L.push(`【対象成果物】${extra.url}`);
+      L.push(`【ご意見】${String(extra.feedback).replace(/\n/g, " ／ ")}`);
+      if (acct) L.push(`【投稿先アカウント】${acct.name}`);
+      return L.join("／");
+    }
 
     if (job === "PLAN") {
       L.push(`【依頼】SNS運用設計書の作成`);
@@ -2401,6 +2412,40 @@ function Studio({ pushLog }) {
     [refs, getSched, theme]
   );
 
+  /** AIにテーマと要点を提案させます */
+  const suggestThemes = useCallback(async () => {
+    if (!endpoint.isGas) {
+      setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      return;
+    }
+    setThemeing(true);
+    setFlash(null);
+    try {
+      const sl = getSched(pfId).slots.find((x) => x.id === prodSlot);
+      const q = new URLSearchParams({
+        action: "theme",
+        acct: acct ? acct.name : "",
+        policy: acct ? acct.note || "" : "",
+        industry: (INDUSTRIES.find((x) => x.id === ctx.industry) || {}).label || "",
+        media: `${pf.label} ${fmt.label}`,
+        brief: sl ? sl.brief : "",
+        style: autoSet ? `${autoSet.tone}／${autoSet.struct}／${autoSet.hook}` : "",
+      });
+      const r = await fetch(`${endpoint.url}?${q.toString()}`);
+      const d = await r.json();
+      if (d && d.ok && d.themes && d.themes.length) {
+        setThemes(d.themes);
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] THEMES SUGGESTED: ${d.themes.length}`);
+      } else {
+        setFlash({ ok: false, msg: d && d.error ? d.error : "テーマを提案できませんでした。少し時間をおいてお試しください。" });
+      }
+    } catch (e) {
+      setFlash({ ok: false, msg: "テーマを取得できませんでした。接続設定をご確認ください。" });
+    } finally {
+      setThemeing(false);
+    }
+  }, [endpoint, acct, ctx, pf, fmt, prodSlot, getSched, autoSet, pushLog]);
+
   /** 依頼したあと、完成するまで状態を追いかけます */
   const watchJob = useCallback(
     (jobId, url) => {
@@ -2433,9 +2478,10 @@ function Studio({ pushLog }) {
     [pushLog]
   );
 
-  const send = async (job, label) => {
+  const send = async (job, label, extra) => {
     if (sending) return;
     if (!acct) return setFlash({ ok: false, msg: "先にアカウント管理でアカウントを登録してください。" });
+    if (job === "REVISE" && (!extra || !extra.feedback)) return setFlash({ ok: false, msg: "修正のご意見を入力してください。" });
     if (job === "CONTENT" && !theme.trim()) return setFlash({ ok: false, msg: "テーマを入力してください。" });
     if (job === "IMAGE" && !imgDesc.trim()) return setFlash({ ok: false, msg: "画像の内容を入力してください。" });
     if (job === "POST") {
@@ -2460,7 +2506,7 @@ function Studio({ pushLog }) {
     const payload = {
       client_name: acct ? (acct.ownerType === "own" ? `${OWNER.name}／${acct.name}` : `${acct.owner}／${acct.name}`) : OWNER.name,
       client_email: acct && acct.email ? acct.email : OWNER.email,
-      message: buildMessage(job),
+      message: buildMessage(job, extra),
       ref_images: job === "CONTENT" ? refImagesPayload : [],
     };
     let ok = true;
@@ -2499,7 +2545,7 @@ function Studio({ pushLog }) {
     setJobs((j) => [{
       id: String(now.getTime()), pf: job === "PLAN" ? "運用設計" : pf.label, tone: job === "PLAN" ? "#7C5CD6" : pf.tone,
       soft: job === "PLAN" ? "#F1EDFC" : pf.soft, kind: label,
-      title: (job === "IMAGE" ? imgDesc : job === "PLAN" ? ctx.company || "自社" : theme).slice(0, 40),
+      title: (job === "IMAGE" ? imgDesc : job === "REVISE" ? "修正：" + String((extra && extra.feedback) || "").slice(0, 30) : theme).slice(0, 40),
       at: job === "POST" ? schedule.at.replace("T", " ") : now.toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
       status: ok ? (job === "POST" ? "予約済み" : "制作中") : "送信失敗",
       billing: acct && acct.ownerType === "client" ? "課金" : "無料", isPost: job === "POST",
@@ -3177,7 +3223,33 @@ function Studio({ pushLog }) {
 
               {subTab === "content" ? (
                 <>
-                  <Field label="テーマ" hint="何について発信するか。1行で">
+                  <div className="stThemeBar">
+                    <button className="stIdeaBtn" onClick={suggestThemes} disabled={themeing}>
+                      <Sic name={themeing ? "loader" : "spark"} size={15} />
+                      {themeing ? "考えています..." : themes.length ? "別のテーマを出す" : "AIにテーマを提案させる"}
+                    </button>
+                    <span>アカウントの方針・お手本・この時間に出したい内容から、AIが決めます。</span>
+                  </div>
+
+                  {themes.length > 0 && (
+                    <div className="stThemes">
+                      {themes.map((t, i) => (
+                        <button
+                          key={i}
+                          className={`stTheme ${theme === t.theme ? "is-on" : ""}`}
+                          onClick={() => {
+                            setTheme(t.theme);
+                            setPoints((t.points || []).join("\n"));
+                          }}
+                        >
+                          <b>{t.theme}</b>
+                          <span>{(t.points || []).map((p2, k) => <em key={k}>{p2}</em>)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <Field label="テーマ" hint="何について発信するか。1行で。上の提案から選ぶか、自分で書き換えてください">
                     <input type="text" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="問い合わせ対応を自動化したら何時間浮いたか" />
                   </Field>
                   <Field label="伝えたい要点" hint="1行ずつ。構成に反映されます">
@@ -3422,6 +3494,38 @@ function Studio({ pushLog }) {
 
           {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
 
+          {reviseFor && (
+            <div className="stRevise">
+              <p className="stRevise__k">
+                どこを直しますか
+                <button onClick={() => { setReviseFor(null); setReviseText(""); }}>×</button>
+              </p>
+              <textarea
+                rows={4}
+                value={reviseText}
+                onChange={(e) => setReviseText(e.target.value)}
+                placeholder={"例：\n・冒頭がありきたりなので、数字から始めてほしい\n・専門用語が多いので、初めての人にも分かる言葉に\n・案2の締めが弱い"}
+              />
+              <div className="stRevise__f">
+                <span>ご意見に沿って書き直し、修正版として納品します。</span>
+                <button
+                  className="stSend"
+                  disabled={sending || !reviseText.trim()}
+                  onClick={async () => {
+                    const url = reviseFor;
+                    const fb = reviseText.trim();
+                    setReviseFor(null);
+                    setReviseText("");
+                    await send("REVISE", "修正版", { url: url, feedback: fb });
+                  }}
+                >
+                  <Sic name="send" size={16} />
+                  この意見で直してもらう
+                </button>
+              </div>
+            </div>
+          )}
+
           {watch && (
             <div className={`stWatch is-${watch.status}`}>
               <div className="stWatch__bar">
@@ -3446,6 +3550,9 @@ function Studio({ pushLog }) {
                         成果物を開く →
                       </a>
                     )}
+                    <button className="stRevBtn" onClick={() => setReviseFor(watch.url)}>
+                      修正を依頼する
+                    </button>
                   </>
                 ) : watch.status === "エラー" ? (
                   "処理に失敗しました。接続設定の「バックエンドの状態を確認」で原因をご覧ください。"
@@ -5314,4 +5421,22 @@ const CSS_DASHBOARD = `
 .stSlotTabs button.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
 .stSlotTabs em{font-style:normal;font-family:var(--sans);font-size:10px;font-weight:400;opacity:.75;}
 .stSlotNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 14px;margin-bottom:16px;}
+
+.stThemeBar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+.stThemeBar span{flex:1;min-width:190px;font-size:11.5px;line-height:1.75;color:var(--muted);}
+.stThemes{display:grid;gap:9px;margin-bottom:16px;}
+.stTheme{display:block;width:100%;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;transition:all .2s;}
+.stTheme:hover{border-color:var(--ai);}
+.stTheme.is-on{border-color:var(--ai);background:#F7F4FE;}
+.stTheme b{display:block;font-size:14px;font-weight:700;margin-bottom:7px;line-height:1.6;}
+.stTheme span{display:grid;gap:4px;}
+.stTheme em{font-style:normal;font-size:12px;line-height:1.75;color:var(--muted);padding-left:14px;position:relative;}
+.stTheme em::before{content:"";position:absolute;left:0;top:.8em;width:7px;height:1.5px;background:var(--ai);}
+.stRevBtn{font-size:11.5px;font-weight:700;color:var(--ai);border:1px solid var(--ai);border-radius:999px;padding:6px 14px;}
+.stRevBtn:hover{background:var(--ai);color:#fff;}
+.stRevise{background:#F7F4FE;border:1.5px solid #DCD0F7;border-radius:14px;padding:16px;margin-top:14px;}
+.stRevise__k{display:flex;align-items:center;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:11px;}
+.stRevise__k button{margin-left:auto;color:#9BA3B1;font-size:16px;padding:2px 8px;}
+.stRevise__f{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap;}
+.stRevise__f span{font-size:11.5px;color:var(--muted);}
 `;
