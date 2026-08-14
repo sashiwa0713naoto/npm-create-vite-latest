@@ -150,6 +150,126 @@ function AccountsView({ pushLog }) {
 
   const note = useCallback((l) => { if (typeof pushLog === "function") pushLog(l); }, [pushLog]);
 
+  /* ── アカウント詳細（これから／投稿済み／制作物／分析）── */
+  const { settings } = useSettings();
+  const [postsFor, setPostsFor] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [tab, setTab] = useState("plan");
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [learnText, setLearnText] = useState("");
+
+  const parsed = useMemo(() => (paste.trim() ? parsePerfPaste(paste) : null), [paste]);
+
+  const openPosts = async (a) => {
+    setPostsFor(a);
+    setPosts([]);
+    setQueue([]);
+    setPaste("");
+    setLearnText("");
+    setTab("plan");
+    if (!settings.gasUrl) return;
+    setLoadingPosts(true);
+    try {
+      const [rp, rj, rq, rl] = await Promise.all([
+        fetch(`${settings.gasUrl}?action=perf`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=jobs`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=queue`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=learn&acct=${encodeURIComponent(a.name)}`).then((r) => r.json()).catch(() => ({})),
+      ]);
+      const mine = (rp.perf || []).filter((x) => !x.アカウント || String(x.アカウント).indexOf(a.name) >= 0);
+      const jobs = (rj.jobs || []).filter(
+        (j) => String(j.投稿先アカウント || "").indexOf(a.name) >= 0 && j.状態 === "完了"
+      );
+      setPosts([
+        ...mine.map((x) => ({ ...x, kind: "posted" })),
+        ...jobs.map((j) => ({
+          post_id: j.job_id,
+          投稿日時: j.受信日時,
+          アカウント: a.name,
+          媒体: j.媒体,
+          本文: "",
+          title: jobTitle(j),
+          url: j.成果物URL,
+          kind: "made",
+        })),
+      ]);
+      setQueue((rq.queue || []).filter((q) => String(q.アカウント || "").indexOf(a.name) >= 0));
+      if (rl && rl.learn) setLearnText(rl.learn);
+    } catch (e) {
+      /* 取得できなくても画面は開きます */
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  /** 貼り付けた実績を一括で取り込みます */
+  const doImport = async (a) => {
+    if (!parsed || !parsed.rows.length || !settings.gasUrl) return;
+    setImporting(true);
+    try {
+      const r = await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          type: "perfbulk",
+          アカウント: a.name,
+          媒体: (PLATFORM_META[a.platform] || {}).label || "",
+          items: parsed.rows,
+        }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setPaste("");
+        note(`[${new Date().toLocaleTimeString()}] PERF IMPORTED: +${d.added} / 更新${d.updated}`);
+        await openPosts(a);
+        setTab("done");
+      }
+    } catch (e) {
+      /* 失敗しても画面は保ちます */
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  /** AIに実績を分析させ、次回の指針を作ります */
+  const runAnalyze = async (a) => {
+    if (!settings.gasUrl) return;
+    setAnalyzing(true);
+    try {
+      const r = await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ type: "analyze", アカウント: a.name }),
+      });
+      const d = await r.json();
+      setLearnText(d && d.ok ? d.learn || "" : (d && d.error) || "分析できませんでした。");
+      if (d && d.ok) note(`[${new Date().toLocaleTimeString()}] AI ANALYZED: ${a.name}`);
+    } catch (e) {
+      setLearnText("分析できませんでした。接続設定をご確認ください。");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  /** YouTubeの数値を無料で取り込みます */
+  const fetchYT = async () => {
+    if (!settings.gasUrl || !postsFor) return;
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=yt`);
+      const d = await r.json();
+      if (d && d.ok) {
+        await openPosts(postsFor);
+        setTab("done");
+      }
+    } catch (e) {
+      /* 取得できなくても画面は保ちます */
+    }
+  };
+
   const openNew = () => { setForm(EMPTY); setEditing("new"); };
   const openEdit = (a) => { setForm(a); setEditing(a.id); };
   const close = () => { setEditing(null); setForm(EMPTY); };
@@ -278,8 +398,11 @@ function AccountsView({ pushLog }) {
                     </dl>
                     {a.note && <p className="acCard__note">{a.note}</p>}
                     <div className="acCard__f">
+                      <button className="acCard__posts" onClick={() => openPosts(a)}>
+                        投稿と実績
+                      </button>
                       <button onClick={() => update(a.id, { status: a.status === "運用中" ? "停止中" : "運用中" })}>
-                        {a.status === "運用中" ? "停止する" : "運用を再開"}
+                        {a.status === "運用中" ? "停止" : "再開"}
                       </button>
                       <button onClick={() => openEdit(a)}><Ac name="edit" size={14} />編集</button>
                       <button className="acCard__del" onClick={() => del(a)}><Ac name="trash" size={14} /></button>
@@ -373,6 +496,214 @@ function AccountsView({ pushLog }) {
           </div>
         </div>
       )}
+
+      {postsFor && (
+        <div className="acModal" onClick={() => setPostsFor(null)}>
+          <div className="acModal__b acDetail" onClick={(e) => e.stopPropagation()}>
+            <div className="acDetail__h" style={{ "--t": (PLATFORM_META[postsFor.platform] || {}).tone, "--s": (PLATFORM_META[postsFor.platform] || {}).soft }}>
+              <div>
+                <p className="acDetail__pf">
+                  {(PLATFORM_META[postsFor.platform] || {}).label}
+                  {postsFor.handle && <em>@{postsFor.handle}</em>}
+                  <span className={postsFor.ownerType === "own" ? "is-own" : ""}>
+                    {postsFor.ownerType === "own" ? "自社" : postsFor.owner}
+                  </span>
+                </p>
+                <h2>{postsFor.name}</h2>
+                <p className="acDetail__meta">
+                  {postsFor.purpose}／{postsFor.cadence}／{postsFor.tone}
+                  {postsFor.note && <em>{postsFor.note}</em>}
+                </p>
+              </div>
+              <button onClick={() => setPostsFor(null)} aria-label="閉じる"><Ac name="x" size={18} /></button>
+            </div>
+
+            <div className="acDetail__tabs">
+              {[
+                ["plan", "これから", queue.length],
+                ["done", "投稿済み", posts.filter((x) => x.kind === "posted").length],
+                ["made", "制作物", posts.filter((x) => x.kind === "made").length],
+                ["learn", "分析", 0],
+              ].map(([id, label, n]) => (
+                <button key={id} className={tab === id ? "is-on" : ""} onClick={() => setTab(id)}>
+                  {label}
+                  {n > 0 && <em>{n}</em>}
+                </button>
+              ))}
+            </div>
+
+            <div className="acDetail__b">
+              {loadingPosts && <p className="acPosts__e">読み込んでいます...</p>}
+
+              {!loadingPosts && tab === "plan" && (
+                queue.length === 0 ? (
+                  <p className="acPosts__e">予約された投稿はありません。制作スタジオのSTEP5で予約できます。</p>
+                ) : (
+                  <div className="acTl">
+                    {queue.map((q) => (
+                      <div className="acTl__i" key={q.post_id}>
+                        <div className="acTl__t">
+                          <b>{String(q.予定日時).slice(5, 16)}</b>
+                          {q.繰り返し && q.繰り返し !== "なし" && <em>{q.繰り返し}</em>}
+                        </div>
+                        <div className="acTl__c">
+                          <p className="acTl__m">
+                            <span>{q.媒体}</span>
+                            <span className={`acTl__s is-${q.状態}`}>{q.状態}</span>
+                          </p>
+                          <p className="acTl__body">{q.本文}</p>
+                          {q.投稿リンク && (
+                            <a href={q.投稿リンク} target="_blank" rel="noopener noreferrer">
+                              投稿画面を開く →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {!loadingPosts && tab === "done" && (
+                <>
+                  <div className="acImport">
+                    <p className="acImport__k">実績を取り込む</p>
+                    <p className="acImport__n">
+                      各SNSの分析画面からCSVを書き出すか、表をそのままコピーして、下に貼り付けてください。
+                      見出し行を含めて貼ると、列を自動で判別します。手入力は不要です。
+                    </p>
+                    <textarea
+                      rows={3}
+                      value={paste}
+                      onChange={(e) => setPaste(e.target.value)}
+                      placeholder={"日付\tポスト本文\tインプレッション\tいいね\tリポスト\t返信\tリンクのクリック数\n2026-08-14\t…\t1240\t62\t18\t5\t14"}
+                    />
+                    {parsed && parsed.rows.length > 0 && (
+                      <p className="acImport__ok">
+                        {parsed.rows.length} 件を認識しました（
+                        {Object.keys(parsed.map).filter((k) => k !== "post_id").join("・")}）
+                      </p>
+                    )}
+                    {parsed && parsed.error && <p className="acImport__ng">{parsed.error}</p>}
+                    <div className="acImport__f">
+                      <button
+                        className="acAdd"
+                        disabled={!parsed || !parsed.rows.length || importing}
+                        onClick={() => doImport(postsFor)}
+                      >
+                        {importing ? "取り込み中..." : "この内容で取り込む"}
+                      </button>
+                      {(PLATFORM_META[postsFor.platform] || {}).label === "YouTube" && (
+                        <button className="acGhost" onClick={fetchYT}>
+                          YouTubeから自動取得（無料）
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {posts.filter((x) => x.kind === "posted").length === 0 ? (
+                    <p className="acPosts__e">まだ実績がありません。上の欄から取り込んでください。</p>
+                  ) : (
+                    <div className="acDone">
+                      {posts
+                        .filter((x) => x.kind === "posted")
+                        .map((pp) => {
+                          const e2 = engagement(pp);
+                          return (
+                            <div className="acDone__i" key={pp.post_id}>
+                              <div className="acDone__h">
+                                <span>{String(pp.投稿日時).slice(0, 16)}</span>
+                                <b className={e2 >= 5 ? "is-hi" : e2 >= 2 ? "is-mid" : ""}>
+                                  反応率 {Math.round(e2 * 100) / 100}％
+                                </b>
+                              </div>
+                              {pp.本文 && <p className="acDone__body">{pp.本文.slice(0, 140)}</p>}
+                              <p className="acDone__n">
+                                表示 {pp.表示回数.toLocaleString()}／いいね {pp.いいね}／保存RT {pp["保存・RT"]}／返信 {pp.返信}／クリック {pp.クリック}
+                              </p>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!loadingPosts && tab === "made" && (
+                posts.filter((x) => x.kind === "made").length === 0 ? (
+                  <p className="acPosts__e">このアカウント向けの制作物はまだありません。</p>
+                ) : (
+                  <div className="acMade">
+                    {posts
+                      .filter((x) => x.kind === "made")
+                      .map((pp) => (
+                        <div className="acMade__i" key={pp.post_id}>
+                          <span className="acMade__t">{String(pp.投稿日時).slice(0, 16)}</span>
+                          <span className="acMade__m">{pp.媒体}</span>
+                          <span className="acMade__x">{pp.title || "成果物"}</span>
+                          {pp.url && (
+                            <a href={pp.url} target="_blank" rel="noopener noreferrer">開く →</a>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                )
+              )}
+
+              {!loadingPosts && tab === "learn" && (
+                <div className="acLearn">
+                  {(() => {
+                    const l = learnFromPerf(posts.filter((x) => x.kind === "posted"), postsFor.name);
+                    return (
+                      <>
+                        {l.ready ? (
+                          <>
+                            <p className="acLearn__k">
+                              実績{l.count}件から読み取った傾向
+                              <em>上位平均 {l.avgTop}％ ／ 下位平均 {l.avgBottom}％</em>
+                            </p>
+                            <ul className="stLearn__l">
+                              {l.insights.map((x) => (
+                                <li key={x.key}>
+                                  <b>{x.advice}</b>
+                                  <em>伸びた {x.top} ／ 伸びず {x.bottom}</em>
+                                  <span className="stLearn__bar"><i style={{ width: `${Math.min(100, x.strength)}%` }} /></span>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <p className="acPosts__e">
+                            実績があと {l.need} 件たまると、傾向を自動で読み取れます。
+                          </p>
+                        )}
+
+                        <div className="acLearn__ai">
+                          <p className="acLearn__k">
+                            AIによる分析
+                            <button className="acAdd" onClick={() => runAnalyze(postsFor)} disabled={analyzing || !l.ready}>
+                              {analyzing ? "分析中..." : "AIに分析させる"}
+                            </button>
+                          </p>
+                          {learnText ? (
+                            <pre className="acLearn__t">{learnText}</pre>
+                          ) : (
+                            <p className="acLearn__n">
+                              反応の良い投稿と低い投稿の本文をAIが読み比べ、「効いた要素」「次回の指針」を言葉で出します。
+                              結果は保存され、以後の制作条件に自動で入ります。1回あたり数円です。
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
 
       <p className="acFoot">
         アカウント情報はこのブラウザ内に保存されます。別の端末でも使う場合は「書き出し」でJSONを保存し、移行先で「読み込み」してください。
@@ -543,6 +874,130 @@ const CSS_ACCOUNTS = `
 .acUse__f label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;}
 .acUse__f input{width:74px;background:var(--white);border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit;font-size:12.5px;}
 .acUse__f span{flex:1;min-width:220px;font-size:11px;line-height:1.8;color:var(--muted);}
+
+.acX{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;border-left:4px solid #9BA3B1;}
+.acX.is-on{border-left-color:#0E9F73;background:#E9F7F1;}
+.acX__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:9px;}
+.acX__d{width:9px;height:9px;border-radius:50%;background:#9BA3B1;}
+.acX.is-on .acX__d{background:#0E9F73;box-shadow:0 0 0 3px rgba(14,159,115,.2);}
+.acX__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acX__s{font-size:12.5px;line-height:1.9;color:var(--muted);}
+.acX.is-on .acX__s{color:#0B6B4F;}
+.acX__l{margin-top:13px;}
+.acX__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--white);border-radius:10px;padding:11px 14px;margin-top:12px;}
+
+.acXCost{background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:13px 15px;font-size:11.5px;line-height:1.9;color:#7A5A12;margin-top:12px;}
+.acXCost b{display:inline;color:#8C5A00;}
+.acXCost b:first-child{display:block;margin-bottom:5px;}
+.acXForm{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px;}
+.acXForm label{display:block;}
+.acXForm label span{display:block;font-size:11px;font-weight:700;margin-bottom:6px;}
+.acXForm input{width:100%;background:var(--white);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:12px;}
+.acXForm input:focus{outline:none;border-color:var(--ai);}
+.acXForm > button{grid-column:1/-1;justify-self:start;}
+@media (max-width:640px){.acXForm{grid-template-columns:1fr;}}
+.acSteps li em{display:block;font-style:normal;font-size:11px;color:var(--sig);margin-top:3px;}
+
+.acCard__posts{color:var(--ai) !important;border-color:var(--ai) !important;font-weight:700;}
+.acCard__posts:hover{background:#F5F1FE;}
+.acPosts{max-width:760px;}
+.acPosts__b{padding:16px 22px;max-height:60vh;overflow-y:auto;}
+.acPosts__e{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:20px;text-align:center;}
+.acPost{border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:10px;}
+.acPost.posted{border-left:3px solid #0E9F73;}
+.acPost.made{border-left:3px solid var(--ai);}
+.acPost__h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:7px;}
+.acPost__t{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acPost__m{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acPost__k{font-size:10px;font-weight:700;color:var(--ai);background:#F1EDFC;border-radius:999px;padding:2px 9px;}
+.acPost__k.is-posted{color:#0E9F73;background:#E6F7F0;}
+.acPost__h a{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--ai);}
+.acPost__body{font-size:12px;line-height:1.8;color:var(--muted);margin-bottom:9px;white-space:pre-wrap;}
+.acPost__f{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding-top:9px;border-top:1px solid var(--line);}
+.acPost__f label{display:block;}
+.acPost__f label span{display:block;font-size:9.5px;color:var(--muted);margin-bottom:3px;}
+.acPost__f input{width:76px;background:var(--bg);border:1px solid transparent;border-radius:8px;padding:7px 9px;font-family:var(--mono);font-size:12px;}
+.acPost__f input:focus{outline:none;border-color:var(--ai);background:var(--white);}
+.acPost__f button{margin-left:auto;font-size:11.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;}
+.acPosts__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:0 0 22px 22px;padding:13px 22px;}
+
+.acSetup{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:16px;}
+.acSetup__k{font-size:13px;font-weight:900;margin-bottom:13px;}
+.acSetup__l{display:grid;gap:8px;}
+.acSetup__i{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:12px 14px;}
+.acSetup__i.is-ok{background:#E9F7F1;}
+.acSetup__i.is-ng{background:#FDECEA;}
+.acSetup__n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--white);font-size:12px;font-weight:700;color:var(--muted);flex-shrink:0;}
+.acSetup__i.is-ok .acSetup__n{background:#0E9F73;color:#fff;}
+.acSetup__i.is-ng .acSetup__n{background:var(--sig);color:#fff;}
+.acSetup__i > div{flex:1;min-width:0;}
+.acSetup__i b{display:block;font-size:13px;font-weight:700;}
+.acSetup__i em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.7;}
+.acSetup__i > button{font-size:11.5px;font-weight:700;color:var(--ai);border:1.5px solid var(--ai);border-radius:999px;padding:7px 15px;white-space:nowrap;}
+.acSetup__i > button:hover{background:var(--ai);color:#fff;}
+.acSetup__n2{font-size:11.5px;line-height:1.85;color:var(--muted);margin-top:12px;}
+
+/* ==== アカウント詳細 ==== */
+.acDetail{max-width:820px;}
+.acDetail__h{display:flex;align-items:flex-start;gap:14px;padding:20px 22px;border-bottom:1px solid var(--line);background:var(--s);}
+.acDetail__h > div{flex:1;min-width:0;}
+.acDetail__pf{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;color:var(--t);margin-bottom:6px;flex-wrap:wrap;}
+.acDetail__pf em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acDetail__pf span{font-size:10px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.acDetail__pf span.is-own{color:#0E9F73;}
+.acDetail__h h2{font-size:19px;font-weight:900;line-height:1.4;}
+.acDetail__meta{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.7;}
+.acDetail__meta em{display:block;font-style:normal;margin-top:3px;}
+.acDetail__h > button{color:var(--muted);padding:6px;border-radius:8px;flex-shrink:0;}
+.acDetail__tabs{display:flex;gap:4px;padding:12px 22px 0;border-bottom:1px solid var(--line);}
+.acDetail__tabs button{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);padding:10px 16px;border-radius:11px 11px 0 0;transition:all .2s;}
+.acDetail__tabs button.is-on{color:var(--ink);background:var(--bg);}
+.acDetail__tabs em{font-style:normal;font-family:var(--mono);font-size:10px;background:var(--ai);color:#fff;border-radius:999px;padding:1px 7px;}
+.acDetail__b{padding:16px 22px 22px;max-height:56vh;overflow-y:auto;background:var(--bg);}
+
+.acTl{display:grid;gap:9px;}
+.acTl__i{display:grid;grid-template-columns:96px 1fr;gap:13px;background:var(--white);border-radius:12px;padding:13px 15px;}
+.acTl__t b{display:block;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ai);}
+.acTl__t em{display:inline-block;font-style:normal;font-size:10px;color:var(--muted);background:var(--bg);border-radius:999px;padding:2px 8px;margin-top:4px;}
+.acTl__m{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.acTl__m span{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acTl__s.is-予約{color:var(--ai);border-color:#DCD0F7;background:#F5F1FE;}
+.acTl__s.is-投稿済み,.acTl__s.is-配信済み{color:#0E9F73;border-color:#B9E4D2;background:#E6F7F0;}
+.acTl__body{font-size:12.5px;line-height:1.85;white-space:pre-wrap;margin-bottom:7px;}
+.acTl__c a{font-size:11.5px;font-weight:700;color:var(--ai);}
+
+.acImport{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:14px;}
+.acImport__k{font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.acImport__n{font-size:11.5px;line-height:1.8;color:var(--muted);margin-bottom:10px;}
+.acImport textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:11px 13px;font-family:var(--mono);font-size:11.5px;line-height:1.7;resize:vertical;}
+.acImport textarea:focus{outline:none;background:var(--white);border-color:var(--ai);}
+.acImport__ok{font-size:11.5px;color:#0E9F73;background:#E6F7F0;border-radius:9px;padding:9px 12px;margin-top:9px;}
+.acImport__ng{font-size:11.5px;color:var(--sig);background:#FDECEA;border-radius:9px;padding:9px 12px;margin-top:9px;line-height:1.7;}
+.acImport__f{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;}
+
+.acDone{display:grid;gap:9px;}
+.acDone__i{background:var(--white);border-radius:12px;padding:13px 15px;}
+.acDone__h{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.acDone__h span{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acDone__h b{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);}
+.acDone__h b.is-mid{color:#B47C10;}
+.acDone__h b.is-hi{color:#0E9F73;}
+.acDone__body{font-size:12.5px;line-height:1.8;margin-bottom:7px;}
+.acDone__n{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+
+.acMade{display:grid;gap:7px;}
+.acMade__i{display:flex;align-items:center;gap:10px;background:var(--white);border-radius:11px;padding:11px 14px;font-size:12px;flex-wrap:wrap;}
+.acMade__t{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acMade__m{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acMade__x{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acMade__i a{font-size:11.5px;font-weight:700;color:var(--ai);}
+
+.acLearn__k{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;margin-bottom:11px;flex-wrap:wrap;}
+.acLearn__k em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acLearn__k button{margin-left:auto;}
+.acLearn__ai{background:var(--white);border-radius:12px;padding:14px;margin-top:14px;}
+.acLearn__t{font-family:var(--sans);font-size:12.5px;line-height:1.95;white-space:pre-wrap;background:var(--bg);border-radius:10px;padding:13px 15px;margin:0;}
+.acLearn__n{font-size:11.5px;line-height:1.85;color:var(--muted);}
 `;
 
 
@@ -648,7 +1103,52 @@ function SettingsView({ pushLog }) {
   };
 
   const [running, setRunning] = useState(false);
+  const [xstat, setXstat] = useState(null);
+  const [xkeys, setXkeys] = useState({ ck: "", cs: "", at: "", as: "" });
+  const [xsaving, setXsaving] = useState(false);
+
+  const saveX = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    if (!xkeys.ck || !xkeys.cs || !xkeys.at || !xkeys.as) {
+      return setResult({ ok: false, msg: "4つすべてを貼り付けてください。" });
+    }
+    setXsaving(true);
+    setResult(null);
+    try {
+      const r = await fetch(u, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ type: "setx", ...xkeys }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setXkeys({ ck: "", cs: "", at: "", as: "" });
+        setXstat({ 登録: true, 接続: true, アカウント: d.account, msg: "自動投稿の準備ができています。" });
+        setResult({ ok: true, msg: `接続できました（@${d.account || "取得済み"}）。予約した時刻に自動投稿されます。` });
+      } else {
+        setResult({ ok: false, msg: (d && d.error) || "登録できませんでした。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "登録できませんでした。接続設定をご確認ください。" });
+    } finally {
+      setXsaving(false);
+    }
+  };
   const [usage2, setUsage2] = useState(null);
+
+  const checkX = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    try {
+      const r = await fetch(`${u}?action=xcheck`);
+      const d = await r.json();
+      if (d && d.x) setXstat(d.x);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "状態を取得できませんでした。" });
+    }
+  };
   const [logs2, setLogs2] = useState(null);
 
   const callBudget = async (params) => {
@@ -752,6 +1252,59 @@ function SettingsView({ pushLog }) {
         </div>
       </header>
 
+      {/* はじめての設定：やることを4つに絞って表示します */}
+      <div className="acSetup">
+        <p className="acSetup__k">設定はこの4つだけです</p>
+        <div className="acSetup__l">
+          {[
+            {
+              n: 1,
+              t: "バックエンドをつなぐ",
+              d: "スプレッドシートにコードを貼り、URLを下の欄に入れる",
+              ok: connected,
+              action: null,
+            },
+            {
+              n: 2,
+              t: "Difyのキーを入れる",
+              d: "コード冒頭の KEY_CREATIVE に貼って保存",
+              ok: diag ? !!(diag["キー"] && diag["キー"]["制作"]) : null,
+              action: () => runDiag(),
+              label: "確認する",
+            },
+            {
+              n: 3,
+              t: "アカウントを登録する",
+              d: "左メニューの「アカウント管理」から投稿先を追加",
+              ok: null,
+              action: null,
+            },
+            {
+              n: 4,
+              t: "投稿の方法を決める",
+              d: "朝のまとめメール（無料）か、Xの自動投稿（有料）",
+              ok: xstat ? !!xstat["接続"] : null,
+              action: checkX,
+              label: "設定する",
+            },
+          ].map((x) => (
+            <div className={`acSetup__i ${x.ok === true ? "is-ok" : x.ok === false ? "is-ng" : ""}`} key={x.n}>
+              <span className="acSetup__n">{x.ok === true ? "✓" : x.n}</span>
+              <div>
+                <b>{x.t}</b>
+                <em>{x.d}</em>
+              </div>
+              {x.action && (
+                <button onClick={x.action}>{x.label}</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="acSetup__n2">
+          1と2が終われば文章と画像が作れます。3と4は、実際に投稿を回すときに設定してください。
+        </p>
+      </div>
+
       <div className={`acConn ${connected ? "is-on" : ""}`}>
         <span className="acConn__d" />
         <div>
@@ -795,6 +1348,9 @@ function SettingsView({ pushLog }) {
           <button className="acGhost" onClick={runRetry} disabled={running}>
             失敗した依頼を再実行
           </button>
+          <button className="acGhost" onClick={checkX}>
+            自動投稿の状態
+          </button>
           <button className="acGhost" onClick={() => callBudget({ action: "usage" })}>
             利用状況を見る
           </button>
@@ -803,6 +1359,75 @@ function SettingsView({ pushLog }) {
           </button>
           <span>生成されない・メールが来ないときは、まずここを押してください。</span>
         </div>
+
+        {xstat && (
+          <div className={`acX ${xstat["接続"] ? "is-on" : ""}`}>
+            <p className="acX__k">
+              <span className="acX__d" />
+              X（旧Twitter）への自動投稿
+              <button onClick={() => setXstat(null)}>閉じる</button>
+            </p>
+            <p className="acX__s">
+              {xstat["接続"]
+                ? `接続できています（@${xstat["アカウント"] || "取得済み"}）。予約した時刻になると自動で投稿されます。`
+                : xstat["msg"]}
+            </p>
+            {!xstat["接続"] && (
+              <>
+                <div className="acXCost">
+                  <b>先に知っておいてください</b>
+                  Xの無料枠は2026年2月に廃止され、新規は従量課金のみです。最低$5のチャージが必要で、
+                  投稿1件$0.015、<b>リンクを含む投稿は$0.20</b>（約30円）かかります。
+                  note誘導のようなリンク付き投稿を毎日出すなら、月1,000円前後を見込んでください。
+                  <br />
+                  費用をかけたくない場合は、下の「朝のまとめメール」で十分運用できます。
+                </div>
+
+                <ol className="acSteps acX__l">
+                  <li>
+                    <b>console.x.com</b> を開き、プロジェクトとアプリを作成します。
+                  </li>
+                  <li>
+                    アプリの「User authentication settings」で
+                    <b> App permissions を Read and write</b> に変更して保存します。
+                  </li>
+                  <li>
+                    <b>そのあとで</b>「Keys and tokens」を開き、4つの値を発行します。
+                    <em>順番が逆だと、読み取り専用のトークンになり投稿できません。</em>
+                  </li>
+                  <li>「Credits」から$5以上をチャージします。</li>
+                  <li>下の欄に4つを貼り付けて「登録して確認」を押します。</li>
+                </ol>
+
+                <div className="acXForm">
+                  {[
+                    ["ck", "API Key"],
+                    ["cs", "API Key Secret"],
+                    ["at", "Access Token"],
+                    ["as", "Access Token Secret"],
+                  ].map(([k, label]) => (
+                    <label key={k}>
+                      <span>{label}</span>
+                      <input
+                        type="password"
+                        value={xkeys[k]}
+                        onChange={(e) => setXkeys({ ...xkeys, [k]: e.target.value })}
+                        placeholder="貼り付け"
+                      />
+                    </label>
+                  ))}
+                  <button className="acAdd" onClick={saveX} disabled={xsaving}>
+                    {xsaving ? "確認中..." : "登録して確認"}
+                  </button>
+                </div>
+              </>
+            )}
+            <p className="acX__n">
+              未設定でも予約は使えます。その場合、時刻になると本文がメールで届き、
+              ワンタップで投稿画面が開くリンクが付きます。
+            </p>
+          </div>
+        )}
 
         {usage2 && (
           <div className="acUse">
@@ -1779,6 +2404,362 @@ function inferSettings(texts) {
 }
 
 
+
+
+/* ============ 分析CSVの取り込み（API課金ゼロ） ============ */
+
+/** 各SNSのCSVで使われる列名を、こちらの項目に対応づけます */
+const CSV_MAP = {
+  post_id: ["post id", "tweet id", "投稿id", "id", "ツイートid", "video id", "動画id", "コンテンツ"],
+  投稿日時: ["date", "time", "日付", "投稿日", "投稿日時", "公開日", "作成日", "post time", "published"],
+  本文: ["post text", "tweet text", "投稿文", "本文", "テキスト", "キャプション", "title", "動画のタイトル", "タイトル", "content"],
+  表示回数: ["impressions", "インプレッション", "表示回数", "views", "再生回数", "video views", "リーチ", "reach", "表示"],
+  いいね: ["likes", "いいね", "いいね数", "like count", "high fives"],
+  "保存・RT": ["reposts", "retweets", "リポスト", "リツイート", "保存", "saves", "bookmarks", "ブックマーク", "shares", "シェア", "共有"],
+  返信: ["replies", "返信", "コメント", "comments", "リプライ"],
+  クリック: ["url clicks", "link clicks", "リンククリック", "クリック", "clicks", "プロフィールへのアクセス", "profile visits"],
+};
+
+function normHeader(h) {
+  return String(h || "").toLowerCase().replace(/[\s"'（）()]/g, "").trim();
+}
+
+/** 列名から、どの項目かを判定します */
+function matchColumn(header) {
+  const h = normHeader(header);
+  if (!h) return null;
+  for (const key of Object.keys(CSV_MAP)) {
+    for (const cand of CSV_MAP[key]) {
+      const c = normHeader(cand);
+      if (h === c || h.indexOf(c) >= 0) return key;
+    }
+  }
+  return null;
+}
+
+/** CSVを配列に分解します（引用符・改行に対応） */
+function parseCsvText(text) {
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let q = false;
+  const t = String(text).replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) {
+      if (c === '"') {
+        if (t[i + 1] === '"') { cur += '"'; i++; }
+        else q = false;
+      } else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === "," || c === "\t") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((v) => String(v).trim()));
+}
+
+/** 数値に変換します（1,234 や 12% にも対応） */
+function toNum(v) {
+  const n = Number(String(v || "").replace(/[,%\s円]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * 分析CSVを読み取り、実績の行に変換します。
+ * 列名は自動で判別するので、どのSNSのCSVでもそのまま入れられます。
+ */
+function importAnalyticsCsv(text, account, media) {
+  const rows = parseCsvText(text);
+  if (rows.length < 2) return { ok: false, error: "データが見つかりませんでした。CSVファイルをご確認ください。" };
+
+  // 見出し行を探します（対応づけできる列がいちばん多い行）
+  let headerAt = 0;
+  let best = 0;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const hit = rows[i].filter((h) => matchColumn(h)).length;
+    if (hit > best) { best = hit; headerAt = i; }
+  }
+  if (best < 2) {
+    return { ok: false, error: "列名を読み取れませんでした。分析画面から書き出したCSVをそのままお使いください。" };
+  }
+
+  const header = rows[headerAt];
+  const cols = header.map((h) => matchColumn(h));
+  const out = [];
+  const seen = {};
+
+  for (let i = headerAt + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const o = { アカウント: account, 媒体: media, メモ: "CSV取込" };
+    cols.forEach((k, ci) => {
+      if (!k) return;
+      const v = r[ci];
+      if (v === undefined) return;
+      if (k === "post_id" || k === "投稿日時" || k === "本文") {
+        if (!o[k]) o[k] = String(v).trim();
+      } else {
+        o[k] = Math.max(o[k] || 0, toNum(v));
+      }
+    });
+    if (!o.本文 && !o.post_id) continue;
+    if (!o.表示回数 && !o.いいね && !o["保存・RT"]) continue;
+    if (!o.post_id) {
+      o.post_id = "CSV_" + (o.投稿日時 || "") + "_" + String(o.本文 || "").slice(0, 12);
+    }
+    if (seen[o.post_id]) continue;
+    seen[o.post_id] = 1;
+    out.push(o);
+  }
+
+  if (!out.length) return { ok: false, error: "数値のある行が見つかりませんでした。" };
+  return { ok: true, rows: out, columns: cols.filter(Boolean) };
+}
+
+
+/* ============ アナリティクスCSVの取り込み ============ */
+
+const COL_MAP = [
+  { key: "表示回数", pats: [/インプレッション/, /表示/, /impression/i, /view/i, /reach/i, /リーチ/] },
+  { key: "いいね", pats: [/いいね/, /like/i, /♡/] },
+  { key: "保存・RT", pats: [/リポスト/, /リツイート/, /保存/, /repost/i, /retweet/i, /share/i, /シェア/, /bookmark/i] },
+  { key: "返信", pats: [/返信/, /コメント/, /reply|replies/i, /comment/i] },
+  { key: "クリック", pats: [/クリック/, /click/i, /プロフィールへ/] },
+  { key: "投稿日時", pats: [/日付/, /日時/, /時刻/, /date/i, /time/i, /created/i] },
+  { key: "本文", pats: [/本文/, /テキスト/, /投稿/, /text/i, /content/i, /caption/i, /タイトル/, /title/i] },
+  { key: "post_id", pats: [/^id$/i, /投稿id/i, /post.?id/i, /tweet.?id/i, /動画id/i, /video.?id/i] },
+];
+
+/** ヘッダー行から、どの列が何かを推測します */
+function guessColumns(header) {
+  const map = {};
+  header.forEach((h, i) => {
+    const t = String(h || "").trim();
+    if (!t) return;
+    for (const c of COL_MAP) {
+      if (map[c.key] !== undefined) continue;
+      if (c.pats.some((re) => re.test(t))) {
+        map[c.key] = i;
+        break;
+      }
+    }
+  });
+  return map;
+}
+
+/** CSV／TSV／表の貼り付けを、実績データに変換します */
+function parsePerfPaste(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { rows: [], map: {}, error: "" };
+
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { rows: [], map: {}, error: "見出し行とデータ行が必要です。" };
+
+  // 区切り文字を判定します（タブ優先＝スプレッドシートからの貼り付け）
+  const sep = lines[0].indexOf("\t") >= 0 ? "\t" : ",";
+  const split = (l) => {
+    if (sep === "\t") return l.split("\t");
+    const out = [];
+    let cur = "";
+    let q = false;
+    for (let i = 0; i < l.length; i++) {
+      const c = l[i];
+      if (q) {
+        if (c === '"') {
+          if (l[i + 1] === '"') { cur += '"'; i++; } else q = false;
+        } else cur += c;
+      } else if (c === '"') q = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  };
+
+  const header = split(lines[0]).map((x) => x.replace(/^"|"$/g, "").trim());
+  const map = guessColumns(header);
+  const hasNum = ["表示回数", "いいね", "保存・RT", "返信", "クリック"].some((k) => map[k] !== undefined);
+  if (!hasNum) {
+    return { rows: [], map: map, error: "数値の列（インプレッション・いいね など）が見つかりませんでした。見出し行ごと貼り付けてください。" };
+  }
+
+  const num = (v) => {
+    const n = String(v || "").replace(/[^\d.-]/g, "");
+    return n ? Math.round(Number(n)) : 0;
+  };
+  const rows = [];
+  for (let i = 1; i < lines.length && rows.length < 300; i++) {
+    const c = split(lines[i]).map((x) => x.replace(/^"|"$/g, "").trim());
+    if (c.every((x) => !x)) continue;
+    const r = {
+      post_id: map.post_id !== undefined ? c[map.post_id] : "",
+      投稿日時: map.投稿日時 !== undefined ? c[map.投稿日時] : "",
+      本文: map.本文 !== undefined ? c[map.本文] : "",
+      表示回数: num(map.表示回数 !== undefined ? c[map.表示回数] : 0),
+      いいね: num(map.いいね !== undefined ? c[map.いいね] : 0),
+      "保存・RT": num(map["保存・RT"] !== undefined ? c[map["保存・RT"]] : 0),
+      返信: num(map.返信 !== undefined ? c[map.返信] : 0),
+      クリック: num(map.クリック !== undefined ? c[map.クリック] : 0),
+    };
+    if (!r.post_id) r.post_id = "P" + (r.投稿日時 || i) + "_" + String(r.本文).slice(0, 20);
+    if (r.表示回数 || r.いいね || r["保存・RT"] || r.返信 || r.クリック) rows.push(r);
+  }
+  return { rows: rows, map: map, error: rows.length ? "" : "数値のある行が見つかりませんでした。" };
+}
+
+/* ============ 実績から「伸びる型」を学ぶ（ブラウザ内・無料） ============ */
+
+/** 1投稿の特徴を数値化します */
+function postFeatures(text) {
+  const t = String(text || "");
+  const lines = t.split("\n");
+  const first = (lines.find((l) => l.trim()) || "").trim();
+  return {
+    文字数: t.replace(/\s/g, "").length,
+    行数: lines.length,
+    空行: lines.filter((l) => !l.trim()).length,
+    冒頭文字数: first.length,
+    冒頭に数字: /\d/.test(first) ? 1 : 0,
+    冒頭が問い: /[?？]/.test(first) ? 1 : 0,
+    絵文字: (t.match(EMOJI_RE2) || []).length,
+    ハッシュタグ: (t.match(/#[^\s#]+/g) || []).length,
+    リンク: /https?:\/\//.test(t) ? 1 : 0,
+    問いかけ: (t.match(/[?？]/g) || []).length,
+    数字の量: (t.match(/\d+/g) || []).length,
+  };
+}
+
+/** 反応率を出します（表示回数がある場合はそれで割ります） */
+function engagement(p) {
+  const react = Number(p.いいね || 0) + Number(p["保存・RT"] || 0) * 2 + Number(p.返信 || 0) * 3 + Number(p.クリック || 0) * 2;
+  const imp = Number(p.表示回数 || 0);
+  return imp > 0 ? (react / imp) * 100 : react;
+}
+
+const FEATURE_LABEL = {
+  文字数: ["長め", "短め", "文字数"],
+  行数: ["行数が多い", "行数が少ない", "行数"],
+  空行: ["余白が多い", "余白が少ない", "空行"],
+  冒頭文字数: ["1行目が長い", "1行目が短い", "1行目の長さ"],
+  冒頭に数字: ["1行目に数字を入れる", "1行目に数字を入れない", "冒頭の数字"],
+  冒頭が問い: ["1行目を問いで始める", "1行目を問いで始めない", "冒頭の問い"],
+  絵文字: ["絵文字を使う", "絵文字を控える", "絵文字"],
+  ハッシュタグ: ["ハッシュタグを多めに", "ハッシュタグを少なめに", "ハッシュタグ"],
+  リンク: ["リンクを入れる", "リンクを入れない", "リンク"],
+  問いかけ: ["問いかけを増やす", "問いかけを減らす", "問いかけ"],
+  数字の量: ["具体的な数字を多く", "数字を控える", "数字の量"],
+};
+
+/**
+ * 実績のある投稿を、反応の良い上位と下位に分けて比べます。
+ * 差が大きい特徴だけを「学んだこと」として返します。
+ */
+function learnFromPerf(rows, account) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account) && String(p.本文 || "").length > 20)
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => ({ ...p, f: postFeatures(p.本文), e: engagement(p) }));
+
+  if (list.length < 6) {
+    return { ready: false, count: list.length, need: 6 - list.length, insights: [], best: null };
+  }
+
+  list.sort((a, b) => b.e - a.e);
+  const n = Math.max(2, Math.round(list.length / 3));
+  const top = list.slice(0, n);
+  const bottom = list.slice(-n);
+  const avg = (arr, k) => arr.reduce((s2, x) => s2 + (x.f[k] || 0), 0) / arr.length;
+
+  const insights = [];
+  Object.keys(FEATURE_LABEL).forEach((k) => {
+    const a = avg(top, k);
+    const b = avg(bottom, k);
+    if (a === 0 && b === 0) return;
+    const base = Math.max(a, b, 0.01);
+    const diff = (a - b) / base;
+    if (Math.abs(diff) < 0.25) return; // 差が小さいものは無視します
+    const L = FEATURE_LABEL[k];
+    insights.push({
+      key: k,
+      label: L[2],
+      advice: diff > 0 ? L[0] : L[1],
+      top: Math.round(a * 10) / 10,
+      bottom: Math.round(b * 10) / 10,
+      strength: Math.round(Math.abs(diff) * 100),
+    });
+  });
+  insights.sort((a, b) => b.strength - a.strength);
+
+  return {
+    ready: true,
+    count: list.length,
+    insights: insights.slice(0, 5),
+    best: top[0],
+    avgTop: Math.round(top.reduce((s2, x) => s2 + x.e, 0) / top.length * 100) / 100,
+    avgBottom: Math.round(bottom.reduce((s2, x) => s2 + x.e, 0) / bottom.length * 100) / 100,
+  };
+}
+
+/** 時間帯・曜日ごとの成績を出します */
+function analyzeTiming(rows, account) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account))
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => {
+      const d = new Date(String(p.投稿日時 || "").replace(/-/g, "/"));
+      return { ...p, e: engagement(p), h: isNaN(d) ? -1 : d.getHours(), w: isNaN(d) ? -1 : d.getDay() };
+    });
+  if (list.length < 4) return null;
+
+  const byHour = {};
+  const byDay = {};
+  list.forEach((x) => {
+    if (x.h >= 0) {
+      const band = x.h < 6 ? "深夜" : x.h < 11 ? "朝" : x.h < 15 ? "昼" : x.h < 19 ? "夕方" : "夜";
+      (byHour[band] = byHour[band] || []).push(x.e);
+    }
+    if (x.w >= 0) {
+      const w = ["日", "月", "火", "水", "木", "金", "土"][x.w];
+      (byDay[w] = byDay[w] || []).push(x.e);
+    }
+  });
+  const agg = (o) =>
+    Object.keys(o)
+      .map((k) => ({ k: k, n: o[k].length, avg: Math.round((o[k].reduce((a, b) => a + b, 0) / o[k].length) * 100) / 100 }))
+      .filter((x) => x.n >= 2)
+      .sort((a, b) => b.avg - a.avg);
+  const hours = agg(byHour);
+  const days = agg(byDay);
+  return { hours: hours, days: days, best: { hour: hours[0], day: days[0] } };
+}
+
+/** 上位・下位の投稿を返します */
+function rankPosts(rows, account, n) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account) && String(p.本文 || "").length > 5)
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => ({ ...p, e: engagement(p) }))
+    .sort((a, b) => b.e - a.e);
+  return { top: list.slice(0, n || 5), bottom: list.slice(-(n || 5)).reverse(), all: list };
+}
+
+/** 学んだことを、AIへの指示文にします */
+function learnToBrief(l, timing, best) {
+  if (!l || !l.ready || !l.insights.length) return "";
+  let t =
+    `過去${l.count}件の実績から分かった傾向：` +
+    l.insights.map((x) => `${x.advice}（伸びた投稿の平均${x.top}に対し、伸びなかった投稿は${x.bottom}）`).join("／") +
+    "。この傾向を今回の制作に反映すること。ただし内容の質を犠牲にしないこと。";
+  if (timing && timing.best && timing.best.hour) {
+    t += `／反応が良い時間帯は「${timing.best.hour.k}」${timing.best.day ? `、曜日は「${timing.best.day.k}」` : ""}。`;
+  }
+  if (best && best.本文) {
+    t += `／最も反応が良かった投稿の書き出しは「${String(best.本文).split("\n")[0].slice(0, 40)}」。この型を参考にすること（文章の流用はしないこと）。`;
+  }
+  return t;
+}
+
 /* ============ 投稿スケジュール ============ */
 const DAYS = ["月", "火", "水", "木", "金", "土", "日"];
 
@@ -2201,6 +3182,7 @@ function Studio({ pushLog }) {
   const [moreCtx, setMoreCtx] = useState(false);
   const [qmode, setQmode] = useState("eco");
   const [usage, setUsage] = useState(null);
+  const [perf, setPerf] = useState([]);
   const [themes, setThemes] = useState([]);
   const [themeing, setThemeing] = useState(false);
   const [reviseFor, setReviseFor] = useState(null);
@@ -2337,6 +3319,8 @@ function Studio({ pushLog }) {
       L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
       L.push(`【テーマ】${theme}`);
       if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
+      const lb = learnToBrief(learned, timing, learned.best);
+      if (lb) L.push(`【実績から学んだこと】${lb}`);
       L.push(`【品質モード】${(MODES.find((m) => m.id === qmode) || MODES[1]).label}`);
       L.push(`【納品パッケージ】${pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}`);
       L.push(`【画像生成】${wantImages ? "あり" : "なし"}`);
@@ -2543,6 +3527,18 @@ function Studio({ pushLog }) {
     },
     [refs, getSched, theme]
   );
+
+  /* 投稿実績を読み込み、学習した傾向を制作条件に反映します */
+  useEffect(() => {
+    if (!endpoint.isGas) return;
+    fetch(`${endpoint.url}?action=perf`)
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.perf)) setPerf(d.perf); })
+      .catch(() => {});
+  }, [endpoint.isGas, endpoint.url]);
+
+  const learned = useMemo(() => learnFromPerf(perf, acct ? acct.name : ""), [perf, acct]);
+  const timing = useMemo(() => analyzeTiming(perf, acct ? acct.name : ""), [perf, acct]);
 
   /** AIにテーマと要点を提案させます */
   const suggestThemes = useCallback(async (auto) => {
@@ -2764,7 +3760,8 @@ function Studio({ pushLog }) {
           { n: 1, l: "運用設計", s: "何をどこにどれだけ" },
           { n: 2, l: "お手本分析", s: "文体を読み取る" },
           { n: 3, l: "制作", s: "条件を詰めて生成" },
-          { n: 4, l: "投稿予約", s: "キューに積む" },
+          { n: 4, l: "プレビュー", s: "確認して直す" },
+          { n: 5, l: "投稿予約", s: "キューに積む" },
         ].map((s) => (
           <button
             key={s.n}
@@ -2776,12 +3773,19 @@ function Studio({ pushLog }) {
                 setTimeout(() => setFlash(null), 4000);
                 return;
               }
+              if (s.n === 5 && !approved) {
+                setStep(4);
+                setFlash({ ok: false, msg: "先にSTEP4で成果物を確認し、「この内容で進む」を押してください。" });
+                setTimeout(() => setFlash(null), 5000);
+                return;
+              }
               setStep(s.n);
             }}
           >
             <span className="stStep__n">{step > s.n ? <Sic name="check" size={15} /> : s.n}</span>
             <span><b>{s.l}</b><em>{s.s}</em></span>
             {!plan && s.n > 1 && <span className="stStep__lock">未</span>}
+            {plan && s.n === 5 && !approved && <span className="stStep__lock">未</span>}
           </button>
         ))}
       </div>
@@ -3500,6 +4504,39 @@ function Studio({ pushLog }) {
                 </>
               )}
 
+              {learned.ready && learned.insights.length > 0 && (
+                <div className="stLearn">
+                  <p className="stLearn__k">
+                    <Sic name="spark" size={15} />
+                    実績{learned.count}件から学んだ傾向を、今回の制作に反映します
+                  </p>
+                  <ul className="stLearn__l">
+                    {learned.insights.map((x) => (
+                      <li key={x.key}>
+                        <b>{x.advice}</b>
+                        <em>
+                          伸びた {x.top} ／ 伸びず {x.bottom}
+                        </em>
+                        <span className="stLearn__bar">
+                          <i style={{ width: `${Math.min(100, x.strength)}%` }} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="stLearn__n">
+                    反応の良い上位と下位を比べて、差の大きい特徴だけを抽出しています。
+                    投稿の数値を入れるほど精度が上がります。
+                  </p>
+                </div>
+              )}
+
+              {!learned.ready && perf.length > 0 && (
+                <p className="stLearnNote">
+                  実績があと {learned.need} 件たまると、伸びた投稿の傾向を自動で反映できるようになります。
+                  アカウント管理から、投稿の数値を入力してください。
+                </p>
+              )}
+
               <div className="stQ">
                 <p className="stQ__k">品質モード（費用が変わります）</p>
                 <div className="stModes">
@@ -3652,21 +4689,6 @@ function Studio({ pushLog }) {
                     <div className="stPrev__b">{preview.text}</div>
                     <div className="stPrev__f">
                       <span className="stPrev__c">{preview.text.replace(/\s/g, "").length} 文字</span>
-                      <button
-                        className="stPrev__use"
-                        onClick={() => {
-                          const body = preview.text
-                            .replace(/^[\s\S]*?■ そのまま投稿できる本文\n?/, "")
-                            .replace(/^下記をコピーして[^\n]*\n/, "")
-                            .replace(/【案\s*\d+】/g, "")
-                            .trim();
-                          setTheme(body.slice(0, 3000));
-                          setFlash({ ok: true, msg: "本文を下の予約フォームに入れました。必要なら手直ししてください。" });
-                          setTimeout(() => setFlash(null), 4000);
-                        }}
-                      >
-                        この本文で予約する ↓
-                      </button>
                       <button className="stRevBtn" onClick={() => setReviseFor(preview.url)}>
                         修正を依頼する
                       </button>
@@ -3715,6 +4737,47 @@ function Studio({ pushLog }) {
                   </div>
                 )}
               </div>
+
+
+              <div className="stFoot">
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(3)}>← 制作に戻る</button>
+                  <span>確認</span>
+                  {approved ? "確認済みです。投稿予約に進めます。" : "内容を読んで、問題なければ右のボタンを押してください。"}
+                </p>
+                <button
+                  className="stSend"
+                  disabled={!preview}
+                  onClick={() => {
+                    const body = preview.text
+                      .replace(/^[\s\S]*?■ そのまま投稿できる本文\n?/, "")
+                      .replace(/^下記をコピーして[^\n]*\n/, "")
+                      .replace(/【案\s*\d+】/g, "")
+                      .trim();
+                    setApproved({ url: preview.url, text: body });
+                    setTheme(body.slice(0, 3000));
+                    setStep(5);
+                  }}
+                >
+                  <Sic name="check" size={16} />
+                  {preview ? "この内容で進む" : "先に読み込んでください"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ============== STEP 5：投稿予約 ============== */}
+          {step === 5 && (
+            <>
+              {approved && (
+                <div className="stOk">
+                  <Sic name="check" size={16} />
+                  <p>
+                    STEP4で確認した本文が入っています。必要なら手直ししてから予約してください。
+                    <a href={approved.url} target="_blank" rel="noopener noreferrer">原本を開く →</a>
+                  </p>
+                </div>
+              )}
 
               <Field label="投稿先">
                 <div className="stChips">
@@ -3810,8 +4873,8 @@ function Studio({ pushLog }) {
                         成果物を開く →
                       </a>
                     )}
-                    <button className="stRevBtn" onClick={() => setReviseFor(watch.url)}>
-                      修正を依頼する
+                    <button className="stRevBtn" onClick={() => { setStep(4); setTimeout(loadPreview, 300); }}>
+                      確認する →
                     </button>
                   </>
                 ) : watch.status === "エラー" ? (
@@ -5711,4 +6774,21 @@ const CSS_DASHBOARD = `
 
 .stEst{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--bg);border-radius:11px;padding:11px 14px;margin-bottom:14px;}
 .stEst__k{font-family:var(--sans);font-size:10px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:3px 10px;}
+
+.stOk{display:flex;align-items:flex-start;gap:11px;background:#E9F7F1;border:1px solid #B9E4D2;border-radius:12px;padding:13px 16px;margin-bottom:16px;}
+.stOk svg{color:#0E9F73;margin-top:3px;flex-shrink:0;}
+.stOk p{font-size:12.5px;line-height:1.85;color:#0B6B4F;}
+.stOk a{font-weight:700;text-decoration:underline;margin-left:8px;}
+
+.stLearn{background:#F7F4FE;border:1px solid #DCD0F7;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stLearn__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:12px;}
+.stLearn__k svg{color:var(--ai);}
+.stLearn__l{display:grid;gap:8px;}
+.stLearn__l li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;background:var(--white);border-radius:11px;padding:10px 13px;align-items:center;}
+.stLearn__l b{font-size:13px;font-weight:700;}
+.stLearn__l em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.stLearn__bar{grid-column:1/-1;height:4px;border-radius:999px;background:var(--bg);overflow:hidden;}
+.stLearn__bar i{display:block;height:100%;background:var(--ai);border-radius:999px;}
+.stLearn__n{font-size:11px;line-height:1.85;color:var(--muted);margin-top:11px;}
+.stLearnNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-bottom:18px;}
 `;
