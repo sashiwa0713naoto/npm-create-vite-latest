@@ -3187,6 +3187,9 @@ function Studio({ pushLog }) {
   const [themeing, setThemeing] = useState(false);
   const [reviseFor, setReviseFor] = useState(null);
   const [reviseText, setReviseText] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [approved, setApproved] = useState(null);
   const [sched, setSched] = useState({});
   const [schedPf, setSchedPf] = useState("x");
   const [refSlot, setRefSlot] = useState("common");
@@ -3578,6 +3581,35 @@ function Studio({ pushLog }) {
       setThemeing(false);
     }
   }, [endpoint, acct, ctx, pf, fmt, prodSlot, getSched, autoSet, pushLog]);
+
+  /** 直近で納品されたものを読み込んで、プレビューします */
+  const loadPreview = useCallback(async () => {
+    if (!endpoint.isGas) {
+      setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      return;
+    }
+    setPreviewing(true);
+    setFlash(null);
+    try {
+      const r = await fetch(`${endpoint.url}?action=jobs`);
+      const d = await r.json();
+      const done = (d.jobs || []).find(
+        (j) => j["状態"] === "完了" && String(j["成果物URL"]).indexOf("http") === 0
+      );
+      if (!done) {
+        setFlash({ ok: false, msg: "完了した成果物がまだありません。先に制作を依頼してください。" });
+        return;
+      }
+      const r2 = await fetch(`${endpoint.url}?action=doc&url=${encodeURIComponent(done["成果物URL"])}`);
+      const d2 = await r2.json();
+      if (d2 && d2.ok) setPreview({ url: done["成果物URL"], text: String(d2.text || "").slice(0, 12000) });
+      else setFlash({ ok: false, msg: (d2 && d2.error) || "成果物を読み込めませんでした。" });
+    } catch (e) {
+      setFlash({ ok: false, msg: "読み込みに失敗しました。接続設定をご確認ください。" });
+    } finally {
+      setPreviewing(false);
+    }
+  }, [endpoint]);
 
   /** 依頼したあと、完成するまで状態を追いかけます */
   const watchJob = useCallback(
