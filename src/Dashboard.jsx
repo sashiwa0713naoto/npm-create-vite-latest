@@ -2760,6 +2760,65 @@ function learnToBrief(l, timing, best) {
   return t;
 }
 
+
+/** 媒体ごとの投稿・予約画面 */
+const POST_TARGET = {
+  x: { name: "X", url: "https://x.com/compose/post", how: "リンクから本文入りで開けます。そのまま投稿できます", auto: true },
+  threads: { name: "Threads", url: "https://www.threads.net/", how: "本文入りで開き、⋯ → スケジュールで予約します", auto: false },
+  instagram: { name: "Instagram", url: "https://business.facebook.com/latest/composer", how: "Meta Business Suiteで日時を指定して予約します", auto: false },
+  tiktok: { name: "TikTok", url: "https://www.tiktok.com/tiktokstudio/upload", how: "動画をアップし、公開設定でスケジュールを選びます", auto: false },
+  youtube: { name: "YouTube", url: "https://studio.youtube.com/", how: "YouTube Studioで日時を指定します", auto: false },
+  yt_shorts: { name: "YouTube Shorts", url: "https://studio.youtube.com/", how: "YouTube Studioで日時を指定します", auto: false },
+  note: { name: "note", url: "https://note.com/notes/new", how: "本文を貼り付け、公開設定で日時を指定します", auto: false },
+};
+
+
+/* ============ 動画の道具立て（3つから選ぶ） ============ */
+const TOOLSETS = [
+  {
+    id: "google",
+    label: "Google AI Studio",
+    cost: "従量課金（少額）",
+    tone: "#2456C8",
+    one: true,
+    voice: "Gemini の音声生成",
+    visual: "Veo（音声つきで生成）",
+    edit: "つなぐだけ",
+    note: "映像と音声を同時に生成できるため、編集作業がほぼ不要です。1つの画面で完結します。",
+    caution:
+      "生成物の商用利用は認められていますが、第三者の権利を侵害していないかはご自身での確認が必要です。無料で使える範囲は変わることがあるため、料金は公式でご確認ください。",
+    how: "1本のプロンプトから、音声つきの映像がそのまま出てきます。カットが複数あるときは、つなぐだけです。",
+  },
+  {
+    id: "vrew",
+    label: "Vrew 1本",
+    cost: "無料〜月1,100円前後",
+    tone: "#0E9F73",
+    one: true,
+    voice: "500種類以上のAI音声",
+    visual: "内蔵の商用可素材＋生成画像",
+    edit: "同じ画面で完結",
+    note: "台本を貼るだけで、音声・字幕・素材選び・書き出しまで1つの画面で終わります。日本語UIです。",
+    caution:
+      "無料プランは書き出し回数やAI音声に上限があります。商用利用の範囲は情報が分かれているため、公式の利用規約を必ずご確認ください。",
+    how: "台本を貼り付けると、文ごとに素材が自動で割り当てられます。声を選んで書き出すだけです。",
+  },
+  {
+    id: "free",
+    label: "完全無料（分業）",
+    cost: "0円",
+    tone: "#7C5CD6",
+    one: false,
+    voice: "VOICEVOX",
+    visual: "Pexels・Pixabay ＋ 生成画像",
+    edit: "DaVinci Resolve 無料版",
+    note: "3つのソフトを使い分けます。手間はかかりますが、費用は一切かかりません。",
+    caution:
+      "VOICEVOXはキャラクターごとに規約が異なります。商用で使う声の規約を必ずご確認ください。",
+    how: "音声・素材・編集を別々に行います。時間はかかりますが、仕上がりを細かく調整できます。",
+  },
+];
+
 /* ============ 投稿スケジュール ============ */
 const DAYS = ["月", "火", "水", "木", "金", "土", "日"];
 
@@ -3009,8 +3068,12 @@ function recommend({ industry, goal, resource, budgetVideo, want }) {
     return { ...p, score: s };
   }).sort((a, b) => b.score - a.score);
 
-  const limit = wish ? Math.max(res.max, Math.min(wish.length, 4)) : res.max;
-  const picked = scored.slice(0, limit).map((p, i) => {
+  // 選んだ媒体は必ず全部入れます。選んでいない場合だけ、使える時間から本数を決めます
+  const chosen = wish
+    ? wish.map((id) => scored.find((p) => p.id === id)).filter(Boolean)
+    : scored.slice(0, res.max);
+
+  const picked = chosen.map((p, i) => {
     const fmt = pickFormat(p, goal, res);
     return {
       id: p.id,
@@ -3170,6 +3233,7 @@ function Studio({ pushLog }) {
   const [refVideo, setRefVideo] = useState("");
   const [refVideoNote, setRefVideoNote] = useState("");
   const [wantImages, setWantImages] = useState(false);
+  const [toolset, setToolset] = useState("google");
   const [deliverBest, setDeliverBest] = useState(true);
   const [notePaid, setNotePaid] = useState(true);
   const [noteToX, setNoteToX] = useState(true);
@@ -3325,6 +3389,10 @@ function Studio({ pushLog }) {
       const lb = learnToBrief(learned, timing, learned.best);
       if (lb) L.push(`【実績から学んだこと】${lb}`);
       L.push(`【品質モード】${(MODES.find((m) => m.id === qmode) || MODES[1]).label}`);
+      if (pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") {
+        const t = TOOLSETS.find((x) => x.id === toolset) || TOOLSETS[0];
+        L.push(`【道具立て】${t.label}／【音声】${t.voice}／【映像】${t.visual}／【編集】${t.edit}`);
+      }
       L.push(`【納品パッケージ】${pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}`);
       L.push(`【画像生成】${wantImages ? "あり" : "なし"}`);
       if (refImages.length) {
@@ -4635,6 +4703,16 @@ function Studio({ pushLog }) {
                     ? ["記事本文（無料枠・有料枠つき）", "タイトル案5つ", "サムネイル画像", "差し込み画像2枚", "X誘導投稿3案"]
                     : pfId === "x"
                     ? ["投稿本文", "続きのスレッド3〜5投稿", "添付画像1枚"]
+                    : pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube"
+                    ? [
+                        "秒数つきのカット割り",
+                        "ナレーション原稿（音声合成にそのまま貼れます）",
+                        "カットごとの映像生成プロンプト（英語）",
+                        "テロップ文言",
+                        "BGM・効果音の指定",
+                        "サムネイル案3つ",
+                        "編集の手順",
+                      ]
                     : ["本文", "ハッシュタグ案・フック案"]
                   ).map((t) => (
                     <li key={t}>
@@ -4651,6 +4729,80 @@ function Studio({ pushLog }) {
                   </span>
                 </label>
               </div>
+
+              {(pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") && (
+                <div className="stVideo">
+                  <p className="stVideo__k">
+                    動画をどう作りますか
+                    <em>選んだ道具に合わせた指示書が出ます</em>
+                  </p>
+
+                  <div className="stTools">
+                    {TOOLSETS.map((t) => (
+                      <button
+                        key={t.id}
+                        className={`stTool ${toolset === t.id ? "is-on" : ""}`}
+                        style={{ "--t": t.tone }}
+                        onClick={() => setToolset(t.id)}
+                      >
+                        <b>{t.label}</b>
+                        <span className="stTool__c">{t.cost}</span>
+                        <dl>
+                          <div><dt>音声</dt><dd>{t.voice}</dd></div>
+                          <div><dt>映像</dt><dd>{t.visual}</dd></div>
+                          <div><dt>編集</dt><dd>{t.edit}</dd></div>
+                        </dl>
+                      </button>
+                    ))}
+                  </div>
+
+                  {(() => {
+                    const t = TOOLSETS.find((x) => x.id === toolset) || TOOLSETS[0];
+                    return (
+                      <>
+                        <p className="stVideo__h">{t.note}</p>
+                        {t.one && (
+                          <p className="stVideo__one">
+                            <Sic name="check" size={15} />
+                            この道具なら、音声・映像・編集が<b>1つの画面で完結します</b>。{t.how}
+                          </p>
+                        )}
+                        <ol className="stVideo__l">
+                          {(toolset === "google"
+                            ? [
+                                ["プロンプトを貼る", "納品された「Veo用プロンプト」をGoogle AI Studioに貼り付けます。セリフも含まれているので、音声つきの映像がそのまま出ます"],
+                                ["気になれば直す", "「もう少し明るく」のように言葉で伝えれば、その場で作り直せます"],
+                                ["つなぐ", "カットが複数あるときだけ、順番につなぎます。テロップが必要なら足します"],
+                                ["書き出す", "縦型か横型かを確認して書き出します"],
+                              ]
+                            : toolset === "vrew"
+                            ? [
+                                ["台本を貼る", "納品された「Vrew用台本」を貼り付けます。文ごとに区切られているので、そのまま入ります"],
+                                ["声を選ぶ", "500種類以上から選びます。話す速さも調整できます"],
+                                ["素材を確認する", "文ごとに素材が自動で割り当てられます。合わないものだけ差し替えます"],
+                                ["書き出す", "字幕は自動で付きます。そのまま書き出せます"],
+                              ]
+                            : [
+                                ["音声をつくる", "読み上げ原稿をVOICEVOXに貼り付けて書き出します"],
+                                ["素材を集める", "カットごとの英語キーワードで無料素材サイトから探します"],
+                                ["並べる", "編集タイムラインの表どおりにDaVinci Resolveで並べます"],
+                                ["BGMを付けて書き出す", "指定された雰囲気に合う商用可の音源を選びます"],
+                              ]
+                          ).map(([t2, d2]) => (
+                            <li key={t2}>
+                              <b>{t2}</b>
+                              {d2}
+                            </li>
+                          ))}
+                        </ol>
+                        <p className="stVideo__n">
+                          <b>注意：</b>{t.caution}
+                        </p>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
 
               {pfId === "note" && (
                 <div className="stNote">
@@ -4801,6 +4953,28 @@ function Studio({ pushLog }) {
           {/* ============== STEP 5：投稿予約 ============== */}
           {step === 5 && (
             <>
+              {(() => {
+                const tg = POST_TARGET[pfId] || {};
+                return (
+                  <div className={`stTarget ${tg.auto ? "is-auto" : ""}`}>
+                    <p className="stTarget__k">
+                      {tg.auto ? "自動投稿できます" : "予約のしかた"}
+                      <em>{pf.label}</em>
+                    </p>
+                    <p className="stTarget__h">
+                      {tg.auto
+                        ? "接続設定でXの自動投稿を設定していれば、予約した時刻に自動で投稿されます。未設定の場合は、時刻になると本文入りのリンクがメールで届きます。"
+                        : `${tg.how}。予約すると、時刻になると本文と手順がメールで届きます。`}
+                    </p>
+                    {tg.url && (
+                      <a href={tg.url} target="_blank" rel="noopener noreferrer" className="stTarget__a">
+                        {tg.name} の投稿画面を開く →
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
+
               {approved && (
                 <div className="stOk">
                   <Sic name="check" size={16} />
@@ -6823,4 +6997,40 @@ const CSS_DASHBOARD = `
 .stLearn__bar i{display:block;height:100%;background:var(--ai);border-radius:999px;}
 .stLearn__n{font-size:11px;line-height:1.85;color:var(--muted);margin-top:11px;}
 .stLearnNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-bottom:18px;}
+
+.stTarget{background:var(--bg);border-radius:14px;padding:15px;margin-bottom:16px;border-left:4px solid #9BA3B1;}
+.stTarget.is-auto{border-left-color:#0E9F73;background:#E9F7F1;}
+.stTarget__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.stTarget__k em{font-style:normal;font-size:10.5px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 10px;}
+.stTarget__h{font-size:12px;line-height:1.9;color:var(--muted);margin-bottom:9px;}
+.stTarget.is-auto .stTarget__h{color:#0B6B4F;}
+.stTarget__a{font-size:12px;font-weight:700;color:var(--ai);}
+
+.stVideo{background:#FBF2E1;border:1px solid #F0DEB4;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stVideo__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#8C5A00;margin-bottom:9px;}
+.stVideo__k em{font-style:normal;font-size:10px;color:#fff;background:#E08A1F;border-radius:999px;padding:2px 10px;}
+.stVideo__h{font-size:12px;line-height:1.95;color:#7A5A12;margin-bottom:12px;}
+.stVideo__h b{font-weight:700;}
+.stVideo__l{counter-reset:v;display:grid;gap:9px;}
+.stVideo__l li{counter-increment:v;position:relative;padding-left:32px;font-size:11.5px;line-height:1.8;color:#7A5A12;}
+.stVideo__l li::before{content:counter(v);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:#E08A1F;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.stVideo__l b{display:block;font-size:12.5px;color:#5C4200;margin-bottom:2px;}
+.stVideo__n{font-size:11px;line-height:1.85;color:#8C5A00;background:var(--white);border-radius:10px;padding:11px 13px;margin-top:12px;}
+
+.stTools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px;}
+.stTool{background:var(--white);border:1.5px solid var(--line);border-radius:14px;padding:13px;text-align:left;transition:all .2s;}
+.stTool:hover{border-color:var(--t);}
+.stTool.is-on{border-color:var(--t);box-shadow:0 0 0 3px color-mix(in srgb,var(--t) 15%,transparent);}
+.stTool b{display:block;font-size:14px;font-weight:900;color:var(--t);}
+.stTool__c{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:9px;}
+.stTool dl{display:grid;gap:5px;}
+.stTool dl > div{display:grid;grid-template-columns:34px 1fr;gap:6px;}
+.stTool dt{font-size:9.5px;color:var(--muted);}
+.stTool dd{font-size:11px;line-height:1.6;}
+@media (max-width:820px){.stTools{grid-template-columns:1fr;}}
+
+.stVideo__one{display:flex;align-items:flex-start;gap:9px;background:var(--white);border-radius:11px;padding:12px 14px;margin-bottom:12px;font-size:12px;line-height:1.85;color:#5C4200;}
+.stVideo__one svg{color:#0E9F73;margin-top:3px;flex-shrink:0;}
+.stVideo__one b{font-weight:700;}
+.stTool.is-on b::after{content:"";}
 `;
