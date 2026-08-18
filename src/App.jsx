@@ -50,6 +50,80 @@ const BUSINESSES = [
       ],
       deliver: ["業務棚卸しレポート", "AI社員の設計書", "ナレッジ基盤の構築", "稼働環境の実装", "運用手順書"],
       span: "初期構築 約2〜4週間 ／ 納品後3ヶ月の伴走",
+      steps: [
+        {
+          n: "01",
+          t: "業務をうかがう",
+          d: "「どの業務を」「今どうやっているか」の2つだけ、まず教えてください。専門知識は要りません。人が動く順番をそのまま話していただければ、こちらで工程に分解します。",
+          s: "30分の打ち合わせ1回",
+        },
+        {
+          n: "02",
+          t: "設計書をお出しする",
+          d: "工程の分解、AI社員の構成、検査基準、費用、効果の見立てを1つの文書にしてお渡しします。ここまでは無料です。中身を見てから判断していただけます。",
+          s: "2〜3営業日",
+        },
+        {
+          n: "03",
+          t: "つくって置く",
+          d: "AI社員を実装し、御社の環境で動く状態にします。使い方は画面をお見せしながらご説明します。難しい操作はありません。",
+          s: "2〜4週間",
+        },
+        {
+          n: "04",
+          t: "動かしながら直す",
+          d: "実際に使うと、想定と違う場面が必ず出ます。3ヶ月間は一緒に直し続けます。判断基準を足したり、任せる範囲を広げたりしながら、御社の形に寄せていきます。",
+          s: "納品後3ヶ月",
+        },
+      ],
+      canDo: [
+        {
+          t: "問い合わせに、24時間以内に返る",
+          d: "受信したメールを読み、内容を分類し、過去のやり取りを踏まえた返信案まで作ります。人は目を通して送るだけです。深夜に届いた相談も、翌朝には返信案が用意されています。",
+          before: "1件20分 × 1日10件",
+          after: "確認だけ、1件1分",
+        },
+        {
+          t: "見積が、その場で出る",
+          d: "ヒアリング内容を渡すと、作業範囲・工数・費用・期間を算出します。価格表と過去案件の判断基準を覚えさせるので、担当者による差が出ません。",
+          before: "作成1時間＋確認待ち半日",
+          after: "5分で下書き",
+        },
+        {
+          t: "資料が、日をまたがない",
+          d: "議事録から報告書、数字から提案資料まで、形式を覚えさせれば同じ品質で出続けます。担当者が休んでも止まりません。",
+          before: "1本4時間",
+          after: "30分の確認",
+        },
+        {
+          t: "判断の基準が、社内に残る",
+          d: "AI社員をつくる過程で、ベテランの頭の中にあった判断基準を言語化します。これは引き継ぎ資料としても使えます。人が辞めても、判断の型は残ります。",
+          before: "属人化",
+          after: "文書化された基準",
+        },
+      ],
+      faq: [
+        {
+          q: "AIに詳しくないのですが、大丈夫ですか",
+          a: "はい。むしろ、AIのことは知らなくて構いません。必要なのは「今どうやっているか」を説明できることだけです。そこから先は当社が設計します。",
+        },
+        {
+          q: "うちの業務は特殊なので、AIには無理では",
+          a: "特殊であるほど、判断基準を言語化する価値があります。ただし、すべてを任せられるわけではありません。最初の打ち合わせで「任せられる部分」と「人が残すべき部分」を正直にお伝えします。",
+        },
+        {
+          q: "情報が外に漏れませんか",
+          a: "扱う情報の範囲は、設計の段階で明確に決めます。社外に出したくない情報は、AIに渡さない設計にできます。どこまで渡すかは御社が決めていただけます。",
+        },
+        {
+          q: "間違った答えを出したらどうするのですか",
+          a: "そのために検査工程を必ず挟みます。また「情報が足りないときは推測せず人に戻す」という停止条件を設計に組み込みます。AIが勝手に判断して外に出す作りにはしません。",
+        },
+        {
+          q: "効果はどれくらい出ますか",
+          a: "業務によります。設計書の段階で、削減できる時間の見立てと、その算出根拠をお出しします。数字の根拠を確認してから判断してください。根拠のない効果は書きません。",
+        },
+      ],
     },
   },
   {
@@ -942,6 +1016,56 @@ function HomePage({ go }) {
         </div>
       </section>
 
+      {/* AI社員とは */}
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap">
+          <Head
+            en="WHAT IS AN AI EMPLOYEE"
+            jp="AI社員とは、何か"
+            note="チャットAIとの違いは、覚えていること・判断できること・止まれることの3つです。"
+          />
+          <div className="sw-what3">
+            {[
+              {
+                n: "01",
+                t: "御社のことを、覚えている",
+                d: "商品知識、価格の判断基準、断るべき条件、過去のやり取り。毎回説明しなくても、前提を持った状態で仕事を始めます。",
+                x: "チャットAIは、毎回ゼロから説明が必要です",
+              },
+              {
+                n: "02",
+                t: "工程をつないで、最後まで進む",
+                d: "受け取る → 分類する → 調べる → 下書きを作る → 検査する。1回の依頼で、決めた範囲の最後まで進みます。",
+                x: "チャットAIは、1往復ごとに指示が要ります",
+              },
+              {
+                n: "03",
+                t: "分からないときは、止まる",
+                d: "情報が足りない、判断が重い、社外に出す。あらかじめ決めた場面では推測せず、人に戻します。",
+                x: "チャットAIは、分からなくても答えを作ります",
+              },
+            ].map((w, i) => (
+              <Reveal key={w.n} delay={i * 80} className="sw-w3">
+                <span className="sw-mono sw-w3__n">{w.n}</span>
+                <h3>{w.t}</h3>
+                <p className="sw-w3__d">{w.d}</p>
+                <p className="sw-w3__x">{w.x}</p>
+              </Reveal>
+            ))}
+          </div>
+
+          <div className="sw-w3__foot">
+            <p>
+              つまりAI社員とは、<b>道具ではなく、担当者です。</b>
+              ツールをお渡しして終わりではなく、実務が回りはじめるところまでを設計・実装します。
+            </p>
+            <a className="sw-btn sw-btn--line" href="#/business/agent">
+              導入の流れを見る
+            </a>
+          </div>
+        </div>
+      </section>
+
       {/* Before / After */}
       <section className="sw-sec sw-sec--white">
         <div className="sw-wrap">
@@ -1201,7 +1325,15 @@ function BusinessDetailPage({ slug, go }) {
       {b.detail.steps && (
         <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
           <div className="sw-wrap sw-narrow">
-            <Head en="OPERATION" jp="運用の流れ" note="最初の設計から、毎日の配信、月次の改善まで一貫してお引き受けします。" />
+            <Head
+              en={b.code === "AGENT" ? "HOW TO START" : "OPERATION"}
+              jp={b.code === "AGENT" ? "導入の流れ" : "運用の流れ"}
+              note={
+                b.code === "AGENT"
+                  ? "専門知識は要りません。「今どうやっているか」を話していただくところから始まります。"
+                  : "最初の設計から、毎日の配信、月次の改善まで一貫してお引き受けします。"
+              }
+            />
             <div className="sw-ops">
               {b.detail.steps.map((st, i) => (
                 <Reveal key={st.n} delay={i * 70} className="sw-op">
@@ -1214,6 +1346,53 @@ function BusinessDetailPage({ slug, go }) {
                     <p className="sw-mono sw-op__s">{st.s}</p>
                     <p className="sw-op__d">{st.d}</p>
                   </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {b.detail.canDo && (
+        <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
+          <div className="sw-wrap">
+            <Head
+              en="WHAT CHANGES"
+              jp="導入すると、こうなります"
+              note="実際にお引き受けすることの多い業務です。どれも「人がゼロになる」のではなく、人の仕事が確認だけになります。"
+            />
+            <div className="sw-cando">
+              {b.detail.canDo.map((c, i) => (
+                <Reveal key={c.t} delay={i * 70} className="sw-cd">
+                  <h3>{c.t}</h3>
+                  <p className="sw-cd__d">{c.d}</p>
+                  <div className="sw-cd__ba">
+                    <div className="sw-cd__b">
+                      <span>これまで</span>
+                      {c.before}
+                    </div>
+                    <span className="sw-cd__ar">→</span>
+                    <div className="sw-cd__a">
+                      <span>導入後</span>
+                      {c.after}
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {b.detail.faq && (
+        <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
+          <div className="sw-wrap sw-narrow">
+            <Head en="QUESTIONS" jp="よくいただくご質問" note="" />
+            <div className="sw-bfaq">
+              {b.detail.faq.map((f, i) => (
+                <Reveal key={f.q} delay={i * 50} className="sw-bfaq__i">
+                  <p className="sw-bfaq__q">{f.q}</p>
+                  <p className="sw-bfaq__a">{f.a}</p>
                 </Reveal>
               ))}
             </div>
@@ -2275,4 +2454,37 @@ const CSS = `
 .sw-op__s{font-size:11px;color:var(--t);font-weight:700;margin-bottom:10px;}
 .sw-op__d{font-size:13.5px;line-height:2.05;color:var(--muted);}
 @media (max-width:600px){.sw-op{grid-template-columns:44px 1fr;gap:14px;}.sw-op__n{width:36px;height:36px;font-size:11px;}.sw-op__line{top:40px;}}
+
+/* 導入すると、こうなります */
+.sw-cando{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;}
+.sw-cd{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:26px 28px;transition:transform .3s,box-shadow .3s;}
+.sw-cd:hover{transform:translateY(-4px);box-shadow:0 28px 50px -34px rgba(26,34,51,.45);}
+.sw-cd h3{font-size:20px;font-weight:900;line-height:1.5;margin-bottom:12px;}
+.sw-cd__d{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:20px;}
+.sw-cd__ba{display:flex;align-items:stretch;gap:12px;}
+.sw-cd__b,.sw-cd__a{flex:1;border-radius:13px;padding:13px 15px;font-size:14px;font-weight:700;line-height:1.5;}
+.sw-cd__b{background:var(--bg);color:var(--muted);}
+.sw-cd__a{background:var(--s);color:var(--t);}
+.sw-cd__b span,.sw-cd__a span{display:block;font-size:10px;font-weight:400;margin-bottom:5px;opacity:.75;}
+.sw-cd__ar{display:flex;align-items:center;font-size:18px;color:var(--t);font-weight:700;}
+@media (max-width:560px){.sw-cd__ba{flex-direction:column;}.sw-cd__ar{transform:rotate(90deg);justify-content:center;}}
+
+/* 事業ページのFAQ */
+.sw-bfaq{display:grid;gap:12px;}
+.sw-bfaq__i{background:var(--bg);border-radius:16px;padding:22px 24px;}
+.sw-bfaq__q{font-size:16px;font-weight:900;line-height:1.6;margin-bottom:9px;position:relative;padding-left:26px;}
+.sw-bfaq__q::before{content:"Q";position:absolute;left:0;top:0;font-family:var(--mono);font-size:14px;color:var(--t);}
+.sw-bfaq__a{font-size:14px;line-height:2.05;color:var(--muted);padding-left:26px;}
+
+/* AI社員とは */
+.sw-what3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;}
+.sw-w3{background:var(--bg);border-radius:20px;padding:28px;position:relative;}
+.sw-w3__n{display:block;font-size:11px;color:var(--sig);font-weight:700;margin-bottom:14px;letter-spacing:.14em;}
+.sw-w3 h3{font-size:20px;font-weight:900;line-height:1.5;margin-bottom:12px;}
+.sw-w3__d{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:16px;}
+.sw-w3__x{font-size:12.5px;line-height:1.85;color:var(--muted);background:var(--white);border-radius:11px;padding:12px 14px;position:relative;padding-left:34px;}
+.sw-w3__x::before{content:"≠";position:absolute;left:14px;top:11px;font-size:14px;font-weight:700;color:#B9C0CB;}
+.sw-w3__foot{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:28px;padding:24px 28px;background:var(--bg);border-radius:18px;flex-wrap:wrap;}
+.sw-w3__foot p{font-size:15px;line-height:1.95;color:var(--muted);flex:1;min-width:260px;}
+.sw-w3__foot b{color:var(--ink);font-weight:900;}
 `;
