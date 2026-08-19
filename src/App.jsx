@@ -152,10 +152,38 @@ const BUSINESSES = [
           en: "DOCUMENT",
           icon: "pen",
           items: [
-            { n: "SEO記事・オウンドメディア", d: "検索意図の分析から構成設計、本文執筆まで（2,000〜3,000字）", p: "12,000円／本" },
-            { n: "営業資料・提案書", d: "訴求の整理から構成、本文まで。スライド原稿の形でお渡しします", p: "30,000円／式" },
-            { n: "マニュアル・手順書", d: "口頭で説明している手順を、読んで分かる文書に整えます", p: "40,000円／式" },
-            { n: "定例レポート", d: "毎月・毎週の報告書を、決まった書式で自動生成します", p: "月20,000円〜" },
+            { n: "SEO記事・オウンドメディア", d: "検索意図の分析から構成設計、本文執筆まで（2,000〜3,000字）", p: "12,000円／本",
+              detail: {
+                flow: ["キーワードと検索意図を分析", "上位記事にない切り口を探す", "見出し構成を設計", "本文を執筆", "薬機法・景表法の観点で検査"],
+                get: ["本文（2,000〜3,000字）", "タイトル案5つ", "ディスクリプション", "見出し構成表", "内部リンクの提案"],
+                need: "テーマまたは狙いたいキーワード。自社の強みが分かる資料があれば精度が上がります。",
+                time: "3営業日",
+                note: "月4本以上のご依頼で単価が下がります。継続の場合、過去記事との重複も自動で避けます。",
+              } },
+            { n: "営業資料・提案書", d: "訴求の整理から構成、本文まで。スライド原稿の形でお渡しします", p: "30,000円／式",
+              detail: {
+                flow: ["提案先と決裁者を確認", "訴求の優先順位を整理", "ストーリーを設計", "スライドごとの原稿を執筆", "想定質問と回答を用意"],
+                get: ["スライド原稿（15〜25枚分）", "各スライドの話し方メモ", "想定質問と回答10問", "1枚要約版"],
+                need: "商品・サービスの内容、価格、提案先の業種と規模。過去の提案書があれば形式を合わせます。",
+                time: "5営業日",
+                note: "スライドのデザイン制作は含みません。原稿をPowerPointやGoogleスライドに貼る形でお使いいただきます。",
+              } },
+            { n: "マニュアル・手順書", d: "口頭で説明している手順を、読んで分かる文書に整えます", p: "40,000円／式",
+              detail: {
+                flow: ["現場の手順をうかがう", "抜けている前提を洗い出す", "作業単位に分解", "手順書として執筆", "はじめての人が読める言葉に調整"],
+                get: ["手順書本文", "作業チェックリスト", "つまずきやすい箇所の注意書き", "更新用のひな形"],
+                need: "口頭説明の録音、または箇条書きのメモ。実際の画面のスクリーンショットがあると精度が上がります。",
+                time: "7営業日",
+                note: "「言わなくても分かるだろう」という前提こそ、新人がつまずく箇所です。そこを掘り起こすところに価値があります。",
+              } },
+            { n: "定例レポート", d: "毎月・毎週の報告書を、決まった書式で自動生成します", p: "月20,000円〜",
+              detail: {
+                flow: ["現在の報告書の形式を確認", "データの受け取り方を決める", "書式を固定", "毎回同じ品質で自動生成", "数字の異常値には注記を付ける"],
+                get: ["定例レポート（月次または週次）", "前回との差分の要約", "気になる数字への注記"],
+                need: "現在お使いの報告書1部と、元データ（スプレッドシートやCSV）。",
+                time: "初回5営業日、以降は自動",
+                note: "データの形式が毎回変わる場合は、事前に整える工程が別途必要になります。",
+              } },
           ],
         },
         {
@@ -392,6 +420,7 @@ const ROUTES = {
   blog: { title: "記事｜株式会社SASHIWA" },
   company: { title: "会社概要｜株式会社SASHIWA" },
   contact: { title: "お問い合わせ｜株式会社SASHIWA" },
+  staff: { title: "社員専用｜株式会社SASHIWA" },
   dashboard: { title: "CONTROL｜株式会社SASHIWA" },
 };
 
@@ -524,34 +553,63 @@ function Icon({ name, size = 28 }) {
 function RingChara({ tone = "#E0402F", gem = "#FFE3DF", id = "a", delay = "0s", scale = 1 }) {
   return (
     <svg
-      viewBox="0 0 128 152"
+      viewBox="0 0 150 170"
       className="sw-ring"
       style={{ animationDelay: delay, transform: `scale(${scale})` }}
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id={`rg-${id}`} x1="0" y1="0" x2="0.4" y2="1">
+        <linearGradient id={`rg-${id}`} x1="0" y1="0" x2="0.35" y2="1">
           <stop offset="0%" stopColor={tone} />
-          <stop offset="100%" stopColor={tone} stopOpacity="0.72" />
+          <stop offset="100%" stopColor={tone} stopOpacity="0.78" />
         </linearGradient>
+        <radialGradient id={`ch-${id}`} cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor={tone} stopOpacity=".38" />
+          <stop offset="100%" stopColor={tone} stopOpacity="0" />
+        </radialGradient>
       </defs>
-      {/* 宝石＝AIコア */}
-      <g className="sw-ring__gem">
-        <path d="M64 8 L80 27 L64 46 L48 27 Z" fill={gem} stroke={tone} strokeWidth="3.4" strokeLinejoin="round" />
-        <path d="M48 27 H80 M64 8 L64 46" stroke={tone} strokeWidth="1.8" opacity=".45" />
+
+      {/* 足 */}
+      <g className="sw-ring__legs">
+        <ellipse cx="60" cy="150" rx="12" ry="8" fill={tone} />
+        <ellipse cx="90" cy="150" rx="12" ry="8" fill={tone} />
+        <rect x="55" y="132" width="10" height="14" rx="5" fill={tone} />
+        <rect x="85" y="132" width="10" height="14" rx="5" fill={tone} />
       </g>
-      {/* 輪＝人と人をつなぐ */}
-      <circle cx="64" cy="98" r="38" fill="none" stroke={`url(#rg-${id})`} strokeWidth="17" strokeLinecap="round" />
-      {/* 顔 */}
-      <circle cx="64" cy="98" r="29.5" fill="#FFFFFF" opacity=".96" />
-      <circle cx="53" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
-      <circle cx="75" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
-      <circle cx="45" cy="105" r="4.6" fill={tone} opacity=".28" />
-      <circle cx="83" cy="105" r="4.6" fill={tone} opacity=".28" />
-      <path d="M56 106 q8 8 16 0" stroke="#1A2233" strokeWidth="3.4" fill="none" strokeLinecap="round" />
-      {/* 手 */}
-      <path d="M20 100 q-9 -5 -11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
-      <path d="M108 100 q9 -5 11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
+
+      {/* 腕（体の後ろから出す） */}
+      <g className="sw-ring__arms">
+        <path d="M32 96 q-14 4 -18 16" stroke={tone} strokeWidth="9" fill="none" strokeLinecap="round" />
+        <path d="M118 96 q14 4 18 16" stroke={tone} strokeWidth="9" fill="none" strokeLinecap="round" />
+        <circle cx="13" cy="115" r="8" fill={tone} />
+        <circle cx="137" cy="115" r="8" fill={tone} />
+      </g>
+
+      {/* 体＝指輪の輪 */}
+      <circle cx="75" cy="88" r="44" fill={`url(#rg-${id})`} />
+      <circle cx="75" cy="88" r="34" fill="#FFFFFF" />
+
+      {/* 頬 */}
+      <circle cx="53" cy="95" r="6.5" fill={`url(#ch-${id})`} />
+      <circle cx="97" cy="95" r="6.5" fill={`url(#ch-${id})`} />
+
+      {/* 目 */}
+      <g className="sw-ring__eyes">
+        <ellipse cx="63" cy="85" rx="4.6" ry="5.6" fill="#1A2233" />
+        <ellipse cx="87" cy="85" rx="4.6" ry="5.6" fill="#1A2233" />
+        <circle cx="64.8" cy="83" r="1.7" fill="#FFFFFF" />
+        <circle cx="88.8" cy="83" r="1.7" fill="#FFFFFF" />
+      </g>
+
+      {/* 口 */}
+      <path d="M67 98 q8 7 16 0" stroke="#1A2233" strokeWidth="3.2" fill="none" strokeLinecap="round" />
+
+      {/* 頭の宝石＝AIコア */}
+      <g className="sw-ring__gem">
+        <path d="M75 8 L88 24 L75 40 L62 24 Z" fill={gem} stroke={tone} strokeWidth="3.4" strokeLinejoin="round" />
+        <path d="M62 24 H88 M75 8 L75 40" stroke={tone} strokeWidth="1.6" opacity=".4" />
+        <path d="M75 40 L75 46" stroke={tone} strokeWidth="3.4" strokeLinecap="round" />
+      </g>
     </svg>
   );
 }
@@ -656,6 +714,139 @@ function Marquee({ items, reverse }) {
         ))}
       </div>
     </div>
+  );
+}
+
+
+function MenuItem({ it }) {
+  const [open, setOpen] = useState(false);
+  const has = !!it.detail;
+  return (
+    <div className={`sw-menu__i ${has ? "is-click" : ""} ${open ? "is-open" : ""}`}>
+      <div
+        className="sw-menu__h"
+        onClick={() => has && setOpen((v) => !v)}
+        role={has ? "button" : undefined}
+        tabIndex={has ? 0 : undefined}
+        onKeyDown={(e) => { if (has && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setOpen((v) => !v); } }}
+      >
+        <div>
+          <p className="sw-menu__n">
+            {it.n}
+            {it.prep && <em className="sw-bz__prep">準備中</em>}
+          </p>
+          <p className="sw-menu__d">{it.d}</p>
+        </div>
+        <p className="sw-mono sw-menu__p">{it.p}</p>
+        {has && <span className="sw-menu__ar">＋</span>}
+      </div>
+
+      {has && open && (
+        <div className="sw-menu__x">
+          <div className="sw-menu__g">
+            <div>
+              <p className="sw-menu__k">つくる手順</p>
+              <ol className="sw-menu__flow">
+                {it.detail.flow.map((f) => <li key={f}>{f}</li>)}
+              </ol>
+            </div>
+            <div>
+              <p className="sw-menu__k">お渡しするもの</p>
+              <ul className="sw-menu__get">
+                {it.detail.get.map((g) => <li key={g}>{g}</li>)}
+              </ul>
+            </div>
+          </div>
+          <dl className="sw-menu__meta">
+            <div><dt>ご用意いただくもの</dt><dd>{it.detail.need}</dd></div>
+            <div><dt>納期</dt><dd>{it.detail.time}</dd></div>
+          </dl>
+          {it.detail.note && <p className="sw-menu__note">{it.detail.note}</p>}
+          <a className="sw-btn sw-btn--line sw-menu__cta" href="#/contact">この内容で相談する</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Accordion({ q, a, delay }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Reveal delay={delay} className={`sw-bfaq__i ${open ? "is-open" : ""}`}>
+      <div
+        className="sw-bfaq__q"
+        onClick={() => setOpen((v) => !v)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+      >
+        <span className="sw-bfaq__mk">Q</span>
+        <span>{q}</span>
+        <span className="sw-bfaq__ar">＋</span>
+      </div>
+      {open && (
+        <p className="sw-bfaq__a">
+          <span>A</span>
+          <span>{a}</span>
+        </p>
+      )}
+    </Reveal>
+  );
+}
+
+function StaffPage() {
+  const tools = [
+    { t: "全社ダッシュボード", d: "稼働中のAI社員、処理件数、直近の履歴を1画面で確認します。", ic: "grid" },
+    { t: "AI社員 設計", d: "お客様の業務から、設計書一式を5部署が同時に作成します。", ic: "robot" },
+    { t: "案件ボード", d: "問い合わせから納品までを追います。取りこぼしを防ぎます。", ic: "check" },
+    { t: "制作スタジオ", d: "文章・画像・動画を、運用設計から投稿予約まで一貫して作ります。", ic: "studio" },
+    { t: "アカウント管理", d: "投稿先の管理と、投稿の実績を確認します。", ic: "sns" },
+    { t: "成果物ライブラリ", d: "これまでに作ったものを、条件つきで探して開けます。", ic: "doc" },
+  ];
+  return (
+    <>
+      <section className="sw-hero sw-hero--sub">
+        <div className="sw-wrap">
+          <p className="sw-mono sw-hero__en">FOR STAFF</p>
+          <h1 className="sw-hero__t">社員専用</h1>
+          <p className="sw-hero__lede">SASHIWAの業務システムです。社内の担当者のみご利用いただけます。</p>
+        </div>
+      </section>
+
+      <section className="sw-sec sw-sec--white">
+        <div className="sw-wrap sw-narrow">
+          <div className="sw-staff__card">
+            <p className="sw-mono sw-staff__k">CONTROL CONSOLE</p>
+            <h2>コントロールコンソール</h2>
+            <p className="sw-staff__d">
+              AI社員の稼働状況、案件の進行、制作、投稿の管理をここから行います。入室にはパスコードが必要です。
+            </p>
+            <a className="sw-btn sw-btn--fill" href="#/dashboard">コンソールに入る</a>
+            <p className="sw-staff__note">パスコードをお忘れの場合は、管理者にお問い合わせください。</p>
+          </div>
+
+          <div className="sw-staff__grid">
+            {tools.map((t) => (
+              <div className="sw-staff__i" key={t.t}>
+                <span className="sw-staff__ic"><Icon name={t.ic} size={18} /></span>
+                <div>
+                  <b>{t.t}</b>
+                  <em>{t.d}</em>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="sw-staff__warn">
+            <p>
+              <b>取り扱いの注意</b>
+              このシステムには、お客様の業務情報と契約情報が含まれます。画面の共有、外部への転載はしないでください。
+              共用の端末では、作業後に必ず退室してください。
+            </p>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -1390,10 +1581,7 @@ function BusinessDetailPage({ slug, go }) {
             <Head en="QUESTIONS" jp="よくいただくご質問" note="" />
             <div className="sw-bfaq">
               {b.detail.faq.map((f, i) => (
-                <Reveal key={f.q} delay={i * 50} className="sw-bfaq__i">
-                  <p className="sw-bfaq__q">{f.q}</p>
-                  <p className="sw-bfaq__a">{f.a}</p>
-                </Reveal>
+                <Accordion key={f.q} q={f.q} a={f.a} delay={i * 50} />
               ))}
             </div>
           </div>
@@ -1415,16 +1603,7 @@ function BusinessDetailPage({ slug, go }) {
                 </div>
                 <div className="sw-menu__l">
                   {m.items.map((it) => (
-                    <div className="sw-menu__i" key={it.n}>
-                      <div>
-                        <p className="sw-menu__n">
-                          {it.n}
-                          {it.prep && <em className="sw-bz__prep">準備中</em>}
-                        </p>
-                        <p className="sw-menu__d">{it.d}</p>
-                      </div>
-                      <p className="sw-mono sw-menu__p">{it.p}</p>
-                    </div>
+                    <MenuItem key={it.n} it={it} />
                   ))}
                 </div>
               </Reveal>
@@ -1828,6 +2007,7 @@ function Footer({ go }) {
               SASHIWA<span>Inc.</span>
             </p>
             <p className="sw-ft__tag">社員は、全員AI。</p>
+            <a className="sw-ft__staff" href="#/staff">社員専用</a>
             <p className="sw-ft__sub">株式会社SASHIWA｜オンライン相談 全国対応</p>
           </div>
           <div className="sw-ft__cols">
@@ -1896,6 +2076,7 @@ export default function App() {
   else if (route.page === "flow") body = <FlowPage go={go} />;
   else if (route.page === "blog") body = <BlogPage go={go} />;
   else if (route.page === "company") body = <CompanyPage go={go} />;
+  else if (route.page === "staff") body = <StaffPage />;
   else if (route.page === "contact") body = <ContactPage />;
   else body = <HomePage go={go} />;
 
@@ -2472,9 +2653,14 @@ const CSS = `
 /* 事業ページのFAQ */
 .sw-bfaq{display:grid;gap:12px;}
 .sw-bfaq__i{background:var(--bg);border-radius:16px;padding:22px 24px;}
-.sw-bfaq__q{font-size:16px;font-weight:900;line-height:1.6;margin-bottom:9px;position:relative;padding-left:26px;}
-.sw-bfaq__q::before{content:"Q";position:absolute;left:0;top:0;font-family:var(--mono);font-size:14px;color:var(--t);}
-.sw-bfaq__a{font-size:14px;line-height:2.05;color:var(--muted);padding-left:26px;}
+.sw-bfaq__i{cursor:pointer;transition:background .25s;}
+.sw-bfaq__i:hover{background:var(--s);}
+.sw-bfaq__q{display:flex;align-items:flex-start;gap:12px;font-size:16px;font-weight:900;line-height:1.6;}
+.sw-bfaq__mk{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;background:var(--t);color:#fff;font-family:var(--mono);font-size:12px;margin-top:1px;}
+.sw-bfaq__ar{margin-left:auto;flex-shrink:0;color:var(--muted);font-size:18px;transition:transform .25s;line-height:1.4;}
+.sw-bfaq__i.is-open .sw-bfaq__ar{transform:rotate(45deg);}
+.sw-bfaq__a{display:flex;gap:12px;font-size:14px;line-height:2.05;color:var(--muted);margin-top:12px;}
+.sw-bfaq__a > span:first-child{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;background:var(--bg);color:var(--muted);font-family:var(--mono);font-size:12px;}
 
 /* AI社員とは */
 .sw-what3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;}
@@ -2487,4 +2673,55 @@ const CSS = `
 .sw-w3__foot{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:28px;padding:24px 28px;background:var(--bg);border-radius:18px;flex-wrap:wrap;}
 .sw-w3__foot p{font-size:15px;line-height:1.95;color:var(--muted);flex:1;min-width:260px;}
 .sw-w3__foot b{color:var(--ink);font-weight:900;}
+
+/* 制作メニューの詳細 */
+.sw-menu__i.is-click{cursor:pointer;}
+.sw-menu__h{display:flex;align-items:center;gap:16px;}
+.sw-menu__h > div{flex:1;min-width:0;}
+.sw-menu__ar{flex-shrink:0;font-size:17px;color:var(--muted);transition:transform .25s;}
+.sw-menu__i.is-open .sw-menu__ar{transform:rotate(45deg);}
+.sw-menu__i.is-click:hover .sw-menu__ar{color:var(--t);}
+.sw-menu__x{margin-top:20px;padding-top:20px;border-top:1px dashed var(--line);}
+.sw-menu__g{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px;}
+@media (max-width:640px){.sw-menu__g{grid-template-columns:1fr;gap:18px;}}
+.sw-menu__k{font-size:11px;font-weight:700;color:var(--t);letter-spacing:.08em;margin-bottom:10px;}
+.sw-menu__flow{counter-reset:mf;display:grid;gap:7px;}
+.sw-menu__flow li{counter-increment:mf;position:relative;padding-left:26px;font-size:13.5px;line-height:1.8;color:var(--muted);}
+.sw-menu__flow li::before{content:counter(mf);position:absolute;left:0;top:2px;width:18px;height:18px;border-radius:50%;background:var(--s);color:var(--t);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.sw-menu__get{display:grid;gap:7px;}
+.sw-menu__get li{position:relative;padding-left:20px;font-size:13.5px;line-height:1.8;color:var(--muted);}
+.sw-menu__get li::before{content:"";position:absolute;left:2px;top:.75em;width:8px;height:2px;background:var(--t);}
+.sw-menu__meta{display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px;}
+.sw-menu__meta > div{background:var(--white);padding:12px 15px;display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:baseline;}
+@media (max-width:560px){.sw-menu__meta > div{grid-template-columns:1fr;gap:4px;}}
+.sw-menu__meta dt{font-size:11px;color:var(--muted);}
+.sw-menu__meta dd{font-size:13.5px;line-height:1.8;}
+.sw-menu__note{font-size:12.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:13px 15px;margin-bottom:16px;}
+.sw-menu__cta{display:inline-flex;}
+
+/* 社員専用 */
+.sw-staff__card{background:var(--ink);color:#fff;border-radius:24px;padding:40px;text-align:center;margin-bottom:24px;}
+.sw-staff__k{font-size:10px;letter-spacing:.2em;color:#7C8797;margin-bottom:12px;}
+.sw-staff__card h2{font-size:clamp(24px,3.4vw,32px);font-weight:900;margin-bottom:14px;}
+.sw-staff__d{font-size:14.5px;line-height:2.05;color:#B9C0CB;margin-bottom:26px;max-width:520px;margin-left:auto;margin-right:auto;}
+.sw-staff__card .sw-btn--fill{background:#fff;color:var(--ink);}
+.sw-staff__card .sw-btn--fill:hover{background:var(--sig);color:#fff;}
+.sw-staff__note{font-size:12px;color:#7C8797;margin-top:16px;}
+.sw-staff__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:11px;margin-bottom:24px;}
+.sw-staff__i{display:flex;align-items:flex-start;gap:12px;background:var(--bg);border-radius:14px;padding:16px 18px;}
+.sw-staff__ic{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:11px;background:var(--white);color:var(--sig);flex-shrink:0;}
+.sw-staff__i b{display:block;font-size:14px;font-weight:700;margin-bottom:4px;}
+.sw-staff__i em{font-style:normal;font-size:12.5px;line-height:1.8;color:var(--muted);}
+.sw-staff__warn{background:#FFF7E8;border:1px solid #F2DCAE;border-radius:14px;padding:18px 22px;}
+.sw-staff__warn b{display:block;font-size:13px;color:#8C5A00;margin-bottom:6px;}
+.sw-staff__warn p{font-size:12.5px;line-height:1.95;color:#7A5A12;}
+.sw-ft__staff{display:inline-block;font-size:11.5px;color:#7C8797;margin-top:10px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:2px;}
+.sw-ft__staff:hover{color:#fff;}
+
+.sw-ring__legs{transform-origin:75px 140px;animation:swStep 2.6s ease-in-out infinite;}
+@keyframes swStep{0%,100%{transform:translateY(0);}50%{transform:translateY(-2px);}}
+.sw-ring__arms{transform-origin:75px 100px;animation:swWave 3.2s ease-in-out infinite;}
+@keyframes swWave{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-4deg);}}
+.sw-ring__eyes{animation:swBlink 5.4s infinite;transform-origin:75px 85px;}
+@keyframes swBlink{0%,94%,100%{transform:scaleY(1);}97%{transform:scaleY(.12);}}
 `;
