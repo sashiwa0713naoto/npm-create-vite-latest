@@ -1,479 +1,6434 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import Dashboard from "./Dashboard.jsx";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 /* ============================================================================
-   株式会社SASHIWA — コーポレートサイト（複数ページ構成）
+   株式会社SASHIWA — コントロールダッシュボード（統合版）
+   配置：src/Dashboard.jsx  ← このファイル1つだけで完結します
 
-   ページ：home / business（一覧）/ business-detail（3種）/ flow / blog /
-           company / contact
-   ルーティング：URLハッシュ（例 #/business/agent）。React Router 不要、
-                 Vercel の設定変更も不要です。
+   ■ 収録内容
+     1. アカウント管理     … 投稿先アカウントの登録・編集
+     2. 接続設定           … Google Apps Script との接続
+     3. 成果物ライブラリ   … 作ったものを探して開く
+     4. 制作スタジオ       … 運用設計 → 制作 → 投稿予約
+     5. 全社ダッシュボード … 稼働状況・処理履歴・コンソール
 
-   ★ 変更禁止：Contact の WEBHOOK_URL と payload のキー
-     （client_name / client_email / message）は Make 側の規格です。
+   ■ なぜ1ファイルなのか
+   分割すると、GitHubのブラウザ編集では「先に作る側」を間違えたときに
+   ビルドが失敗します。1ファイルにまとめることで、この事故が起きません。
+   App.jsx が import するのはこのファイルだけです。
 
-   ★ 差し替え箇所
-     - POSTS：記事データ（microCMS 連携時はここを置き換え）
-     - COMPANY：「準備中」の項目
-     - STATS：実数が出たら更新
+   ■ 以前に作った Accounts.jsx / Library.jsx / Studio.jsx について
+   このファイルに統合済みなので、リポジトリに残っていても使われません。
+   削除しても、そのまま置いておいても問題ありません。
    ============================================================================ */
 
-const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv";
 
-/* ---------------------------------------------------------------- データ */
 
-const BUSINESSES = [
-  {
-    slug: "agent",
-    code: "AGENT",
-    no: "BUSINESS 01",
-    en: "AI EMPLOYEE",
-    title: "AI社員構築代行",
-    sub: "仕組みをつくって、御社に置く",
-    theme: "#E0402F",
-    soft: "#FDECEA",
-    lede: "御社の業務を処理するAI社員を設計・実装し、実務が人の手を離れて回る状態にします。",
-    price: "初期構築 30万円〜",
-    icon: "robot",
-    detail: {
-      what:
-        "社内の判断基準・商品知識・業務手順を、AIが読める形に整理します（ナレッジ基盤）。その上に、部門ごとの役割を持たせたAIエージェント＝「AI社員」を設計・実装し、実務が回りはじめるところまでを請け負います。ツールの導入やプロンプトの受け渡しでは終わりません。",
-      points: [
-        { t: "ナレッジ基盤をつくる", d: "社内の暗黙知を、AIが参照できるドキュメントに変換します。" },
-        { t: "役割を持たせて実装する", d: "部門ごとに担当と権限を定義し、エージェントとして動かします。" },
-        { t: "検査工程を必ず挟む", d: "別のAIが品質と表現リスクを確認してから、外に出します。" },
-      ],
-      plans: [
-        { n: "スモール構築", d: "業務1つ分のAI社員を設計・実装します。まず1箇所を自動化して効果を確かめたい方向け。", p: "30万円〜" },
-        { n: "標準構築", d: "部門単位で複数のAI社員と、それらをつなぐ処理の流れまで構築します。", p: "50万円〜" },
-        { n: "フル構築", d: "全社の業務棚卸しから設計・実装・稼働後の伴走までを一貫して行います。", p: "80万円〜" },
-      ],
-      deliver: ["業務棚卸しレポート", "AI社員の設計書", "ナレッジ基盤の構築", "稼働環境の実装", "運用手順書"],
-      span: "初期構築 約2〜4週間 ／ 納品後3ヶ月の伴走",
-      steps: [
-        {
-          n: "01",
-          t: "業務をうかがう",
-          d: "「どの業務を」「今どうやっているか」の2つだけ、まず教えてください。専門知識は要りません。人が動く順番をそのまま話していただければ、こちらで工程に分解します。",
-          s: "30分の打ち合わせ1回",
-        },
-        {
-          n: "02",
-          t: "設計書をお出しする",
-          d: "工程の分解、AI社員の構成、検査基準、費用、効果の見立てを1つの文書にしてお渡しします。ここまでは無料です。中身を見てから判断していただけます。",
-          s: "2〜3営業日",
-        },
-        {
-          n: "03",
-          t: "つくって置く",
-          d: "AI社員を実装し、御社の環境で動く状態にします。使い方は画面をお見せしながらご説明します。難しい操作はありません。",
-          s: "2〜4週間",
-        },
-        {
-          n: "04",
-          t: "動かしながら直す",
-          d: "実際に使うと、想定と違う場面が必ず出ます。3ヶ月間は一緒に直し続けます。判断基準を足したり、任せる範囲を広げたりしながら、御社の形に寄せていきます。",
-          s: "納品後3ヶ月",
-        },
-      ],
-      canDo: [
-        {
-          t: "問い合わせに、24時間以内に返る",
-          d: "受信したメールを読み、内容を分類し、過去のやり取りを踏まえた返信案まで作ります。人は目を通して送るだけです。深夜に届いた相談も、翌朝には返信案が用意されています。",
-          before: "1件20分 × 1日10件",
-          after: "確認だけ、1件1分",
-        },
-        {
-          t: "見積が、その場で出る",
-          d: "ヒアリング内容を渡すと、作業範囲・工数・費用・期間を算出します。価格表と過去案件の判断基準を覚えさせるので、担当者による差が出ません。",
-          before: "作成1時間＋確認待ち半日",
-          after: "5分で下書き",
-        },
-        {
-          t: "資料が、日をまたがない",
-          d: "議事録から報告書、数字から提案資料まで、形式を覚えさせれば同じ品質で出続けます。担当者が休んでも止まりません。",
-          before: "1本4時間",
-          after: "30分の確認",
-        },
-        {
-          t: "判断の基準が、社内に残る",
-          d: "AI社員をつくる過程で、ベテランの頭の中にあった判断基準を言語化します。これは引き継ぎ資料としても使えます。人が辞めても、判断の型は残ります。",
-          before: "属人化",
-          after: "文書化された基準",
-        },
-      ],
-      faq: [
-        {
-          q: "AIに詳しくないのですが、大丈夫ですか",
-          a: "はい。むしろ、AIのことは知らなくて構いません。必要なのは「今どうやっているか」を説明できることだけです。そこから先は当社が設計します。",
-        },
-        {
-          q: "うちの業務は特殊なので、AIには無理では",
-          a: "特殊であるほど、判断基準を言語化する価値があります。ただし、すべてを任せられるわけではありません。最初の打ち合わせで「任せられる部分」と「人が残すべき部分」を正直にお伝えします。",
-        },
-        {
-          q: "情報が外に漏れませんか",
-          a: "扱う情報の範囲は、設計の段階で明確に決めます。社外に出したくない情報は、AIに渡さない設計にできます。どこまで渡すかは御社が決めていただけます。",
-        },
-        {
-          q: "間違った答えを出したらどうするのですか",
-          a: "そのために検査工程を必ず挟みます。また「情報が足りないときは推測せず人に戻す」という停止条件を設計に組み込みます。AIが勝手に判断して外に出す作りにはしません。",
-        },
-        {
-          q: "効果はどれくらい出ますか",
-          a: "業務によります。設計書の段階で、削減できる時間の見立てと、その算出根拠をお出しします。数字の根拠を確認してから判断してください。根拠のない効果は書きません。",
-        },
-      ],
-    },
-  },
-  {
-    slug: "studio",
-    code: "STUDIO",
-    no: "BUSINESS 02",
-    en: "AUTO PRODUCTION",
-    title: "文書・動画 自動制作",
-    sub: "成果物そのものを、つくって納品する",
-    theme: "#2456C8",
-    soft: "#E8EEFB",
-    lede: "記事・資料・マニュアル・動画を、企画から仕上げまでAIが一貫して制作し、完成物としてお渡しします。",
-    price: "月額 4万円〜／単発 1.2万円〜",
-    icon: "studio",
-    detail: {
-      what:
-        "毎回だれかが手を動かして作っている制作物を、SASHIWAのAIエージェントが引き受けます。企画・構成の設計、本文や台本の執筆、表現上のリスク検査、体裁の整形までを一本の流れで処理し、そのまま使える完成物としてお渡しします。ライターや編集者の手配も、進捗の催促も発生しません。",
-      points: [
-        { t: "企画から仕上げまで一貫して", d: "テーマを渡すだけで、構成の設計から完成データまでが揃います。" },
-        { t: "毎月止まらない", d: "担当者の繁忙や離職で制作が止まる、という事態が起きません。" },
-        { t: "別のAIが検査する", d: "制作したAIとは別のAIが、事実関係と法令上の表現を一次スクリーニングします。" },
-      ],
-      menus: [
-        {
-          label: "文書制作",
-          en: "DOCUMENT",
-          icon: "pen",
-          items: [
-            { n: "SEO記事・オウンドメディア", d: "検索意図の分析から構成設計、本文執筆まで（2,000〜3,000字）", p: "12,000円／本" },
-            { n: "営業資料・提案書", d: "訴求の整理から構成、本文まで。スライド原稿の形でお渡しします", p: "30,000円／式" },
-            { n: "マニュアル・手順書", d: "口頭で説明している手順を、読んで分かる文書に整えます", p: "40,000円／式" },
-            { n: "定例レポート", d: "毎月・毎週の報告書を、決まった書式で自動生成します", p: "月20,000円〜" },
-          ],
-        },
-        {
-          label: "動画制作",
-          en: "VIDEO",
-          icon: "film",
-          items: [
-            { n: "縦型ショート動画", d: "企画・台本・テロップ・書き出しまで自動処理（30〜60秒）", p: "20,000円／本", prep: true },
-            { n: "解説動画", d: "横型2〜3分。スライドとナレーションを組み合わせた構成", p: "50,000円／本", prep: true },
-          ],
-        },
-      ],
-      plans: [
-        { n: "ライト", d: "文書 月4本。まずは更新を止めない状態をつくりたい方向け。", p: "40,000円／月" },
-        { n: "スタンダード", d: "文書 月8本。オウンドメディアを本格的に回す構成。", p: "72,000円／月" },
-        { n: "フル", d: "文書 月16本＋コンテンツ設計。動画も組み合わせられます。", p: "128,000円／月" },
-      ],
-      deliver: ["完成データ（Google Docs／動画ファイル）", "構成・台本原稿", "想定キーワードと訴求の整理", "月次の制作実績レポート"],
-      span: "初回納品 約1週間 ／ 以降は毎月の定期納品",
-      note:
-        "AIが生成した文章・映像には、事実の誤りが含まれる可能性があります。公開前の最終確認はお客様側で行っていただく前提です。検査工程は一次スクリーニングであり、内容の正確性を保証するものではありません。なお動画制作は、使用する音源・音声合成の商用利用条件を確認中のため、現在は事前相談のみ承っています。",
-    },
-  },
-  {
-    slug: "social",
-    code: "SOCIAL",
-    no: "BUSINESS 03",
-    en: "24/365 SOCIAL",
-    title: "SNSアカウント運用代行",
-    sub: "24時間365日、止まらずに発信する",
-    theme: "#7C5CD6",
-    soft: "#F1EDFC",
-    lede: "ネタ集めから執筆、画像、予約投稿まで。人が手を動かさなくても、毎日発信が続く状態をつくります。",
-    price: "月額 6万円〜",
-    icon: "social",
-    detail: {
-      what:
-        "SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。加えて「どの媒体に何をどれだけ出すべきか」という設計そのものもAIが提案するため、方針を一から決める必要がありません。SASHIWA自身のアカウントも、同じ仕組みで運用しています。",
-      points: [
-        { t: "運用プランをAIが設計する", d: "業種・目的・使える時間から、どの媒体にどの形式で何本出すかをAIが提案します。ゼロから決める必要はありません。" },
-        { t: "媒体ごとの仕様に沿って作る", d: "リールは冒頭1秒、TikTokは2秒、Xは1行目。媒体ごとの勝ち筋を制作条件に落とし込みます。" },
-        { t: "毎日、決まった時刻に出る", d: "深夜でも休日でも、設定した時刻に投稿が予約配信されます。ネタ切れも起きません。" },
-      ],
-      steps: [
-        { n: "01", t: "運用設計", d: "業種・目的・使える時間をうかがい、AIが媒体・形式・頻度・投稿時間・コンテンツの柱を提案します。ご一緒に調整して確定します。", s: "初回 約1週間" },
-        { n: "02", t: "アカウント設定", d: "プロフィール文、固定投稿、リンク導線を整えます。何を発信するアカウントなのかが一目で伝わる状態にします。", s: "同上" },
-        { n: "03", t: "制作と検査", d: "媒体ごとの仕様に沿って本文・画像を制作し、別のAIが表現と法令上のリスクを検査します。", s: "毎日" },
-        { n: "04", t: "配信と改善", d: "決まった時刻に自動配信。月次で伸びた投稿の傾向を分析し、翌月の方針に反映します。", s: "毎日／月次" },
-      ],
-      menus: [
-        {
-          label: "運用対象",
-          en: "PLATFORM",
-          icon: "social",
-          items: [
-            { n: "X（旧Twitter）運用", d: "1日1〜5投稿。ネタ収集・執筆・予約投稿まで自動", p: "60,000円／月" },
-            { n: "Instagram運用", d: "フィード・ストーリーズの企画から画像生成、予約投稿まで", p: "80,000円／月" },
-            { n: "note・ブログ連携", d: "SNS投稿と連動した長文記事を定期公開", p: "40,000円／月" },
-          ],
-        },
-        {
-          label: "オプション",
-          en: "OPTION",
-          icon: "pen",
-          items: [
-            { n: "返信の下書き生成", d: "受信したコメントへの返信案を毎朝まとめてお渡しします", p: "20,000円／月" },
-            { n: "月次分析レポート", d: "伸びた投稿の傾向を分析し、翌月の方針を提案", p: "20,000円／月" },
-          ],
-        },
-      ],
-      plans: [
-        { n: "シングル", d: "1アカウント・毎日1投稿。まず1つ止めずに回したい方向け。", p: "60,000円／月" },
-        { n: "マルチ", d: "3アカウント同時運用。プラットフォームをまたいで展開します。", p: "108,000円／月" },
-        { n: "フル", d: "5アカウント＋返信下書き＋月次分析レポート。", p: "168,000円／月" },
-      ],
-      deliver: ["投稿カレンダー", "投稿本文・画像データ", "返信の下書き（オプション）", "月次の分析レポート"],
-      span: "初期設計 約1週間 ／ 以降は毎日の自動投稿",
-      note:
-        "各SNSの利用規約は随時変更されます。自動投稿が規約に抵触しないかは運用開始前に確認し、変更があった場合は運用方法を見直します。フォロワーの購入は一切行いません。また、投稿の伸びは内容以外の要因にも左右されるため、フォロワー数や表示回数を保証するものではありません。アカウントの最終的な管理権限はお客様が保持します。",
-    },
-  },
-];
+/* ======================= 1. アカウント管理・接続設定 ======================= */
 
-const TASKS = [
-  { icon: "mail", t: "問い合わせ対応", d: "受信を分類し、定型は自動返信。判断が要るものだけ人へ。" },
-  { icon: "doc", t: "レポート作成", d: "各所の数字を集計し、決まった書式で自動配信。" },
-  { icon: "sns", t: "SNS投稿", d: "企画・下書き・体裁チェック・予約投稿まで自動。" },
-  { icon: "slide", t: "資料づくり", d: "提案書やセミナー資料を、構成から自動生成。" },
-  { icon: "search", t: "社内検索", d: "マニュアルや過去案件を横断検索し、根拠つきで要約。" },
-  { icon: "yen", t: "請求・経費処理", d: "書類を自動で仕分け・記録し、人は承認だけ。" },
-];
-
-const STATS = [
-  { v: 365, u: "日", label: "止まらない稼働", suffix: "" },
-  { v: 24, u: "時間", label: "依頼の受付・処理" },
-  { v: 0, u: "名", label: "人間の従業員" },
-  { v: 5, u: "体", label: "稼働中のAI社員" },
-];
-
-const MARQUEE = [
-  "SNSアカウント運用",
-  "SEO記事制作",
-  "営業資料・提案書",
-  "マニュアル作成",
-  "動画の企画・台本",
-  "問い合わせ一次対応",
-  "定例レポート生成",
-  "AI社員の設計・実装",
-  "工数とコストの試算",
-  "品質・倫理の検査",
-];
-
-const BEFORE_AFTER = [
-  { before: "問い合わせに気づくのが翌朝", after: "届いた瞬間に解析が始まる" },
-  { before: "レポートを毎週手作業で集計", after: "決まった時刻に配信されている" },
-  { before: "資料の体裁チェックで半日", after: "別のAIが自動で検査する" },
-  { before: "担当者が休むと業務が止まる", after: "24時間365日、止まらない" },
-];
-
-const AGENTS = [
-  { code: "AG-01", name: "CEO_AI", role: "統括", mission: "依頼を読み解き、担当を決める", lead: true },
-  { code: "AG-02", name: "Creative_PR_AI", role: "制作・広報", mission: "原稿・構成・デザイン方針" },
-  { code: "AG-03", name: "Engineer_DevOps_AI", role: "技術・運用", mission: "実装・技術調査・稼働監視" },
-  { code: "AG-04", name: "QA_Ethics_AI", role: "品質・倫理", mission: "成果物の検査とリスク確認" },
-  { code: "AG-05", name: "CFO_Resource_AI", role: "原価・資源", mission: "工数の試算とコスト算出" },
-];
-
-const WORKFLOWS = [
-  {
-    time: "24時間",
-    tag: "問い合わせ自動化",
-    title: "送信された瞬間に、担当が決まっている",
-    body:
-      "フォーム送信をきっかけに処理が起動。統括AIが依頼文を構造化し、必要な作業を洗い出して担当を選定します。深夜でも土日でも、待ち時間はありません。",
-    steps: ["受信", "要件の構造化", "担当の自動選定", "並行実行"],
-  },
-  {
-    time: "納品前",
-    tag: "検査と原価計算",
-    title: "外に出る前に、必ず二重の確認が入る",
-    body:
-      "成果物ができた時点で、品質・倫理を担当するAIが内容を検査。同時に原価担当のAIが工数とコストを算出します。この2工程を通らないものは納品されません。",
-    steps: ["成果物の受領", "品質・倫理検査", "工数試算", "差戻し／通過"],
-  },
-  {
-    time: "毎日22:00",
-    tag: "コンテンツ運用",
-    title: "翌日の分が、寝ている間に用意される",
-    body:
-      "テーマの収集から下書き生成、体裁の調整、投稿予約までを自動で実行。人が行うのは最終確認だけという状態まで組み上げます。",
-    steps: ["情報収集", "下書き生成", "体裁チェック", "予約配信"],
-  },
-];
-
-const FLOW = [
-  {
-    n: "01",
-    title: "無料相談（30分）",
-    span: "オンライン",
-    body: "いま手作業でやっていることをうかがい、AIに渡せそうな業務と、おおよその費用感をご案内します。",
-  },
-  {
-    n: "02",
-    title: "業務の棚卸し・設計",
-    span: "1〜2週間",
-    body: "業務の流れを整理し、効果の大きいものから優先順位をつけます。どのAI社員に何を任せるかを決めます。",
-  },
-  {
-    n: "03",
-    title: "ナレッジ整備と実装",
-    span: "2〜4週間",
-    body: "判断基準や手順をAIが読める形に整理し、エージェントとパイプラインを実装。実データで稼働テストを行います。",
-  },
-  {
-    n: "04",
-    title: "稼働開始と改善",
-    span: "3ヶ月伴走",
-    body: "狭い範囲から動かしはじめ、問題がなければ対象を広げます。定期ミーティングで調整を続けます。",
-  },
-];
-
-const FAQ = [
-  {
-    q: "AI社員とは、何ですか？",
-    a: "自社の判断基準・商品知識・業務手順をAIが読める形に整理したうえで、部門ごとに役割を持たせたAIエージェントのことです。毎回ゼロから前提を説明する単発のチャットとは違い、「この業務はこの担当に渡せばいい」という状態をつくります。",
-  },
-  {
-    q: "どんな業務を任せられますか？",
-    a: "問い合わせの一次対応、定例レポートの作成、社内資料の検索と要約、記事やSNS投稿の制作、データの集計と分析、請求・経費の処理。手順が言葉で説明できる業務であれば、ほとんどが対象になります。",
-  },
-  {
-    q: "導入までどれくらいかかりますか？",
-    a: "対象業務の洗い出しに1〜2週間、実装と稼働テストに2〜4週間が目安です。範囲を絞った小さな構成であれば、より短い期間で動かしはじめることもできます。",
-  },
-  {
-    q: "納品したら終わりですか？",
-    a: "納品後3ヶ月の伴走がつきます。定期のミーティングで稼働状況を確認し、任せる範囲を広げたり、精度を上げる調整を行います。",
-  },
-  {
-    q: "費用はいくらですか？",
-    a: "任せる業務の範囲と数によって変わるため、個別のお見積もりです。まずは30分の無料相談で、どの業務を渡せそうかと概算をご案内します。オンラインで全国対応しています。",
-  },
-  {
-    q: "自社でChatGPTを使うのと、何が違いますか？",
-    a: "毎回、前提の説明から始めなくて済むことです。会社の情報・商品・判断基準・過去の成果物をAIが参照できる状態にしておき、必要なときに必要な担当へ仕事を渡します。加えて、成果物は必ず別のAIが検査してから出てきます。",
-  },
-  {
-    q: "預けた情報の扱いが心配です。",
-    a: "ご提供いただいた資料やデータは、案件の対応にのみ使用します。モデルの学習用途への転用や、第三者への提供は行いません。処理の経過は記録として保全し、後から経緯を確認できる状態にしています。",
-  },
-];
-
-const COMPANY = [
-  { k: "商号", v: "株式会社SASHIWA", ready: true },
-  { k: "代表者", v: "指輪直人", ready: true },
-  { k: "従業員", v: "AIエージェント 5体（人間 0名）", ready: true },
-  { k: "事業内容", v: "AI社員構築代行／文書・動画の自動制作", ready: true },
-  { k: "対応地域", v: "オンラインで全国対応", ready: true },
-  { k: "設立", v: "準備中", ready: false },
-  { k: "資本金", v: "準備中", ready: false },
-  { k: "所在地", v: "準備中", ready: false },
-];
-
-/* 記事データ。microCMS 連携時はここを API 取得結果に差し替えてください。
-   形式：{ id, date, category, title, excerpt, url } */
-const POSTS = [];
-
-/* ---------------------------------------------------------------- ルート定義 */
-
-const ROUTES = {
-  home: { title: "株式会社SASHIWA｜社員は全員AI。AI社員構築代行" },
-  business: { title: "事業内容｜株式会社SASHIWA" },
-  flow: { title: "導入の流れ｜株式会社SASHIWA" },
-  blog: { title: "記事｜株式会社SASHIWA" },
-  company: { title: "会社概要｜株式会社SASHIWA" },
-  contact: { title: "お問い合わせ｜株式会社SASHIWA" },
-  dashboard: { title: "CONTROL｜株式会社SASHIWA" },
-};
-
-function parseHash() {
-  const h = (typeof window !== "undefined" ? window.location.hash : "") || "";
-  const clean = h.replace(/^#\/?/, "").replace(/\/$/, "");
-  if (!clean) return { page: "home", slug: null };
-  const [page, slug] = clean.split("/");
-  if (page === "business" && slug) return { page: "business", slug };
-  if (ROUTES[page]) return { page, slug: null };
-  return { page: "home", slug: null };
+/**
+ * どこかで問題が起きても、白い画面にせず原因を表示します。
+ * 原因が分かれば直せるので、必ず何か表示するようにしています。
+ */
+class Guard extends React.Component {
+  constructor(p) {
+    super(p);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err: err };
+  }
+  componentDidCatch(err, info) {
+    try {
+      console.error("SASHIWA ERROR:", err, info);
+    } catch (e) {}
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const msg = String(this.state.err && this.state.err.message ? this.state.err.message : this.state.err);
+    return (
+      <div style={{ minHeight: "100vh", background: "#0A0E16", color: "#fff", padding: "48px 24px", fontFamily: "'Noto Sans JP',sans-serif" }}>
+        <div style={{ maxWidth: 620, margin: "0 auto" }}>
+          <p style={{ fontSize: 11, letterSpacing: ".2em", color: "#E0402F", fontWeight: 700, marginBottom: 12 }}>ERROR</p>
+          <h1 style={{ fontSize: 24, fontWeight: 900, marginBottom: 16 }}>画面を表示できませんでした</h1>
+          <p style={{ fontSize: 14, lineHeight: 2, color: "#B9C0CB", marginBottom: 20 }}>
+            原因は下に表示しています。多くの場合、保存データを消すと直ります。
+          </p>
+          <pre style={{ background: "#151B26", borderRadius: 12, padding: 16, fontSize: 12, lineHeight: 1.8, whiteSpace: "pre-wrap", color: "#FF8A7A", marginBottom: 24 }}>
+            {msg}
+          </pre>
+          <button
+            onClick={() => {
+              try {
+                Object.keys(window.localStorage)
+                  .filter((k) => k.indexOf("sashiwa.") === 0)
+                  .forEach((k) => window.localStorage.removeItem(k));
+              } catch (e) {}
+              window.location.hash = "#/dashboard";
+              window.location.reload();
+            }}
+            style={{ background: "#E0402F", color: "#fff", border: "none", borderRadius: 999, padding: "14px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+          >
+            保存データを消して、やり直す
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
-/* ---------------------------------------------------------------- アイコン */
 
-function Icon({ name, size = 28 }) {
-  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
-  const paths = {
-    robot: (
+
+/** 同じスタイルを何度も差し込まないようにします（メモリ対策） */
+const _styleDone = {};
+function Style({ id, css }) {
+  if (typeof document !== "undefined") {
+    if (!_styleDone[id]) {
+      _styleDone[id] = true;
+      const el = document.createElement("style");
+      el.setAttribute("data-sw", id);
+      el.textContent = css;
+      document.head.appendChild(el);
+    }
+    return null;
+  }
+  return <style>{css}</style>;
+}
+
+
+
+/* ============================================================================
+   株式会社SASHIWA — アカウント管理
+   配置：src/Accounts.jsx
+
+   ■ 役割
+   「どのアカウントに投稿するか」を一元管理します。制作スタジオはここに登録した
+   アカウントから選ぶ形になるため、投稿先の取り違えが起きません。
+
+   ■ 保存場所
+   ブラウザのローカルストレージに保存します（このPCのこのブラウザのみ）。
+   別の端末でも使う場合は、右上の「書き出し」でJSONを保存し、
+   別端末で「読み込み」してください。
+   ============================================================================ */
+
+const KEY = "sashiwa.accounts.v1";
+
+const PLATFORM_META = {
+  x: { label: "X（旧Twitter）", tone: "#1A2233", soft: "#ECEEF2", cap: 140 },
+  instagram: { label: "Instagram", tone: "#C13584", soft: "#FBEAF4", cap: 2200 },
+  threads: { label: "Threads", tone: "#3B4252", soft: "#EDEFF3", cap: 500 },
+  tiktok: { label: "TikTok", tone: "#E0402F", soft: "#FDECEA", cap: 2200 },
+  youtube: { label: "YouTube", tone: "#B3181C", soft: "#FBE9E9", cap: 5000 },
+  yt_shorts: { label: "YouTube Shorts", tone: "#D3241C", soft: "#FCEAE9", cap: 100 },
+  note: { label: "note", tone: "#0E9F73", soft: "#E7F6F1", cap: 8000 },
+};
+
+const SEED = [
+  {
+    id: "seed-own-x",
+    name: "SASHIWA 公式X",
+    platform: "x",
+    handle: "sashiwa_ai",
+    ownerType: "own",
+    owner: "自社",
+    purpose: "認知",
+    tone: "丁寧・ですます",
+    cadence: "毎日1本",
+    status: "運用中",
+    email: "",
+    note: "AI社員構築代行の認知獲得。実際の稼働ログを出す。",
+  },
+];
+
+/* ------------------------------------------------------------- ストア */
+
+function load() {
+  if (typeof window === "undefined" || !window.localStorage) return SEED;
+  try {
+    const raw = window.localStorage.getItem(KEY);
+    if (!raw) return SEED;
+    // 壊れた保存データや、大きすぎる保存データで画面が止まらないようにします
+    if (raw.length > 400000) {
+      window.localStorage.removeItem(KEY);
+      return SEED;
+    }
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return SEED;
+    return v.slice(0, 60);
+  } catch (e) {
+    try { window.localStorage.removeItem(KEY); } catch (e2) {}
+    return SEED;
+  }
+}
+
+function persist(list) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(list));
+  } catch (e) {
+    /* 保存できない環境では無視（表示は継続） */
+  }
+}
+
+function useAccounts() {
+  const [accounts, setAccounts] = useState(SEED);
+
+  useEffect(() => {
+    setAccounts(load());
+  }, []);
+
+  const commit = useCallback((next) => {
+    setAccounts(next);
+    persist(next);
+  }, []);
+
+  const add = useCallback(
+    (a) => commit([...load(), { ...a, id: `a-${Date.now()}` }]),
+    [commit]
+  );
+  const update = useCallback(
+    (id, patch) => commit(load().map((a) => (a.id === id ? { ...a, ...patch } : a))),
+    [commit]
+  );
+  const remove = useCallback((id) => commit(load().filter((a) => a.id !== id)), [commit]);
+  const replaceAll = useCallback((list) => commit(list), [commit]);
+
+  return { accounts, add, update, remove, replaceAll };
+}
+
+/* ------------------------------------------------------------- 部品 */
+
+function Ac({ name, size = 18 }) {
+  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
+  const p = {
+    plus: <path d="M12 5v14M5 12h14" {...s} />,
+    edit: (<><path d="M16.8 3.4a2.3 2.3 0 0 1 3.3 3.3L8.4 18.4l-4.4 1.2 1.2-4.4Z" {...s} /><path d="m15 5.2 3.3 3.3" {...s} /></>),
+    trash: (<><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" {...s} /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2A1.5 1.5 0 0 0 16.6 19l.9-12.5" {...s} /></>),
+    down: (<><path d="M12 3.5v12M7.5 11l4.5 4.5 4.5-4.5" {...s} /><path d="M4 20.5h16" {...s} /></>),
+    up: (<><path d="M12 15.5v-12M7.5 8 12 3.5 16.5 8" {...s} /><path d="M4 20.5h16" {...s} /></>),
+    user: (<><circle cx="12" cy="8" r="3.6" {...s} /><path d="M5.5 20.4a6.5 6.5 0 0 1 13 0" {...s} /></>),
+    x: <path d="M6 6l12 12M18 6L6 18" {...s} />,
+    check: (<><circle cx="12" cy="12" r="9" {...s} /><path d="m8 12.3 2.8 2.8L16 9.8" {...s} /></>),
+  };
+  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.check}</svg>;
+}
+
+const EMPTY = {
+  name: "", platform: "x", handle: "", ownerType: "own", owner: "自社",
+  purpose: "認知", tone: "丁寧・ですます", cadence: "毎日1本", status: "運用中", email: "", note: "",
+};
+
+/* ------------------------------------------------------------- 本体 */
+
+function AccountsView({ pushLog }) {
+  const { accounts, add, update, remove, replaceAll } = useAccounts();
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(EMPTY);
+  const [filter, setFilter] = useState("all");
+  const [msg, setMsg] = useState("");
+
+  const note = useCallback((l) => { if (typeof pushLog === "function") pushLog(l); }, [pushLog]);
+
+  /* ── アカウント詳細（これから／投稿済み／制作物／分析）── */
+  const { settings } = useSettings();
+  const [postsFor, setPostsFor] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [tab, setTab] = useState("plan");
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [learnText, setLearnText] = useState("");
+
+  const parsed = useMemo(() => (paste.trim() ? parsePerfPaste(paste) : null), [paste]);
+
+  const openPosts = async (a) => {
+    setPostsFor(a);
+    setPosts([]);
+    setQueue([]);
+    setPaste("");
+    setLearnText("");
+    setTab("plan");
+    if (!settings.gasUrl) return;
+    setLoadingPosts(true);
+    try {
+      const [rp, rj, rq, rl] = await Promise.all([
+        fetch(`${settings.gasUrl}?action=perf`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=jobs`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=queue`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${settings.gasUrl}?action=learn&acct=${encodeURIComponent(a.name)}`).then((r) => r.json()).catch(() => ({})),
+      ]);
+      const mine = (rp.perf || []).filter((x) => !x.アカウント || String(x.アカウント).indexOf(a.name) >= 0);
+      const jobs = (rj.jobs || []).filter(
+        (j) => String(j.投稿先アカウント || "").indexOf(a.name) >= 0 && j.状態 === "完了"
+      );
+      setPosts([
+        ...mine.map((x) => ({ ...x, kind: "posted" })),
+        ...jobs.map((j) => ({
+          post_id: j.job_id,
+          投稿日時: j.受信日時,
+          アカウント: a.name,
+          媒体: j.媒体,
+          本文: "",
+          title: jobTitle(j),
+          url: j.成果物URL,
+          kind: "made",
+        })),
+      ]);
+      setQueue((rq.queue || []).filter((q) => String(q.アカウント || "").indexOf(a.name) >= 0));
+      if (rl && rl.learn) setLearnText(rl.learn);
+    } catch (e) {
+      /* 取得できなくても画面は開きます */
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  /** 貼り付けた実績を一括で取り込みます */
+  const doImport = async (a) => {
+    if (!parsed || !parsed.rows.length || !settings.gasUrl) return;
+    setImporting(true);
+    try {
+      const r = await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          type: "perfbulk",
+          アカウント: a.name,
+          媒体: (PLATFORM_META[a.platform] || {}).label || "",
+          items: parsed.rows,
+        }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setPaste("");
+        note(`[${new Date().toLocaleTimeString()}] PERF IMPORTED: +${d.added} / 更新${d.updated}`);
+        await openPosts(a);
+        setTab("done");
+      }
+    } catch (e) {
+      /* 失敗しても画面は保ちます */
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  /** AIに実績を分析させ、次回の指針を作ります */
+  const runAnalyze = async (a) => {
+    if (!settings.gasUrl) return;
+    setAnalyzing(true);
+    try {
+      const r = await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ type: "analyze", アカウント: a.name }),
+      });
+      const d = await r.json();
+      setLearnText(d && d.ok ? d.learn || "" : (d && d.error) || "分析できませんでした。");
+      if (d && d.ok) note(`[${new Date().toLocaleTimeString()}] AI ANALYZED: ${a.name}`);
+    } catch (e) {
+      setLearnText("分析できませんでした。接続設定をご確認ください。");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  /** YouTubeの数値を無料で取り込みます */
+  const fetchYT = async () => {
+    if (!settings.gasUrl || !postsFor) return;
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=yt`);
+      const d = await r.json();
+      if (d && d.ok) {
+        await openPosts(postsFor);
+        setTab("done");
+      }
+    } catch (e) {
+      /* 取得できなくても画面は保ちます */
+    }
+  };
+
+  const openNew = () => { setForm(EMPTY); setEditing("new"); };
+  const openEdit = (a) => { setForm(a); setEditing(a.id); };
+  const close = () => { setEditing(null); setForm(EMPTY); };
+
+  const save = () => {
+    if (!form.name.trim()) return setMsg("アカウント名を入力してください。");
+    if (form.ownerType === "client" && !form.owner.trim()) return setMsg("お客様名を入力してください。");
+    const clean = { ...form, owner: form.ownerType === "own" ? "自社" : form.owner };
+    if (editing === "new") { add(clean); note(`[${new Date().toLocaleTimeString()}] ACCOUNT ADDED: ${clean.name}`); }
+    else { update(editing, clean); note(`[${new Date().toLocaleTimeString()}] ACCOUNT UPDATED: ${clean.name}`); }
+    setMsg("");
+    close();
+  };
+
+  const del = (a) => {
+    if (typeof window !== "undefined" && !window.confirm(`「${a.name}」を削除します。よろしいですか？`)) return;
+    remove(a.id);
+    note(`[${new Date().toLocaleTimeString()}] ACCOUNT REMOVED: ${a.name}`);
+  };
+
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(accounts, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sashiwa_accounts_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importJson = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const v = JSON.parse(String(r.result));
+        if (!Array.isArray(v)) throw new Error();
+        replaceAll(v);
+        setMsg(`${v.length}件を読み込みました。`);
+        setTimeout(() => setMsg(""), 4000);
+      } catch (err) {
+        setMsg("読み込めませんでした。書き出したJSONファイルを選んでください。");
+      }
+    };
+    r.readAsText(f);
+    e.target.value = "";
+  };
+
+  const shown = accounts.filter((a) =>
+    filter === "all" ? true : filter === "own" ? a.ownerType === "own" : a.ownerType === "client"
+  );
+  const groups = shown.reduce((m, a) => {
+    const k = a.ownerType === "own" ? "自社" : a.owner || "（お客様名未設定）";
+    (m[k] = m[k] || []).push(a);
+    return m;
+  }, {});
+
+  const active = accounts.filter((a) => a.status === "運用中").length;
+
+  return (
+    <div className="acRoot">
+      <Style id="CSS_ACCOUNTS" css={CSS_ACCOUNTS} />
+
+      <header className="acHead">
+        <div>
+          <p className="acHead__en">ACCOUNTS</p>
+          <h1>アカウント管理</h1>
+          <p className="acHead__s">投稿先をここで管理します。制作スタジオはこの一覧から選ぶ形になります。</p>
+        </div>
+        <div className="acHead__b">
+          <button className="acGhost" onClick={exportJson}><Ac name="down" size={15} />書き出し</button>
+          <label className="acGhost">
+            <Ac name="up" size={15} />読み込み
+            <input type="file" accept="application/json" onChange={importJson} hidden />
+          </label>
+          <button className="acAdd" onClick={openNew}><Ac name="plus" size={16} />アカウントを追加</button>
+        </div>
+      </header>
+
+      <div className="acBar">
+        <div className="acFilter">
+          {[
+            { id: "all", label: `すべて ${accounts.length}` },
+            { id: "own", label: `自社 ${accounts.filter((a) => a.ownerType === "own").length}` },
+            { id: "client", label: `お客様 ${accounts.filter((a) => a.ownerType === "client").length}` },
+          ].map((f) => (
+            <button key={f.id} className={filter === f.id ? "is-on" : ""} onClick={() => setFilter(f.id)}>{f.label}</button>
+          ))}
+        </div>
+        <p className="acBar__n">運用中 {active} 件 ／ 停止中 {accounts.length - active} 件</p>
+      </div>
+
+      {msg && <p className="acMsg">{msg}</p>}
+
+      {Object.keys(groups).length === 0 ? (
+        <div className="acEmpty">
+          <Ac name="user" size={30} />
+          <h2>アカウントがまだありません</h2>
+          <p>投稿先のアカウントを登録すると、制作スタジオから選べるようになります。</p>
+          <button className="acAdd" onClick={openNew}><Ac name="plus" size={16} />最初のアカウントを追加</button>
+        </div>
+      ) : (
+        Object.entries(groups).map(([owner, list]) => (
+          <section className="acGroup" key={owner}>
+            <h2 className="acGroup__t">
+              <Ac name="user" size={15} />
+              {owner}
+              <em>{list.length}</em>
+            </h2>
+            <div className="acGrid">
+              {list.map((a) => {
+                const m = PLATFORM_META[a.platform] || PLATFORM_META.x;
+                return (
+                  <article className={`acCard ${a.status === "停止中" ? "is-off" : ""}`} key={a.id} style={{ "--t": m.tone, "--s": m.soft }}>
+                    <div className="acCard__h">
+                      <span className="acCard__pf">{m.label}</span>
+                      <span className={`acCard__st ${a.status === "運用中" ? "is-on" : ""}`}>{a.status}</span>
+                    </div>
+                    <p className="acCard__n">{a.name}</p>
+                    {a.handle && <p className="acCard__hd">@{a.handle}</p>}
+                    <dl className="acCard__m">
+                      <div><dt>目的</dt><dd>{a.purpose}</dd></div>
+                      <div><dt>頻度</dt><dd>{a.cadence}</dd></div>
+                      <div><dt>トーン</dt><dd>{a.tone}</dd></div>
+                    </dl>
+                    {a.note && <p className="acCard__note">{a.note}</p>}
+                    <div className="acCard__f">
+                      <button className="acCard__posts" onClick={() => openPosts(a)}>
+                        投稿と実績
+                      </button>
+                      <button onClick={() => update(a.id, { status: a.status === "運用中" ? "停止中" : "運用中" })}>
+                        {a.status === "運用中" ? "停止" : "再開"}
+                      </button>
+                      <button onClick={() => openEdit(a)}><Ac name="edit" size={14} />編集</button>
+                      <button className="acCard__del" onClick={() => del(a)}><Ac name="trash" size={14} /></button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+
+      {editing && (
+        <div className="acModal" onClick={close}>
+          <div className="acModal__b" onClick={(e) => e.stopPropagation()}>
+            <div className="acModal__h">
+              <h2>{editing === "new" ? "アカウントを追加" : "アカウントを編集"}</h2>
+              <button onClick={close} aria-label="閉じる"><Ac name="x" size={18} /></button>
+            </div>
+
+            <div className="acForm">
+              <label><span>アカウント名</span>
+                <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="SASHIWA 公式X" />
+              </label>
+              <div className="acForm__r">
+                <label><span>プラットフォーム</span>
+                  <select value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
+                    {Object.entries(PLATFORM_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </label>
+                <label><span>ハンドル（@なし）</span>
+                  <input type="text" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} placeholder="sashiwa_ai" />
+                </label>
+              </div>
+
+              <label><span>持ち主</span>
+                <div className="acSeg">
+                  <button className={form.ownerType === "own" ? "is-on" : ""} onClick={() => setForm({ ...form, ownerType: "own", owner: "自社" })}>自社（無料）</button>
+                  <button className={form.ownerType === "client" ? "is-on" : ""} onClick={() => setForm({ ...form, ownerType: "client", owner: form.owner === "自社" ? "" : form.owner })}>お客様（課金）</button>
+                </div>
+              </label>
+
+              {form.ownerType === "client" && (
+                <div className="acForm__r">
+                  <label><span>お客様名</span>
+                    <input type="text" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} placeholder="株式会社◯◯" />
+                  </label>
+                  <label><span>納品先メール</span>
+                    <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="client@example.com" />
+                  </label>
+                </div>
+              )}
+
+              <div className="acForm__r">
+                <label><span>目的</span>
+                  <select value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}>
+                    {["認知", "見込み客", "販売", "採用", "信頼"].map((v) => <option key={v}>{v}</option>)}
+                  </select>
+                </label>
+                <label><span>投稿頻度</span>
+                  <select value={form.cadence} onChange={(e) => setForm({ ...form, cadence: e.target.value })}>
+                    {["毎日1本", "毎日2本", "週3本", "週2本", "週1本"].map((v) => <option key={v}>{v}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div className="acForm__r">
+                <label><span>トーン</span>
+                  <select value={form.tone} onChange={(e) => setForm({ ...form, tone: e.target.value })}>
+                    {["丁寧・ですます", "フランク", "断定的・力強い", "専門的・硬め", "やわらかい・共感"].map((v) => <option key={v}>{v}</option>)}
+                  </select>
+                </label>
+                <label><span>状態</span>
+                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                    <option>運用中</option><option>停止中</option>
+                  </select>
+                </label>
+              </div>
+
+              <label><span>メモ・運用方針</span>
+                <textarea rows={3} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="このアカウントで何を発信するか。制作時にAIへ渡されます。" />
+              </label>
+            </div>
+
+            {msg && <p className="acMsg acMsg--in">{msg}</p>}
+
+            <div className="acModal__f">
+              <button className="acGhost" onClick={close}>キャンセル</button>
+              <button className="acAdd" onClick={save}><Ac name="check" size={16} />保存する</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {postsFor && (
+        <div className="acModal" onClick={() => setPostsFor(null)}>
+          <div className="acModal__b acDetail" onClick={(e) => e.stopPropagation()}>
+            <div className="acDetail__h" style={{ "--t": (PLATFORM_META[postsFor.platform] || {}).tone, "--s": (PLATFORM_META[postsFor.platform] || {}).soft }}>
+              <div>
+                <p className="acDetail__pf">
+                  {(PLATFORM_META[postsFor.platform] || {}).label}
+                  {postsFor.handle && <em>@{postsFor.handle}</em>}
+                  <span className={postsFor.ownerType === "own" ? "is-own" : ""}>
+                    {postsFor.ownerType === "own" ? "自社" : postsFor.owner}
+                  </span>
+                </p>
+                <h2>{postsFor.name}</h2>
+                <p className="acDetail__meta">
+                  {postsFor.purpose}／{postsFor.cadence}／{postsFor.tone}
+                  {postsFor.note && <em>{postsFor.note}</em>}
+                </p>
+              </div>
+              <button onClick={() => setPostsFor(null)} aria-label="閉じる"><Ac name="x" size={18} /></button>
+            </div>
+
+            <div className="acDetail__tabs">
+              {[
+                ["plan", "これから", queue.length],
+                ["done", "投稿済み", posts.filter((x) => x.kind === "posted").length],
+                ["made", "制作物", posts.filter((x) => x.kind === "made").length],
+                ["learn", "分析", 0],
+              ].map(([id, label, n]) => (
+                <button key={id} className={tab === id ? "is-on" : ""} onClick={() => setTab(id)}>
+                  {label}
+                  {n > 0 && <em>{n}</em>}
+                </button>
+              ))}
+            </div>
+
+            <div className="acDetail__b">
+              {loadingPosts && <p className="acPosts__e">読み込んでいます...</p>}
+
+              {!loadingPosts && tab === "plan" && (
+                queue.length === 0 ? (
+                  <p className="acPosts__e">予約された投稿はありません。制作スタジオのSTEP5で予約できます。</p>
+                ) : (
+                  <div className="acTl">
+                    {queue.map((q) => (
+                      <div className="acTl__i" key={q.post_id}>
+                        <div className="acTl__t">
+                          <b>{String(q.予定日時).slice(5, 16)}</b>
+                          {q.繰り返し && q.繰り返し !== "なし" && <em>{q.繰り返し}</em>}
+                        </div>
+                        <div className="acTl__c">
+                          <p className="acTl__m">
+                            <span>{q.媒体}</span>
+                            <span className={`acTl__s is-${q.状態}`}>{q.状態}</span>
+                          </p>
+                          <p className="acTl__body">{q.本文}</p>
+                          {q.投稿リンク && (
+                            <a href={q.投稿リンク} target="_blank" rel="noopener noreferrer">
+                              投稿画面を開く →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {!loadingPosts && tab === "done" && (
+                <>
+                  <div className="acImport">
+                    <p className="acImport__k">実績を取り込む</p>
+                    <p className="acImport__n">
+                      各SNSの分析画面からCSVを書き出すか、表をそのままコピーして、下に貼り付けてください。
+                      見出し行を含めて貼ると、列を自動で判別します。手入力は不要です。
+                    </p>
+                    <textarea
+                      rows={3}
+                      value={paste}
+                      onChange={(e) => setPaste(e.target.value)}
+                      placeholder={"日付\tポスト本文\tインプレッション\tいいね\tリポスト\t返信\tリンクのクリック数\n2026-08-14\t…\t1240\t62\t18\t5\t14"}
+                    />
+                    {parsed && parsed.rows.length > 0 && (
+                      <p className="acImport__ok">
+                        {parsed.rows.length} 件を認識しました（
+                        {Object.keys(parsed.map).filter((k) => k !== "post_id").join("・")}）
+                      </p>
+                    )}
+                    {parsed && parsed.error && <p className="acImport__ng">{parsed.error}</p>}
+                    <div className="acImport__f">
+                      <button
+                        className="acAdd"
+                        disabled={!parsed || !parsed.rows.length || importing}
+                        onClick={() => doImport(postsFor)}
+                      >
+                        {importing ? "取り込み中..." : "この内容で取り込む"}
+                      </button>
+                      {(PLATFORM_META[postsFor.platform] || {}).label === "YouTube" && (
+                        <button className="acGhost" onClick={fetchYT}>
+                          YouTubeから自動取得（無料）
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {posts.filter((x) => x.kind === "posted").length === 0 ? (
+                    <p className="acPosts__e">まだ実績がありません。上の欄から取り込んでください。</p>
+                  ) : (
+                    <div className="acDone">
+                      {posts
+                        .filter((x) => x.kind === "posted")
+                        .map((pp) => {
+                          const e2 = engagement(pp);
+                          return (
+                            <div className="acDone__i" key={pp.post_id}>
+                              <div className="acDone__h">
+                                <span>{String(pp.投稿日時).slice(0, 16)}</span>
+                                <b className={e2 >= 5 ? "is-hi" : e2 >= 2 ? "is-mid" : ""}>
+                                  反応率 {Math.round(e2 * 100) / 100}％
+                                </b>
+                              </div>
+                              {pp.本文 && <p className="acDone__body">{pp.本文.slice(0, 140)}</p>}
+                              <p className="acDone__n">
+                                表示 {pp.表示回数.toLocaleString()}／いいね {pp.いいね}／保存RT {pp["保存・RT"]}／返信 {pp.返信}／クリック {pp.クリック}
+                              </p>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!loadingPosts && tab === "made" && (
+                posts.filter((x) => x.kind === "made").length === 0 ? (
+                  <p className="acPosts__e">このアカウント向けの制作物はまだありません。</p>
+                ) : (
+                  <div className="acMade">
+                    {posts
+                      .filter((x) => x.kind === "made")
+                      .map((pp) => (
+                        <div className="acMade__i" key={pp.post_id}>
+                          <span className="acMade__t">{String(pp.投稿日時).slice(0, 16)}</span>
+                          <span className="acMade__m">{pp.媒体}</span>
+                          <span className="acMade__x">{pp.title || "成果物"}</span>
+                          {pp.url && (
+                            <a href={pp.url} target="_blank" rel="noopener noreferrer">開く →</a>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                )
+              )}
+
+              {!loadingPosts && tab === "learn" && (
+                <div className="acLearn">
+                  {(() => {
+                    const l = learnFromPerf(posts.filter((x) => x.kind === "posted"), postsFor.name);
+                    return (
+                      <>
+                        {l.ready ? (
+                          <>
+                            <p className="acLearn__k">
+                              実績{l.count}件から読み取った傾向
+                              <em>上位平均 {l.avgTop}％ ／ 下位平均 {l.avgBottom}％</em>
+                            </p>
+                            <ul className="stLearn__l">
+                              {l.insights.map((x) => (
+                                <li key={x.key}>
+                                  <b>{x.advice}</b>
+                                  <em>伸びた {x.top} ／ 伸びず {x.bottom}</em>
+                                  <span className="stLearn__bar"><i style={{ width: `${Math.min(100, x.strength)}%` }} /></span>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <p className="acPosts__e">
+                            実績があと {l.need} 件たまると、傾向を自動で読み取れます。
+                          </p>
+                        )}
+
+                        <div className="acLearn__ai">
+                          <p className="acLearn__k">
+                            AIによる分析
+                            <button className="acAdd" onClick={() => runAnalyze(postsFor)} disabled={analyzing || !l.ready}>
+                              {analyzing ? "分析中..." : "AIに分析させる"}
+                            </button>
+                          </p>
+                          {learnText ? (
+                            <pre className="acLearn__t">{learnText}</pre>
+                          ) : (
+                            <p className="acLearn__n">
+                              反応の良い投稿と低い投稿の本文をAIが読み比べ、「効いた要素」「次回の指針」を言葉で出します。
+                              結果は保存され、以後の制作条件に自動で入ります。1回あたり数円です。
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      <p className="acFoot">
+        アカウント情報はこのブラウザ内に保存されます。別の端末でも使う場合は「書き出し」でJSONを保存し、移行先で「読み込み」してください。
+      </p>
+    </div>
+  );
+}
+
+/* ================================ CSS_ACCOUNTS ================================== */
+
+const CSS_ACCOUNTS = `
+.acRoot{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;--t:#1A2233;--s:#ECEEF2;
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
+.acRoot *,.acRoot *::before,.acRoot *::after{box-sizing:border-box;}
+.acRoot h1,.acRoot h2,.acRoot p,.acRoot ul,.acRoot li,.acRoot dl,.acRoot dd,.acRoot dt{margin:0;padding:0;}
+.acRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.acRoot a{color:inherit;text-decoration:none;}
+.acRoot :focus-visible{outline:2px solid var(--ai);outline-offset:2px;}
+
+.acHead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:18px;}
+.acHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai);font-weight:700;margin-bottom:8px;}
+.acHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.acHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
+.acHead__b{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.acGhost{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:10px 18px;cursor:pointer;transition:all .2s;}
+.acGhost:hover{border-color:var(--ink);color:var(--ink);}
+.acAdd{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:11px 22px;transition:all .2s;box-shadow:0 12px 24px -14px rgba(124,92,214,.9);}
+.acAdd:hover{filter:brightness(.93);transform:translateY(-1px);}
+
+.acBar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.acFilter{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;}
+.acFilter button{font-size:12.5px;font-weight:700;padding:8px 17px;border-radius:999px;color:var(--muted);transition:all .2s;}
+.acFilter button.is-on{background:var(--ink);color:#fff;}
+.acBar__n{font-size:12px;color:var(--muted);}
+.acMsg{font-size:12.5px;color:var(--ai);background:#F5F1FE;border-radius:10px;padding:11px 15px;margin-bottom:14px;}
+.acMsg--in{margin:0 22px 12px;}
+
+.acEmpty{background:var(--white);border:1px dashed var(--line);border-radius:20px;padding:52px 28px;text-align:center;color:var(--muted);}
+.acEmpty svg{margin:0 auto 16px;color:var(--ai);}
+.acEmpty h2{font-size:18px;font-weight:900;color:var(--ink);margin-bottom:8px;}
+.acEmpty p{font-size:13px;margin-bottom:22px;}
+
+.acGroup{margin-bottom:26px;}
+.acGroup__t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:12px;color:var(--muted);}
+.acGroup__t em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ai);background:#F1EDFC;border-radius:999px;padding:2px 9px;}
+.acGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:13px;}
+
+.acCard{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:18px 20px;transition:transform .25s,box-shadow .25s;}
+.acCard:hover{transform:translateY(-3px);box-shadow:0 22px 42px -30px rgba(26,34,51,.5);}
+.acCard.is-off{opacity:.55;}
+.acCard__h{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.acCard__pf{font-size:10.5px;font-weight:700;color:var(--t);background:var(--s);border-radius:999px;padding:3px 10px;}
+.acCard__st{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;}
+.acCard__st.is-on{color:#0E9F73;background:#E6F7F0;}
+.acCard__n{font-size:15px;font-weight:900;line-height:1.5;}
+.acCard__hd{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:12px;}
+.acCard__m{display:flex;gap:16px;flex-wrap:wrap;padding:11px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.acCard__m dt{font-size:9.5px;color:var(--muted);margin-bottom:2px;}
+.acCard__m dd{font-size:12px;font-weight:500;}
+.acCard__note{font-size:11.5px;line-height:1.8;color:var(--muted);margin-top:10px;}
+.acCard__f{display:flex;gap:6px;align-items:center;margin-top:14px;}
+.acCard__f button{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:all .2s;}
+.acCard__f button:hover{border-color:var(--ink);color:var(--ink);}
+.acCard__del{margin-left:auto;padding:7px 10px !important;}
+.acCard__del:hover{color:var(--sig) !important;border-color:var(--sig) !important;background:#FDECEA;}
+
+.acModal{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+.acModal__b{background:var(--white);border-radius:22px;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;box-shadow:0 40px 80px -40px rgba(0,0,0,.5);}
+.acModal__h{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--white);z-index:2;}
+.acModal__h h2{font-size:16px;font-weight:900;}
+.acModal__h button{color:var(--muted);padding:6px;border-radius:8px;}
+.acModal__h button:hover{background:var(--bg);color:var(--ink);}
+.acForm{padding:20px 22px;}
+.acForm label{display:block;margin-bottom:15px;}
+.acForm label > span{display:block;font-size:12px;font-weight:700;margin-bottom:7px;}
+.acForm__r{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:560px){.acForm__r{grid-template-columns:1fr;}}
+.acRoot input[type=text],.acRoot input[type=email],.acRoot select,.acRoot textarea{
+  width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:11px 13px;
+  font-family:var(--sans);font-size:13.5px;line-height:1.75;color:var(--ink);resize:vertical;transition:all .2s;}
+.acRoot input:focus,.acRoot select:focus,.acRoot textarea:focus{outline:none;background:var(--white);border-color:var(--ai);box-shadow:0 0 0 4px #F1EDFC;}
+.acSeg{display:flex;gap:6px;}
+.acSeg button{flex:1;text-align:center;font-size:12.5px;font-weight:700;border:1.5px solid var(--line);border-radius:11px;padding:11px;color:var(--muted);transition:all .2s;}
+.acSeg button.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
+.acModal__f{display:flex;justify-content:flex-end;gap:9px;padding:16px 22px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--white);}
+
+.acFoot{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:12px;padding:13px 16px;margin-top:24px;}
+
+.acConn{display:flex;align-items:center;gap:13px;background:var(--white);border:1px solid var(--line);border-left:4px solid #9BA3B1;border-radius:16px;padding:16px 18px;margin-bottom:16px;}
+.acConn.is-on{border-left-color:#0E9F73;}
+.acConn__d{width:10px;height:10px;border-radius:50%;background:#9BA3B1;flex-shrink:0;}
+.acConn.is-on .acConn__d{background:#0E9F73;box-shadow:0 0 0 4px rgba(14,159,115,.18);}
+.acConn b{display:block;font-size:14px;font-weight:700;margin-bottom:3px;}
+.acConn em{font-style:normal;font-size:12px;color:var(--muted);line-height:1.75;}
+.acPanel{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:14px;}
+.acPanel__f{display:block;}
+.acPanel__f > span{display:block;font-size:12px;font-weight:700;margin-bottom:8px;}
+.acPanel__f > em{display:block;font-style:normal;font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.75;}
+.acPanel__b{display:flex;gap:9px;margin-top:16px;flex-wrap:wrap;}
+.acResult{font-size:12.5px;line-height:1.85;border-radius:11px;padding:12px 15px;margin-top:14px;}
+.acResult.is-ok{color:#0E9F73;background:#E6F7F0;}
+.acResult.is-ng{color:var(--sig);background:#FDECEA;}
+.acPanel--guide h2{font-size:14px;font-weight:900;margin-bottom:14px;}
+.acSteps{counter-reset:s;display:grid;gap:11px;}
+.acSteps li{counter-increment:s;position:relative;padding-left:34px;font-size:13px;line-height:1.9;color:var(--muted);}
+.acSteps li::before{content:counter(s);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;background:var(--ai);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.acSteps b{color:var(--ink);font-weight:700;}
+.acNote{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-top:16px;}
+
+.acDiagBar{display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line);flex-wrap:wrap;}
+.acDiagBar span{font-size:11.5px;color:var(--muted);line-height:1.75;}
+.acDiag{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;}
+.acDiag__v{font-size:12px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.acDiag__v b{font-family:var(--mono);color:var(--ink);}
+.acDiag__v em{font-style:normal;font-size:11px;color:#fff;background:var(--sig);border-radius:999px;padding:3px 10px;}
+.acDiag__l{display:grid;gap:7px;list-style:none;padding:0;margin:0;}
+.acDiag__l li{display:flex;align-items:center;gap:10px;font-size:12.5px;flex-wrap:wrap;background:var(--white);border-radius:10px;padding:10px 13px;}
+.acDiag__m{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;flex-shrink:0;}
+.acDiag__l li.is-ok .acDiag__m{color:#0E9F73;background:#E6F7F0;}
+.acDiag__l li.is-ng .acDiag__m{color:var(--sig);background:#FDECEA;}
+.acDiag__l li.is-opt{opacity:.72;}
+.acDiag__l li.is-opt .acDiag__m{color:var(--muted);background:var(--line);}
+.acDiag__l li em{font-style:normal;font-size:11.5px;color:var(--muted);flex:1;min-width:160px;}
+.acDiag__n{font-size:11.5px;color:var(--muted);margin-top:12px;}
+.acDiag__n b{color:var(--ink);}
+.acDiag__w{margin-top:12px;background:#FDECEA;border-radius:11px;padding:12px 14px;}
+.acDiag__w > p:first-child{font-size:11.5px;font-weight:700;color:var(--sig);margin-bottom:7px;}
+.acDiag__job{font-size:11.5px;line-height:1.8;color:#8C2A22;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px;}
+.acDiag__job em{font-style:normal;font-size:10px;font-weight:700;background:var(--sig);color:#fff;border-radius:999px;padding:2px 8px;}
+.acDiag__job.is-hold{color:#7A5A12;}
+.acDiag__job.is-hold em{background:#B47C10;}
+.acDiag__job span{width:100%;font-family:var(--mono);font-size:10.5px;opacity:.85;}
+
+.acLog{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px;}
+.acLog__k{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;margin-bottom:12px;}
+.acLog__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acLog__e{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:10px;padding:14px;text-align:center;}
+.acLog__t{max-height:330px;overflow-y:auto;border:1px solid var(--line);border-radius:11px;}
+.acLog__r{display:grid;grid-template-columns:110px 140px 74px 54px 1fr;gap:9px;padding:8px 12px;font-size:11.5px;align-items:baseline;}
+.acLog__r + .acLog__r{border-top:1px solid var(--line);}
+.acLog__r.is-ng{background:#FDF3F2;}
+.acLog__d{font-family:var(--mono);font-size:10px;color:var(--muted);}
+.acLog__s{font-weight:700;}
+.acLog__st{font-size:10px;font-weight:700;color:#0E9F73;background:#E6F7F0;border-radius:999px;padding:2px 8px;text-align:center;white-space:nowrap;}
+.acLog__st.is-ng{color:var(--sig);background:#FDECEA;}
+.acLog__ms{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:right;}
+.acLog__ms.is-slow{color:var(--sig);font-weight:700;}
+.acLog__m{color:var(--muted);word-break:break-word;}
+.acLog__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:11px 14px;margin-top:12px;}
+@media (max-width:900px){.acLog__r{grid-template-columns:1fr;gap:3px;}.acLog__ms{text-align:left;}}
+
+.acUse{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;}
+.acUse__k{display:flex;align-items:center;font-size:12.5px;font-weight:700;margin-bottom:12px;}
+.acUse__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acUse__bar{height:8px;border-radius:999px;background:var(--white);overflow:hidden;margin-bottom:14px;}
+.acUse__bar span{display:block;height:100%;background:linear-gradient(90deg,#0E9F73,#E0A21F 70%,#E0402F);transition:width .5s;}
+.acUse__g{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin-bottom:16px;}
+.acUse__g > div{background:var(--white);border-radius:11px;padding:11px 13px;font-size:13px;font-weight:700;}
+.acUse__g span{display:block;font-size:9.5px;font-weight:400;color:var(--muted);margin-bottom:3px;}
+.acUse__sk{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:9px;}
+.acUse__m{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px;}
+.acUse__m > div{background:var(--white);border-radius:11px;padding:11px 13px;text-align:center;}
+.acUse__m b{display:block;font-size:11.5px;margin-bottom:3px;}
+.acUse__m em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:5px;}
+.acUse__m span{font-size:17px;font-weight:900;color:var(--ai);}
+.acUse__f{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--line);}
+.acUse__f label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;}
+.acUse__f input{width:74px;background:var(--white);border:1.5px solid var(--line);border-radius:9px;padding:7px 10px;font:inherit;font-size:12.5px;}
+.acUse__f span{flex:1;min-width:220px;font-size:11px;line-height:1.8;color:var(--muted);}
+
+.acX{background:var(--bg);border-radius:14px;padding:16px;margin-top:14px;border-left:4px solid #9BA3B1;}
+.acX.is-on{border-left-color:#0E9F73;background:#E9F7F1;}
+.acX__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:9px;}
+.acX__d{width:9px;height:9px;border-radius:50%;background:#9BA3B1;}
+.acX.is-on .acX__d{background:#0E9F73;box-shadow:0 0 0 3px rgba(14,159,115,.2);}
+.acX__k button{margin-left:auto;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 13px;}
+.acX__s{font-size:12.5px;line-height:1.9;color:var(--muted);}
+.acX.is-on .acX__s{color:#0B6B4F;}
+.acX__l{margin-top:13px;}
+.acX__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--white);border-radius:10px;padding:11px 14px;margin-top:12px;}
+
+.acXCost{background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:13px 15px;font-size:11.5px;line-height:1.9;color:#7A5A12;margin-top:12px;}
+.acXCost b{display:inline;color:#8C5A00;}
+.acXCost b:first-child{display:block;margin-bottom:5px;}
+.acXForm{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px;}
+.acXForm label{display:block;}
+.acXForm label span{display:block;font-size:11px;font-weight:700;margin-bottom:6px;}
+.acXForm input{width:100%;background:var(--white);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:12px;}
+.acXForm input:focus{outline:none;border-color:var(--ai);}
+.acXForm > button{grid-column:1/-1;justify-self:start;}
+@media (max-width:640px){.acXForm{grid-template-columns:1fr;}}
+.acSteps li em{display:block;font-style:normal;font-size:11px;color:var(--sig);margin-top:3px;}
+
+.acCard__posts{color:var(--ai) !important;border-color:var(--ai) !important;font-weight:700;}
+.acCard__posts:hover{background:#F5F1FE;}
+.acPosts{max-width:760px;}
+.acPosts__b{padding:16px 22px;max-height:60vh;overflow-y:auto;}
+.acPosts__e{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:20px;text-align:center;}
+.acPost{border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:10px;}
+.acPost.posted{border-left:3px solid #0E9F73;}
+.acPost.made{border-left:3px solid var(--ai);}
+.acPost__h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:7px;}
+.acPost__t{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acPost__m{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acPost__k{font-size:10px;font-weight:700;color:var(--ai);background:#F1EDFC;border-radius:999px;padding:2px 9px;}
+.acPost__k.is-posted{color:#0E9F73;background:#E6F7F0;}
+.acPost__h a{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--ai);}
+.acPost__body{font-size:12px;line-height:1.8;color:var(--muted);margin-bottom:9px;white-space:pre-wrap;}
+.acPost__f{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding-top:9px;border-top:1px solid var(--line);}
+.acPost__f label{display:block;}
+.acPost__f label span{display:block;font-size:9.5px;color:var(--muted);margin-bottom:3px;}
+.acPost__f input{width:76px;background:var(--bg);border:1px solid transparent;border-radius:8px;padding:7px 9px;font-family:var(--mono);font-size:12px;}
+.acPost__f input:focus{outline:none;border-color:var(--ai);background:var(--white);}
+.acPost__f button{margin-left:auto;font-size:11.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;}
+.acPosts__n{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:0 0 22px 22px;padding:13px 22px;}
+
+.acSetup{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:16px;}
+.acSetup__k{font-size:13px;font-weight:900;margin-bottom:13px;}
+.acSetup__l{display:grid;gap:8px;}
+.acSetup__i{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:12px;padding:12px 14px;}
+.acSetup__i.is-ok{background:#E9F7F1;}
+.acSetup__i.is-ng{background:#FDECEA;}
+.acSetup__n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--white);font-size:12px;font-weight:700;color:var(--muted);flex-shrink:0;}
+.acSetup__i.is-ok .acSetup__n{background:#0E9F73;color:#fff;}
+.acSetup__i.is-ng .acSetup__n{background:var(--sig);color:#fff;}
+.acSetup__i > div{flex:1;min-width:0;}
+.acSetup__i b{display:block;font-size:13px;font-weight:700;}
+.acSetup__i em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.7;}
+.acSetup__i > button{font-size:11.5px;font-weight:700;color:var(--ai);border:1.5px solid var(--ai);border-radius:999px;padding:7px 15px;white-space:nowrap;}
+.acSetup__i > button:hover{background:var(--ai);color:#fff;}
+.acSetup__n2{font-size:11.5px;line-height:1.85;color:var(--muted);margin-top:12px;}
+
+/* ==== アカウント詳細 ==== */
+.acDetail{max-width:820px;}
+.acDetail__h{display:flex;align-items:flex-start;gap:14px;padding:20px 22px;border-bottom:1px solid var(--line);background:var(--s);}
+.acDetail__h > div{flex:1;min-width:0;}
+.acDetail__pf{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;color:var(--t);margin-bottom:6px;flex-wrap:wrap;}
+.acDetail__pf em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acDetail__pf span{font-size:10px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.acDetail__pf span.is-own{color:#0E9F73;}
+.acDetail__h h2{font-size:19px;font-weight:900;line-height:1.4;}
+.acDetail__meta{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.7;}
+.acDetail__meta em{display:block;font-style:normal;margin-top:3px;}
+.acDetail__h > button{color:var(--muted);padding:6px;border-radius:8px;flex-shrink:0;}
+.acDetail__tabs{display:flex;gap:4px;padding:12px 22px 0;border-bottom:1px solid var(--line);}
+.acDetail__tabs button{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);padding:10px 16px;border-radius:11px 11px 0 0;transition:all .2s;}
+.acDetail__tabs button.is-on{color:var(--ink);background:var(--bg);}
+.acDetail__tabs em{font-style:normal;font-family:var(--mono);font-size:10px;background:var(--ai);color:#fff;border-radius:999px;padding:1px 7px;}
+.acDetail__b{padding:16px 22px 22px;max-height:56vh;overflow-y:auto;background:var(--bg);}
+
+.acTl{display:grid;gap:9px;}
+.acTl__i{display:grid;grid-template-columns:96px 1fr;gap:13px;background:var(--white);border-radius:12px;padding:13px 15px;}
+.acTl__t b{display:block;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ai);}
+.acTl__t em{display:inline-block;font-style:normal;font-size:10px;color:var(--muted);background:var(--bg);border-radius:999px;padding:2px 8px;margin-top:4px;}
+.acTl__m{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.acTl__m span{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acTl__s.is-予約{color:var(--ai);border-color:#DCD0F7;background:#F5F1FE;}
+.acTl__s.is-投稿済み,.acTl__s.is-配信済み{color:#0E9F73;border-color:#B9E4D2;background:#E6F7F0;}
+.acTl__body{font-size:12.5px;line-height:1.85;white-space:pre-wrap;margin-bottom:7px;}
+.acTl__c a{font-size:11.5px;font-weight:700;color:var(--ai);}
+
+.acImport{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:14px;}
+.acImport__k{font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.acImport__n{font-size:11.5px;line-height:1.8;color:var(--muted);margin-bottom:10px;}
+.acImport textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:11px 13px;font-family:var(--mono);font-size:11.5px;line-height:1.7;resize:vertical;}
+.acImport textarea:focus{outline:none;background:var(--white);border-color:var(--ai);}
+.acImport__ok{font-size:11.5px;color:#0E9F73;background:#E6F7F0;border-radius:9px;padding:9px 12px;margin-top:9px;}
+.acImport__ng{font-size:11.5px;color:var(--sig);background:#FDECEA;border-radius:9px;padding:9px 12px;margin-top:9px;line-height:1.7;}
+.acImport__f{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;}
+
+.acDone{display:grid;gap:9px;}
+.acDone__i{background:var(--white);border-radius:12px;padding:13px 15px;}
+.acDone__h{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.acDone__h span{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acDone__h b{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);}
+.acDone__h b.is-mid{color:#B47C10;}
+.acDone__h b.is-hi{color:#0E9F73;}
+.acDone__body{font-size:12.5px;line-height:1.8;margin-bottom:7px;}
+.acDone__n{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+
+.acMade{display:grid;gap:7px;}
+.acMade__i{display:flex;align-items:center;gap:10px;background:var(--white);border-radius:11px;padding:11px 14px;font-size:12px;flex-wrap:wrap;}
+.acMade__t{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acMade__m{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.acMade__x{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acMade__i a{font-size:11.5px;font-weight:700;color:var(--ai);}
+
+.acLearn__k{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;margin-bottom:11px;flex-wrap:wrap;}
+.acLearn__k em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acLearn__k button{margin-left:auto;}
+.acLearn__ai{background:var(--white);border-radius:12px;padding:14px;margin-top:14px;}
+.acLearn__t{font-family:var(--sans);font-size:12.5px;line-height:1.95;white-space:pre-wrap;background:var(--bg);border-radius:10px;padding:13px 15px;margin:0;}
+.acLearn__n{font-size:11.5px;line-height:1.85;color:var(--muted);}
+`;
+
+
+/* ============================================================================
+   接続設定（GASのURLなど）
+   GitHubを触らずに、ダッシュボード上で設定できるようにするための仕組みです。
+   ============================================================================ */
+
+const SKEY = "sashiwa.settings.v1";
+
+const DEFAULT_SETTINGS = {
+  gasUrl: "",
+  makeUrl: "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv",
+  useGas: true,
+  liveSubmit: true,
+};
+
+/** URLに reset が付いていたら、保存データを消してから起動します */
+(function () {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    if (String(window.location.hash || "").indexOf("reset") >= 0) {
+      Object.keys(window.localStorage)
+        .filter(function (k) { return k.indexOf("sashiwa.") === 0; })
+        .forEach(function (k) { window.localStorage.removeItem(k); });
+    }
+  } catch (e) {}
+})();
+
+function loadSettings() {
+  if (typeof window === "undefined" || !window.localStorage) return DEFAULT_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(SKEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    if (raw.length > 100000) {
+      window.localStorage.removeItem(SKEY);
+      return DEFAULT_SETTINGS;
+    }
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch (e) {
+    try { window.localStorage.removeItem(SKEY); } catch (e2) {}
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function useSettings() {
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  useEffect(() => { setSettings(loadSettings()); }, []);
+  const save = useCallback((patch) => {
+    const next = { ...loadSettings(), ...patch };
+    setSettings(next);
+    if (typeof window !== "undefined" && window.localStorage) {
+      try { window.localStorage.setItem(SKEY, JSON.stringify(next)); } catch (e) {}
+    }
+    return next;
+  }, []);
+  return { settings, save };
+}
+
+/** 送信先URLと、プリフライトを避けるContent-Typeを返します */
+function resolveEndpoint(settings) {
+  const useGas = settings.useGas && settings.gasUrl;
+  return {
+    url: useGas ? settings.gasUrl : settings.makeUrl,
+    contentType: useGas ? "text/plain;charset=utf-8" : "application/json",
+    isGas: !!useGas,
+  };
+}
+
+function SettingsView({ pushLog }) {
+  const { settings, save } = useSettings();
+  const [gasUrl, setGasUrl] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => { setGasUrl(settings.gasUrl || ""); }, [settings.gasUrl]);
+
+  const test = async () => {
+    const u = gasUrl.trim();
+    if (!u) return setResult({ ok: false, msg: "URLを入力してください。" });
+    if (u.indexOf("script.google.com") < 0 || u.indexOf("/exec") < 0) {
+      return setResult({ ok: false, msg: "GASのウェブアプリURLは script.google.com で始まり /exec で終わります。デプロイ画面のURLをそのまま貼ってください。" });
+    }
+    setTesting(true);
+    setResult(null);
+    try {
+      const r = await fetch(u, { method: "GET" });
+      const t = await r.text();
+      if (t.indexOf("SASHIWA") >= 0) {
+        save({ gasUrl: u, useGas: true });
+        setResult({ ok: true, msg: "接続できました。保存しました。これ以降の依頼はこちらで処理されます。" });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] BACKEND CONNECTED: Google Apps Script`);
+      } else {
+        setResult({ ok: false, msg: "応答はありましたが、SASHIWAのバックエンドではないようです。URLをご確認ください。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "接続できませんでした。デプロイ時の「アクセスできるユーザー」が『全員』になっているかご確認ください。" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const [diag, setDiag] = useState(null);
+  const [diagging, setDiagging] = useState(false);
+
+  const runDiag = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setDiagging(true);
+    setDiag(null);
+    try {
+      const r = await fetch(`${u}?action=diag`);
+      const d = await r.json();
+      if (d && d.diag) setDiag(d.diag);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直したあと、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "状態を取得できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
+    } finally {
+      setDiagging(false);
+    }
+  };
+
+  const [running, setRunning] = useState(false);
+  const [xstat, setXstat] = useState(null);
+  const [xkeys, setXkeys] = useState({ ck: "", cs: "", at: "", as: "" });
+  const [xsaving, setXsaving] = useState(false);
+
+  const saveX = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    if (!xkeys.ck || !xkeys.cs || !xkeys.at || !xkeys.as) {
+      return setResult({ ok: false, msg: "4つすべてを貼り付けてください。" });
+    }
+    setXsaving(true);
+    setResult(null);
+    try {
+      const r = await fetch(u, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ type: "setx", ...xkeys }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setXkeys({ ck: "", cs: "", at: "", as: "" });
+        setXstat({ 登録: true, 接続: true, アカウント: d.account, msg: "自動投稿の準備ができています。" });
+        setResult({ ok: true, msg: `接続できました（@${d.account || "取得済み"}）。予約した時刻に自動投稿されます。` });
+      } else {
+        setResult({ ok: false, msg: (d && d.error) || "登録できませんでした。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "登録できませんでした。接続設定をご確認ください。" });
+    } finally {
+      setXsaving(false);
+    }
+  };
+  const [usage2, setUsage2] = useState(null);
+
+  const checkX = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    try {
+      const r = await fetch(`${u}?action=xcheck`);
+      const d = await r.json();
+      if (d && d.x) setXstat(d.x);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "状態を取得できませんでした。" });
+    }
+  };
+  const [logs2, setLogs2] = useState(null);
+
+  const callBudget = async (params) => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    try {
+      const q = new URLSearchParams(params).toString();
+      const r = await fetch(`${u}?${q}`);
+      const d = await r.json();
+      if (d && d.usage) setUsage2(d.usage);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "利用状況を取得できませんでした。" });
+    }
+  };
+  const [logging, setLogging] = useState(false);
+
+  const loadLog = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setLogging(true);
+    try {
+      const r = await fetch(`${u}?action=log&n=80`);
+      const d = await r.json();
+      if (d && Array.isArray(d.log)) setLogs2(d.log);
+      else setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、新バージョンでデプロイしてください。" });
+    } catch (e) {
+      setResult({ ok: false, msg: "ログを取得できませんでした。" });
+    } finally {
+      setLogging(false);
+    }
+  };
+
+  const runNow = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await fetch(`${u}?action=run`);
+      const d = await r.json();
+      if (d && d.ran) {
+        if (d.diag) setDiag(d.diag);
+        setResult({ ok: true, msg: "処理を実行しました。数十秒後にメールが届きます。届かない場合は下の状態表示をご確認ください。" });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] MANUAL RUN EXECUTED`);
+      } else {
+        setResult({ ok: false, msg: "古いバージョンが公開されています。Apps Scriptでコードを貼り直し、「デプロイを管理」→編集→バージョン「新バージョン」→デプロイを行ってください。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "実行できませんでした。デプロイの「アクセスできるユーザー」が『全員』かご確認ください。" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const runRetry = async () => {
+    const u = (gasUrl || settings.gasUrl || "").trim();
+    if (!u) return setResult({ ok: false, msg: "先にURLを入力して接続してください。" });
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await fetch(`${u}?action=retry`);
+      const d = await r.json();
+      if (d && typeof d.retried === "number") {
+        if (d.diag) setDiag(d.diag);
+        setResult({
+          ok: true,
+          msg:
+            d.retried > 0
+              ? `${d.retried} 件を再実行しました。数十秒後にメールが届きます。`
+              : "再実行が必要な依頼はありませんでした。",
+        });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] RETRY: ${d.retried} jobs`);
+      } else {
+        setResult({ ok: false, msg: "古いバージョンが公開されています。コードを貼り直し、デプロイを新バージョンで更新してください。" });
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: "実行できませんでした。デプロイ設定をご確認ください。" });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const disconnect = () => {
+    save({ gasUrl: "", useGas: false });
+    setGasUrl("");
+    setResult({ ok: true, msg: "接続を解除しました。以降はMakeに送信されます。" });
+  };
+
+  const connected = !!settings.gasUrl && settings.useGas;
+
+  return (
+    <div className="acRoot">
+      <Style id="CSS_ACCOUNTS" css={CSS_ACCOUNTS} />
+
+      <header className="acHead">
+        <div>
+          <p className="acHead__en">SETTINGS</p>
+          <h1>接続設定</h1>
+          <p className="acHead__s">制作の依頼をどこで処理するかを設定します。GitHubを触る必要はありません。</p>
+        </div>
+      </header>
+
+      {/* はじめての設定：やることを4つに絞って表示します */}
+      <div className="acSetup">
+        <p className="acSetup__k">設定はこの4つだけです</p>
+        <div className="acSetup__l">
+          {[
+            {
+              n: 1,
+              t: "バックエンドをつなぐ",
+              d: "スプレッドシートにコードを貼り、URLを下の欄に入れる",
+              ok: connected,
+              action: null,
+            },
+            {
+              n: 2,
+              t: "Difyのキーを入れる",
+              d: "コード冒頭の KEY_CREATIVE に貼って保存",
+              ok: diag ? !!(diag["キー"] && diag["キー"]["制作"]) : null,
+              action: () => runDiag(),
+              label: "確認する",
+            },
+            {
+              n: 3,
+              t: "アカウントを登録する",
+              d: "左メニューの「アカウント管理」から投稿先を追加",
+              ok: null,
+              action: null,
+            },
+            {
+              n: 4,
+              t: "投稿の方法を決める",
+              d: "朝のまとめメール（無料）か、Xの自動投稿（有料）",
+              ok: xstat ? !!xstat["接続"] : null,
+              action: checkX,
+              label: "設定する",
+            },
+          ].map((x) => (
+            <div className={`acSetup__i ${x.ok === true ? "is-ok" : x.ok === false ? "is-ng" : ""}`} key={x.n}>
+              <span className="acSetup__n">{x.ok === true ? "✓" : x.n}</span>
+              <div>
+                <b>{x.t}</b>
+                <em>{x.d}</em>
+              </div>
+              {x.action && (
+                <button onClick={x.action}>{x.label}</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="acSetup__n2">
+          1と2が終われば文章と画像が作れます。3と4は、実際に投稿を回すときに設定してください。
+        </p>
+      </div>
+
+      <div className={`acConn ${connected ? "is-on" : ""}`}>
+        <span className="acConn__d" />
+        <div>
+          <b>{connected ? "Google Apps Script に接続中" : "未接続（Makeに送信中）"}</b>
+          <em>
+            {connected
+              ? "文章の生成・保存・納品・予約配信まで自動で処理されます。"
+              : "現在はMakeへ送信しています。成果物の保存と納品は行われません。"}
+          </em>
+        </div>
+      </div>
+
+      <section className="acPanel">
+        <label className="acPanel__f">
+          <span>ウェブアプリのURL</span>
+          <input
+            type="text"
+            value={gasUrl}
+            onChange={(e) => setGasUrl(e.target.value)}
+            placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+          />
+          <em>Apps Scriptの「デプロイ」で発行されたURLをそのまま貼り付けてください。</em>
+        </label>
+
+        <div className="acPanel__b">
+          <button className="acAdd" onClick={test} disabled={testing}>
+            {testing ? "接続を確認中..." : "接続して保存"}
+          </button>
+          {connected && <button className="acGhost" onClick={disconnect}>接続を解除</button>}
+        </div>
+
+        {result && <p className={`acResult ${result.ok ? "is-ok" : "is-ng"}`}>{result.msg}</p>}
+
+        <div className="acDiagBar">
+          <button className="acGhost" onClick={runDiag} disabled={diagging}>
+            {diagging ? "確認中..." : "バックエンドの状態を確認"}
+          </button>
+          <button className="acAdd" onClick={runNow} disabled={running}>
+            {running ? "処理中..." : "今すぐ処理する"}
+          </button>
+          <button className="acGhost" onClick={runRetry} disabled={running}>
+            失敗した依頼を再実行
+          </button>
+          <button className="acGhost" onClick={checkX}>
+            自動投稿の状態
+          </button>
+          <button className="acGhost" onClick={() => callBudget({ action: "usage" })}>
+            利用状況を見る
+          </button>
+          <button className="acGhost" onClick={loadLog} disabled={logging}>
+            {logging ? "取得中..." : "詳細ログを見る"}
+          </button>
+          <span>生成されない・メールが来ないときは、まずここを押してください。</span>
+        </div>
+
+        {xstat && (
+          <div className={`acX ${xstat["接続"] ? "is-on" : ""}`}>
+            <p className="acX__k">
+              <span className="acX__d" />
+              X（旧Twitter）への自動投稿
+              <button onClick={() => setXstat(null)}>閉じる</button>
+            </p>
+            <p className="acX__s">
+              {xstat["接続"]
+                ? `接続できています（@${xstat["アカウント"] || "取得済み"}）。予約した時刻になると自動で投稿されます。`
+                : xstat["msg"]}
+            </p>
+            {!xstat["接続"] && (
+              <>
+                <div className="acXCost">
+                  <b>先に知っておいてください</b>
+                  Xの無料枠は2026年2月に廃止され、新規は従量課金のみです。最低$5のチャージが必要で、
+                  投稿1件$0.015、<b>リンクを含む投稿は$0.20</b>（約30円）かかります。
+                  note誘導のようなリンク付き投稿を毎日出すなら、月1,000円前後を見込んでください。
+                  <br />
+                  費用をかけたくない場合は、下の「朝のまとめメール」で十分運用できます。
+                </div>
+
+                <ol className="acSteps acX__l">
+                  <li>
+                    <b>console.x.com</b> を開き、プロジェクトとアプリを作成します。
+                  </li>
+                  <li>
+                    アプリの「User authentication settings」で
+                    <b> App permissions を Read and write</b> に変更して保存します。
+                  </li>
+                  <li>
+                    <b>そのあとで</b>「Keys and tokens」を開き、4つの値を発行します。
+                    <em>順番が逆だと、読み取り専用のトークンになり投稿できません。</em>
+                  </li>
+                  <li>「Credits」から$5以上をチャージします。</li>
+                  <li>下の欄に4つを貼り付けて「登録して確認」を押します。</li>
+                </ol>
+
+                <div className="acXForm">
+                  {[
+                    ["ck", "API Key"],
+                    ["cs", "API Key Secret"],
+                    ["at", "Access Token"],
+                    ["as", "Access Token Secret"],
+                  ].map(([k, label]) => (
+                    <label key={k}>
+                      <span>{label}</span>
+                      <input
+                        type="password"
+                        value={xkeys[k]}
+                        onChange={(e) => setXkeys({ ...xkeys, [k]: e.target.value })}
+                        placeholder="貼り付け"
+                      />
+                    </label>
+                  ))}
+                  <button className="acAdd" onClick={saveX} disabled={xsaving}>
+                    {xsaving ? "確認中..." : "登録して確認"}
+                  </button>
+                </div>
+              </>
+            )}
+            <p className="acX__n">
+              未設定でも予約は使えます。その場合、時刻になると本文がメールで届き、
+              ワンタップで投稿画面が開くリンクが付きます。
+            </p>
+          </div>
+        )}
+
+        {usage2 && (
+          <div className="acUse">
+            <p className="acUse__k">
+              OpenAIの利用状況
+              <button onClick={() => setUsage2(null)}>閉じる</button>
+            </p>
+
+            <div className="acUse__bar">
+              <span
+                style={{
+                  width: usage2["予算USD"]
+                    ? `${Math.min(100, (usage2["合計USD"] / usage2["予算USD"]) * 100)}%`
+                    : "0%",
+                }}
+              />
+            </div>
+
+            <div className="acUse__g">
+              {[
+                ["購入した額", usage2["予算USD"] ? `$${usage2["予算USD"]}` : "未登録"],
+                ["使った額", `$${usage2["合計USD"]}`],
+                ["残り", usage2["予算USD"] ? `$${usage2["残りUSD"]}（約${Math.round(usage2["残りUSD"] * 150).toLocaleString()}円）` : "—"],
+                ["今日", `$${usage2["本日USD"]} ／ 上限 $${usage2["日次上限USD"]}`],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <span>{k}</span>
+                  {v}
+                </div>
+              ))}
+            </div>
+
+            <p className="acUse__sk">この残高であと作れる量</p>
+            <div className="acUse__m">
+              {[
+                ["エコ", "eco"],
+                ["標準", "std"],
+                ["高品質", "high"],
+              ].map(([label, id]) => {
+                const m = usage2["モード別"] && usage2["モード別"][id];
+                if (!m) return null;
+                return (
+                  <div key={id}>
+                    <b>{label}</b>
+                    <em>${m["費用"]}／1件</em>
+                    <span>{m["作れる件数"]} 件</span>
+                  </div>
+                );
+              })}
+              <div>
+                <b>画像</b>
+                <em>${usage2["平均"]["画像1枚"]}／1枚</em>
+                <span>{usage2["あと作れる"]["画像"]} 枚</span>
+              </div>
+            </div>
+
+            <div className="acUse__f">
+              <button className="acAdd" onClick={() => callBudget({ action: "budget", add: 10 })}>
+                ＋$10 追加した
+              </button>
+              <label>
+                1日の上限 $
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  defaultValue={usage2["日次上限USD"]}
+                  onBlur={(e) => callBudget({ action: "budget", daily: e.target.value })}
+                />
+              </label>
+              <span>
+                OpenAIは残高を取得できるAPIを公開していないため、購入額から実際の消費を引いて計算しています。
+                10ドル購入するたびに左のボタンを押してください。
+              </span>
+            </div>
+          </div>
+        )}
+
+        {logs2 && (
+          <div className="acLog">
+            <p className="acLog__k">
+              実行ログ（新しい順・{logs2.length}件）
+              <button onClick={() => setLogs2(null)}>閉じる</button>
+            </p>
+            {logs2.length === 0 ? (
+              <p className="acLog__e">まだログがありません。制作を1件依頼すると記録されます。</p>
+            ) : (
+              <div className="acLog__t">
+                {logs2.map((r, i) => {
+                  const ng = /失敗|エラー|待機|省略/.test(r["結果"]);
+                  const slow = Number(r["秒"]) >= 40;
+                  return (
+                    <div className={`acLog__r ${ng ? "is-ng" : ""}`} key={i}>
+                      <span className="acLog__d">{r["日時"]}</span>
+                      <span className="acLog__s">{r["工程"]}</span>
+                      <span className={`acLog__st ${ng ? "is-ng" : ""}`}>{r["結果"]}</span>
+                      <span className={`acLog__ms ${slow ? "is-slow" : ""}`}>{r["秒"] ? r["秒"] + "秒" : ""}</span>
+                      <span className="acLog__m">{r["詳細"]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <p className="acLog__n">
+              「失敗 429」が並ぶ場合はDifyの利用制限です。時間をおくか、Difyの料金プランをご確認ください。
+              所要秒が45秒を超える工程は、Apps Scriptの通信上限（約60秒）に近く危険です。
+            </p>
+          </div>
+        )}
+
+        {diag && (
+          <div className="acDiag">
+            <p className="acDiag__v">
+              バージョン <b>{diag.version || "不明"}</b>
+              {diag.version !== "3.0" && <em>古いデプロイが公開されています</em>}
+            </p>
+            <ul className="acDiag__l">
+              {[
+                {
+                  label: "制作キー（Dify）",
+                  ok: diag["キー"] && diag["キー"]["制作"],
+                  need: true,
+                  hint: 'Apps Scriptの冒頭 KEY_CREATIVE = "" に、Creative_PR_AI のAPIキー（app-…）を貼って保存してください',
+                },
+                { label: "検査キー（Dify）", ok: diag["キー"] && diag["キー"]["検査"], need: false, hint: "入れると品質・法令の二重検査が働きます" },
+                { label: "画像キー（OpenAI）", ok: diag["キー"] && diag["キー"]["画像"], need: false, hint: "画像を作る場合のみ必要です" },
+                { label: "動画キー（JSON2Video）", ok: diag["キー"] && diag["キー"]["動画"], need: false, hint: "動画を作る場合のみ必要です" },
+                { label: "自動実行トリガー", ok: diag["トリガー"] && diag["トリガー"].length > 0, need: true, hint: "setup を実行すると登録されます" },
+                { label: "シートの準備", ok: diag["シート"] && diag["シート"]["ジョブ"], need: true, hint: "setup を実行すると作られます" },
+              ].map((it) => (
+                <li key={it.label} className={it.ok ? "is-ok" : it.need ? "is-ng" : "is-opt"}>
+                  <span className="acDiag__m">{it.ok ? "OK" : it.need ? "要対応" : "任意"}</span>
+                  <b>{it.label}</b>
+                  {!it.ok && <em>{it.hint}</em>}
+                </li>
+              ))}
+            </ul>
+            <p className="acDiag__n">
+              通知先：<b>{diag["通知先"] || "未設定"}</b> ／ 記録件数：{(diag["シート"] && diag["シート"]["件数"]) || 0} 件
+            </p>
+            {diag["未処理"] && diag["未処理"].length > 0 && (
+              <div className="acDiag__w">
+                <p>未処理・エラーの案件</p>
+                {diag["未処理"].map((w) => (
+                  <p key={w.id} className={`acDiag__job ${w["状態"] === "保留" ? "is-hold" : ""}`}>
+                    <em>{w["状態"]}</em>
+                    {w.id}
+                    <span>{w["備考"]}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="acPanel acPanel--guide">
+        <h2>接続までの手順</h2>
+        <ol className="acSteps">
+          <li><b>スプレッドシートを新規作成</b>して、名前を「SASHIWA_制作バックエンド」にします。</li>
+          <li>メニューの<b>「拡張機能」→「Apps Script」</b>を開きます。</li>
+          <li>最初のコードを全部消し、<b>SASHIWA_Backend.gs の中身を貼り付け</b>て保存します。</li>
+          <li>関数選択で <b>setup</b> を選んで実行。ダイアログにDifyのキーを貼るだけで、シートもトリガーも自動で用意されます。</li>
+          <li><b>「デプロイ」→「新しいデプロイ」→ ウェブアプリ</b>。アクセスできるユーザーを<b>「全員」</b>にしてデプロイ。</li>
+          <li>表示されたURLを<b>上の欄に貼って「接続して保存」</b>。以上で完了です。</li>
+        </ol>
+        <p className="acNote">
+          設定はこのブラウザに保存されます。別の端末でも使う場合は、同じURLをその端末でも貼り付けてください。
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/* ========================== 2. 成果物ライブラリ ========================== */
+
+/* ============================================================================
+   株式会社SASHIWA — 成果物ライブラリ
+   配置：src/Library.jsx
+
+   ■ 役割
+   作った文章・画像・動画・運用設計を、あとから探して開ける場所です。
+   Google Apps Script から直接取得するため、スプレッドシートを一般公開する
+   必要がありません（顧客名が含まれるため、公開は避ける設計にしています）。
+   ============================================================================ */
+
+const SERVICE_META = {
+  AGENT: { label: "AI社員構築代行", tone: "#E0402F", soft: "#FDECEA" },
+  STUDIO: { label: "文書・動画 自動制作", tone: "#2456C8", soft: "#E8EEFB" },
+  SOCIAL: { label: "SNSアカウント運用", tone: "#7C5CD6", soft: "#F1EDFC" },
+};
+
+const KIND_META = {
+  コンテンツ: { icon: "doc", tone: "#2456C8", soft: "#E8EEFB" },
+  画像: { icon: "image", tone: "#0E9F73", soft: "#E7F6F1" },
+  動画: { icon: "film", tone: "#E08A1F", soft: "#FBF2E1" },
+  運用設計: { icon: "map", tone: "#7C5CD6", soft: "#F1EDFC" },
+  予約投稿: { icon: "clock", tone: "#7C5CD6", soft: "#F1EDFC" },
+  問い合わせ: { icon: "mail", tone: "#E0402F", soft: "#FDECEA" },
+};
+
+/* デモ用。GAS未接続のときに表示します。 */
+const DEMO_JOBS = [
+  {
+    job_id: "J1786200000001",
+    受信日時: "2026-08-06 22:00",
+    種別: "コンテンツ",
+    投稿先アカウント: "SASHIWA 公式X（X（旧Twitter） @sashiwa_ai）",
+    持ち主: "自社",
+    媒体: "X（旧Twitter）",
+    状態: "完了",
+    指示内容:
+      "【事業】STUDIO／【JOB】CONTENT／【課金】無料（社内利用）／【媒体】X（旧Twitter）／【形式】単発投稿／【文字数上限】140／【媒体仕様】1行目で完結。改行で余白を作る。／【勝ち筋】1行目だけで価値が伝わること。／【目的】見込み客／【ターゲット】従業員10〜50名の中小企業の経営者／【トーン】丁寧・ですます／【構成】PREP法／【フックの型】数字を出す／【案数】3案／【検査】厳格／【テーマ】問い合わせ対応を自動化したら何時間浮いたか",
+    成果物URL: "",
+    完了日時: "2026-08-06 22:03",
+  },
+  {
+    job_id: "J1786200000002",
+    受信日時: "2026-08-06 05:30",
+    種別: "運用設計",
+    投稿先アカウント: "SASHIWA 公式X",
+    持ち主: "自社",
+    媒体: "X（旧Twitter）",
+    状態: "完了",
+    指示内容:
+      "【事業】STUDIO／【JOB】PLAN／【依頼】SNS運用設計書の作成／【会社】株式会社SASHIWA／【業種】BtoBサービス／【目的】見込み客／【使える時間】週2〜3時間／【ターゲット】中小企業の経営者",
+    成果物URL: "",
+    完了日時: "2026-08-06 05:34",
+  },
+];
+
+/* ------------------------------------------------------------- 解析 */
+
+/** 「【キー】値／【キー】値」の形を配列に分解します */
+function parseInstruction(text) {
+  const out = [];
+  String(text || "")
+    .split("／")
+    .forEach((chunk) => {
+      const m = chunk.match(/^\s*【([^】]+)】([\s\S]*)$/);
+      if (m) out.push({ k: m[1].trim(), v: m[2].trim() });
+      else if (chunk.trim()) {
+        if (out.length) out[out.length - 1].v += "／" + chunk.trim();
+      }
+    });
+  return out;
+}
+
+/** 一覧に出す短いタイトルを作ります */
+function jobTitle(job) {
+  const p = parseInstruction(job.指示内容);
+  const find = (k) => (p.find((x) => x.k === k) || {}).v;
+  return (
+    find("テーマ") ||
+    find("本文") ||
+    find("描画内容") ||
+    find("依頼") ||
+    find("内容") ||
+    job.種別 ||
+    "（内容なし）"
+  );
+}
+
+/* ------------------------------------------------------------- 部品 */
+
+function Li({ name, size = 18 }) {
+  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
+  const p = {
+    doc: (<><path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} /><path d="M14 2.8V7h4M8.5 12h7M8.5 16h5" {...s} /></>),
+    image: (<><rect x="3" y="4.5" width="18" height="15" rx="2.6" {...s} /><circle cx="8.6" cy="10" r="1.9" {...s} /><path d="m4 17 4.6-4.4 3.4 3.2 3.4-3.6L20 17" {...s} /></>),
+    film: (<><rect x="2.5" y="4.5" width="19" height="15" rx="2.6" {...s} /><path d="M7.5 4.5v15M16.5 4.5v15" {...s} opacity=".4" /><path d="m10.8 9.4 3.4 2.1-3.4 2.1z" {...s} /></>),
+    map: (<><path d="M9 3.5 3.5 6v14.5L9 18l6 2.5 5.5-2.5V3.5L15 6Z" {...s} /><path d="M9 3.5V18M15 6v14.5" {...s} /></>),
+    clock: (<><circle cx="12" cy="12" r="9" {...s} /><path d="M12 7v5.3l3.4 2" {...s} /></>),
+    mail: (<><rect x="2.5" y="5" width="19" height="14" rx="2.4" {...s} /><path d="m3.5 7 8.5 6 8.5-6" {...s} /></>),
+    open: (<><path d="M14 4.5h5.5V10" {...s} /><path d="M19.5 4.5 11 13" {...s} /><path d="M18 14.5v4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" {...s} /></>),
+    x: <path d="M6 6l12 12M18 6L6 18" {...s} />,
+    search: (<><circle cx="10.8" cy="10.8" r="6.8" {...s} /><path d="m15.8 15.8 4.4 4.4" {...s} /></>),
+    refresh: (<><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" {...s} /><path d="M20.5 4.5V10H15" {...s} /></>),
+    copy: (<><rect x="8.5" y="8.5" width="12" height="12" rx="2.4" {...s} /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" {...s} /></>),
+    box: (<><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5Z" {...s} /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" {...s} /></>),
+  };
+  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.doc}</svg>;
+}
+
+/* ------------------------------------------------------------- 詳細 */
+
+function JobDetail({ job, onClose }) {
+  const [copied, setCopied] = useState(false);
+  if (!job) return null;
+  const pairs = parseInstruction(job.指示内容);
+  const km = KIND_META[job.種別] || KIND_META.コンテンツ;
+  const svc = (pairs.find((x) => x.k === "事業") || {}).v;
+  const sm = SERVICE_META[svc] || null;
+
+  const HIDE = ["事業", "JOB"];
+  const shown = pairs.filter((p) => HIDE.indexOf(p.k) < 0);
+
+  return (
+    <div className="lbModal" onClick={onClose}>
+      <Style id="CSS_LIBRARY" css={CSS_LIBRARY} />
+      <div className="lbModal__b" onClick={(e) => e.stopPropagation()} style={{ "--t": km.tone, "--s": km.soft }}>
+        <div className="lbModal__h">
+          <span className="lbModal__ic"><Li name={km.icon} size={20} /></span>
+          <div className="lbModal__ht">
+            <p className="lbModal__k">
+              {job.種別}
+              {sm && <em style={{ background: sm.soft, color: sm.tone }}>{sm.label}</em>}
+              <span className={`lbSt lbSt--${job.状態}`}>{job.状態}</span>
+            </p>
+            <h2>{jobTitle(job)}</h2>
+          </div>
+          <button className="lbModal__x" onClick={onClose} aria-label="閉じる"><Li name="x" size={18} /></button>
+        </div>
+
+        <div className="lbModal__body">
+          <dl className="lbMeta">
+            <div><dt>受信日時</dt><dd className="lbMono">{job.受信日時 || "—"}</dd></div>
+            <div><dt>完了日時</dt><dd className="lbMono">{job.完了日時 || "—"}</dd></div>
+            <div><dt>投稿先</dt><dd>{job.投稿先アカウント || "—"}</dd></div>
+            <div><dt>持ち主</dt><dd>{job.持ち主 || "—"}</dd></div>
+            <div><dt>媒体</dt><dd>{job.媒体 || "—"}</dd></div>
+            <div><dt>ジョブID</dt><dd className="lbMono">{job.job_id}</dd></div>
+          </dl>
+
+          {job.成果物URL && String(job.成果物URL).indexOf("http") === 0 ? (
+            <a className="lbOpen" href={job.成果物URL} target="_blank" rel="noopener noreferrer">
+              <Li name="open" size={17} />
+              成果物を開く
+            </a>
+          ) : (
+            <p className="lbNone">
+              {job.状態 === "完了"
+                ? "この案件には成果物ファイルが紐づいていません。"
+                : job.状態 === "エラー"
+                ? "処理中にエラーが発生しました。理由は下記のとおりです。"
+                : "処理が完了すると、ここに成果物へのリンクが表示されます。"}
+              {job.状態 === "エラー" && job.成果物URL && <span className="lbErr">{job.成果物URL}</span>}
+            </p>
+          )}
+
+          <div className="lbSpecH">
+            <h3>制作条件</h3>
+            <button
+              className="lbCopy"
+              onClick={() => {
+                try {
+                  navigator.clipboard.writeText(String(job.指示内容 || ""));
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                } catch (e) {}
+              }}
+            >
+              <Li name="copy" size={13} />
+              {copied ? "コピーしました" : "条件をコピー"}
+            </button>
+          </div>
+
+          {shown.length === 0 ? (
+            <p className="lbNone">条件の記録がありません。</p>
+          ) : (
+            <dl className="lbSpec">
+              {shown.map((p, i) => (
+                <div key={`${p.k}-${i}`}>
+                  <dt>{p.k}</dt>
+                  <dd>{p.v || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- 本体 */
+
+function LibraryView({ pushLog, initialFilter }) {
+  const { settings } = useSettings();
+  const [jobs, setJobs] = useState(DEMO_JOBS);
+  const [live, setLive] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [svc, setSvc] = useState(initialFilter || "all");
+  const [kind, setKind] = useState("all");
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(null);
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState("works");
+  const [queue, setQueue] = useState([]);
+  const [copiedId, setCopiedId] = useState("");
+
+  useEffect(() => { if (initialFilter) setSvc(initialFilter); }, [initialFilter]);
+
+  const load = useCallback(async () => {
+    if (!settings.gasUrl) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=jobs`);
+      const data = await r.json();
+      try {
+        const rq = await fetch(`${settings.gasUrl}?action=queue`);
+        const dq = await rq.json();
+        if (dq && dq.ok && Array.isArray(dq.queue)) setQueue(dq.queue);
+      } catch (e2) { /* 予約が取れなくても本体は表示します */ }
+      if (data && data.ok && Array.isArray(data.jobs)) {
+        setJobs(data.jobs);
+        setLive(true);
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] LIBRARY SYNCED: ${data.jobs.length} records`);
+      } else {
+        throw new Error("形式が違います");
+      }
+    } catch (e) {
+      setLive(false);
+      setErr("取得できませんでした。接続設定をご確認ください。デモデータを表示しています。");
+    } finally {
+      setLoading(false);
+    }
+  }, [settings.gasUrl, pushLog]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    return jobs.filter((j) => {
+      if (kind !== "all" && j.種別 !== kind) return false;
+      if (svc !== "all") {
+        const p = parseInstruction(j.指示内容);
+        const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
+        if (s !== svc) return false;
+      }
+      if (q.trim()) {
+        const hay = `${j.投稿先アカウント} ${j.持ち主} ${j.媒体} ${j.指示内容}`.toLowerCase();
+        if (hay.indexOf(q.trim().toLowerCase()) < 0) return false;
+      }
+      return true;
+    });
+  }, [jobs, kind, svc, q]);
+
+  const kinds = useMemo(() => {
+    const set = {};
+    jobs.forEach((j) => { set[j.種別] = (set[j.種別] || 0) + 1; });
+    return set;
+  }, [jobs]);
+
+  return (
+    <div className="lbRoot">
+      <Style id="CSS_LIBRARY" css={CSS_LIBRARY} />
+
+      <header className="lbHead">
+        <div>
+          <p className="lbHead__en">LIBRARY</p>
+          <h1>成果物ライブラリ</h1>
+          <p className="lbHead__s">これまでに作ったものを、条件つきで探して開けます。</p>
+        </div>
+        <button className="lbRe" onClick={load} disabled={loading || !settings.gasUrl}>
+          <span className={loading ? "lbSpin" : ""}><Li name="refresh" size={15} /></span>
+          {settings.gasUrl ? (loading ? "取得中..." : "再取得") : "未接続"}
+        </button>
+      </header>
+
+      <div className={`lbSync ${live ? "is-live" : ""}`}>
+        <span className="lbSync__d" />
+        {live ? `実データを表示中（${jobs.length}件）` : "デモデータを表示中｜接続設定でGoogle Apps Scriptを接続すると実データになります"}
+      </div>
+      {err && <p className="lbErrBar">{err}</p>}
+
+      <div className="lbTabs">
+        <button className={tab === "works" ? "is-on" : ""} onClick={() => setTab("works")}>成果物</button>
+        <button className={tab === "queue" ? "is-on" : ""} onClick={() => setTab("queue")}>
+          予約投稿<em>{queue.filter((q) => q.状態 === "予約").length}</em>
+        </button>
+      </div>
+
+      {tab === "queue" ? (
+        queue.length === 0 ? (
+          <div className="lbEmpty">
+            <Li name="clock" size={30} />
+            <h2>予約された投稿はありません</h2>
+            <p>制作スタジオのSTEP3から予約すると、ここに並びます。</p>
+          </div>
+        ) : (
+          <div className="lbQueue">
+            {queue.map((q) => (
+              <article className={`lbQ lbQ--${q.状態}`} key={q.post_id}>
+                <div className="lbQ__l">
+                  <span className="lbMono lbQ__t">{q.予定日時}</span>
+                  <span className={`lbSt lbSt--${q.状態}`}>{q.状態}</span>
+                </div>
+                <div className="lbQ__m">
+                  <p className="lbQ__h">
+                    {q.アカウント}
+                    <em>{q.媒体}</em>
+                    {q.繰り返し && q.繰り返し !== "なし" && <em>{q.繰り返し}</em>}
+                  </p>
+                  <p className="lbQ__b">{q.本文}</p>
+                  <div className="lbQ__f">
+                    {q.投稿リンク && (
+                      <a className="lbQ__go" href={q.投稿リンク} target="_blank" rel="noopener noreferrer">
+                        <Li name="open" size={14} />
+                        投稿画面を開く
+                      </a>
+                    )}
+                    <button
+                      className="lbQ__cp"
+                      onClick={() => {
+                        try {
+                          navigator.clipboard.writeText(String(q.本文 || ""));
+                          setCopiedId(q.post_id);
+                          setTimeout(() => setCopiedId(""), 2000);
+                        } catch (e) {}
+                      }}
+                    >
+                      <Li name="copy" size={13} />
+                      {copiedId === q.post_id ? "コピーしました" : "本文をコピー"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      ) : (
+      <>
+      <div className="lbFilters">
+        <div className="lbSeg">
+          {[["all", "すべて"], ["AGENT", "AI社員構築"], ["STUDIO", "文書・動画"], ["SOCIAL", "SNS運用"]].map(([id, label]) => (
+            <button key={id} className={svc === id ? "is-on" : ""} onClick={() => setSvc(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="lbSeg lbSeg--sub">
+          <button className={kind === "all" ? "is-on" : ""} onClick={() => setKind("all")}>全種別</button>
+          {Object.keys(kinds).map((k) => (
+            <button key={k} className={kind === k ? "is-on" : ""} onClick={() => setKind(k)}>{k} {kinds[k]}</button>
+          ))}
+        </div>
+        <label className="lbSearch">
+          <Li name="search" size={15} />
+          <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="アカウント名・内容で検索" />
+        </label>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="lbEmpty">
+          <Li name="box" size={30} />
+          <h2>該当する成果物がありません</h2>
+          <p>条件を変えるか、制作スタジオから新しく作ってみてください。</p>
+        </div>
+      ) : (
+        <div className="lbGrid">
+          {filtered.slice(0, 60).map((j) => {
+            const km = KIND_META[j.種別] || KIND_META.コンテンツ;
+            const p = parseInstruction(j.指示内容);
+            const s = (p.find((x) => x.k === "事業") || {}).v || "AGENT";
+            const sm = SERVICE_META[s];
+            const hasFile = j.成果物URL && String(j.成果物URL).indexOf("http") === 0;
+            return (
+              <article key={j.job_id} className="lbCard" style={{ "--t": km.tone, "--s": km.soft }} onClick={() => setSel(j)}>
+                <div className="lbCard__h">
+                  <span className="lbCard__ic"><Li name={km.icon} size={17} /></span>
+                  <span className="lbCard__k">{j.種別}</span>
+                  {sm && <span className="lbCard__s" style={{ background: sm.soft, color: sm.tone }}>{s}</span>}
+                  <span className={`lbSt lbSt--${j.状態}`}>{j.状態}</span>
+                </div>
+                <p className="lbCard__t">{jobTitle(j)}</p>
+                <p className="lbCard__m">
+                  <span className="lbMono">{j.受信日時}</span>
+                  {j.媒体 && j.媒体 !== "-" && <em>{j.媒体}</em>}
+                </p>
+                <p className="lbCard__a">{j.投稿先アカウント || j.持ち主 || "—"}</p>
+                <div className="lbCard__f">
+                  <span className="lbCard__more">詳細を見る →</span>
+                  {hasFile && (
+                    <a href={j.成果物URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                      <Li name="open" size={14} />開く
+                    </a>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      </>
+      )}
+
+      <JobDetail job={sel} onClose={() => setSel(null)} />
+    </div>
+  );
+}
+
+/* ================================ CSS_LIBRARY ================================== */
+
+const CSS_LIBRARY = `
+.lbRoot,.lbModal{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;--t:#2456C8;--s:#E8EEFB;
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
+.lbRoot *,.lbRoot *::before,.lbRoot *::after,.lbModal *,.lbModal *::before,.lbModal *::after{box-sizing:border-box;}
+.lbRoot h1,.lbRoot h2,.lbRoot p,.lbRoot dl,.lbRoot dd,.lbRoot dt,.lbModal h2,.lbModal h3,.lbModal p,.lbModal dl,.lbModal dd,.lbModal dt{margin:0;padding:0;}
+.lbRoot button,.lbModal button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.lbRoot a,.lbModal a{color:inherit;text-decoration:none;}
+.lbMono{font-family:var(--mono);}
+.lbSpin{display:inline-flex;animation:lbSpin 1s linear infinite;}
+@keyframes lbSpin{to{transform:rotate(360deg);}}
+
+.lbHead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+.lbHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai);font-weight:700;margin-bottom:8px;}
+.lbHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.lbHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
+.lbRe{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:10px 18px;transition:all .2s;}
+.lbRe:hover:not(:disabled){border-color:var(--ink);color:var(--ink);}
+.lbRe:disabled{opacity:.5;cursor:default;}
+
+.lbSync{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 15px;margin-bottom:12px;}
+.lbSync__d{width:8px;height:8px;border-radius:50%;background:#9BA3B1;flex-shrink:0;}
+.lbSync.is-live .lbSync__d{background:#0E9F73;box-shadow:0 0 0 3px rgba(14,159,115,.2);}
+.lbErrBar{font-size:12px;color:var(--sig);background:#FDECEA;border-radius:11px;padding:11px 15px;margin-bottom:12px;line-height:1.8;}
+
+.lbFilters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+.lbSeg{display:flex;gap:4px;background:var(--bg);border-radius:999px;padding:4px;flex-wrap:wrap;}
+.lbSeg button{font-size:12.5px;font-weight:700;padding:8px 16px;border-radius:999px;color:var(--muted);transition:all .2s;white-space:nowrap;}
+.lbSeg button.is-on{background:var(--ink);color:#fff;}
+.lbSeg--sub button.is-on{background:var(--ai);}
+.lbSearch{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;flex:1;min-width:200px;}
+.lbSearch svg{color:var(--muted);}
+.lbSearch input{flex:1;border:none;background:none;font:inherit;font-size:13px;outline:none;color:var(--ink);}
+
+.lbGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:13px;}
+.lbCard{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:18px 20px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.lbCard:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);}
+.lbCard__h{display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap;}
+.lbCard__ic{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--s);color:var(--t);}
+.lbCard__k{font-size:11.5px;font-weight:700;}
+.lbCard__s{font-family:var(--mono);font-size:9px;font-weight:700;border-radius:999px;padding:3px 8px;letter-spacing:.06em;}
+.lbSt{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;white-space:nowrap;}
+.lbSt--完了{color:#0E9F73;background:#E6F7F0;}
+.lbSt--制作中{color:#B47C10;background:#FFF4DE;}
+.lbSt--エラー{color:var(--sig);background:#FDECEA;}
+.lbCard__t{font-size:14px;font-weight:700;line-height:1.65;margin-bottom:10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.lbCard__m{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--muted);margin-bottom:5px;}
+.lbCard__m em{font-style:normal;border:1px solid var(--line);border-radius:999px;padding:2px 8px;}
+.lbCard__a{font-size:11.5px;color:var(--muted);margin-bottom:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lbCard__f{display:flex;align-items:center;gap:10px;padding-top:11px;border-top:1px solid var(--line);}
+.lbCard__more{font-size:12px;font-weight:700;color:var(--t);}
+.lbCard__f a{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px;transition:all .2s;}
+.lbCard__f a:hover{border-color:var(--t);color:var(--t);}
+
+.lbEmpty{background:var(--white);border:1px dashed var(--line);border-radius:20px;padding:52px 28px;text-align:center;color:var(--muted);}
+.lbEmpty svg{margin:0 auto 16px;color:var(--ai);}
+.lbEmpty h2{font-size:17px;font-weight:900;color:var(--ink);margin-bottom:8px;}
+.lbEmpty p{font-size:13px;}
+
+/* 詳細モーダル */
+.lbModal{position:fixed;inset:0;background:rgba(10,14,22,.5);z-index:220;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+.lbModal__b{background:var(--white);border-radius:22px;width:100%;max-width:640px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 80px -40px rgba(0,0,0,.5);}
+.lbModal__h{display:flex;align-items:flex-start;gap:12px;padding:20px 22px;border-bottom:1px solid var(--line);}
+.lbModal__ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--s);color:var(--t);flex-shrink:0;}
+.lbModal__ht{flex:1;min-width:0;}
+.lbModal__k{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px;flex-wrap:wrap;}
+.lbModal__k em{font-style:normal;font-size:9.5px;border-radius:999px;padding:2px 8px;}
+.lbModal__ht h2{font-size:17px;font-weight:900;line-height:1.55;}
+.lbModal__x{color:var(--muted);padding:6px;border-radius:8px;flex-shrink:0;}
+.lbModal__x:hover{background:var(--bg);color:var(--ink);}
+.lbModal__body{padding:20px 22px;overflow-y:auto;}
+
+.lbMeta{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px;}
+.lbMeta > div{background:var(--white);padding:11px 14px;}
+.lbMeta dt{font-size:10px;color:var(--muted);margin-bottom:3px;}
+.lbMeta dd{font-size:12.5px;font-weight:500;line-height:1.6;word-break:break-all;}
+@media (max-width:560px){.lbMeta{grid-template-columns:1fr;}}
+
+.lbOpen{display:flex;align-items:center;justify-content:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:14px;margin-bottom:18px;transition:filter .2s,transform .2s;}
+.lbOpen:hover{filter:brightness(.92);transform:translateY(-1px);}
+.lbNone{font-size:12.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
+.lbErr{display:block;font-family:var(--mono);font-size:11px;color:var(--sig);margin-top:8px;word-break:break-all;}
+
+.lbSpecH{display:flex;align-items:center;gap:10px;margin-bottom:11px;}
+.lbSpecH h3{font-size:13px;font-weight:700;}
+.lbCopy{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 13px;transition:all .2s;}
+.lbCopy:hover{border-color:var(--t);color:var(--t);}
+.lbSpec{display:grid;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.lbSpec > div{display:grid;grid-template-columns:130px 1fr;gap:12px;padding:10px 14px;align-items:baseline;}
+.lbSpec > div:nth-child(odd){background:var(--bg);}
+.lbSpec dt{font-size:11px;font-weight:700;color:var(--muted);}
+.lbSpec dd{font-size:12.5px;line-height:1.85;word-break:break-word;}
+@media (max-width:560px){.lbSpec > div{grid-template-columns:1fr;gap:3px;}}
+
+.lbTabs{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;margin-bottom:14px;width:fit-content;}
+.lbTabs button{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;padding:9px 20px;border-radius:999px;color:var(--muted);transition:all .2s;}
+.lbTabs button.is-on{background:var(--ink);color:#fff;}
+.lbTabs em{font-style:normal;font-family:var(--mono);font-size:10px;background:var(--ai);color:#fff;border-radius:999px;padding:1px 7px;}
+.lbQueue{display:grid;gap:10px;}
+.lbQ{display:grid;grid-template-columns:150px 1fr;gap:16px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--ai);border-radius:16px;padding:16px 18px;}
+.lbQ--投稿済み,.lbQ--配信済み{border-left-color:#0E9F73;opacity:.72;}
+.lbQ--エラー{border-left-color:var(--sig);}
+.lbQ__l{display:flex;flex-direction:column;gap:7px;align-items:flex-start;}
+.lbQ__t{font-size:12px;font-weight:700;color:var(--ai);}
+.lbQ__l .lbSt{margin-left:0;}
+.lbQ__h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:6px;flex-wrap:wrap;}
+.lbQ__h em{font-style:normal;font-size:10.5px;font-weight:400;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.lbQ__b{font-size:12.5px;line-height:1.85;color:var(--muted);white-space:pre-wrap;}
+.lbSt--予約{color:var(--ai);background:#F1EDFC;}
+.lbSt--投稿済み,.lbSt--配信済み{color:#0E9F73;background:#E6F7F0;}
+@media (max-width:640px){.lbQ{grid-template-columns:1fr;gap:9px;}.lbQ__l{flex-direction:row;align-items:center;}}
+
+.lbQ__f{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;}
+.lbQ__go{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;transition:filter .2s;}
+.lbQ__go:hover{filter:brightness(.92);}
+.lbQ__cp{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:8px 15px;transition:all .2s;}
+.lbQ__cp:hover{border-color:var(--ink);color:var(--ink);}
+`;
+
+/* ============================ 3. 制作スタジオ ============================ */
+
+/* ============================================================================
+   株式会社SASHIWA — 制作スタジオ v3
+   配置：src/Studio.jsx
+
+   ■ 設計の考え方
+   お客様も運用者も「何が最適か」は分かりません。そこで
+     STEP1 運用設計 … AIがまず最適解を提案し、人が調整する
+     STEP2 制作     … 提案された条件を引き継いで、細部を詰めて生成する
+     STEP3 投稿予約 … 予約キューに積む
+   という順路にしています。
+
+   ■ 推奨エンジンについて
+   媒体特性・業種・目的・使える時間から、内蔵のルールで即座に提案します
+   （通信もAPI費用も発生しません）。さらに踏み込んだ運用設計書が必要な場合は、
+   「詳細な運用設計書をAIに作らせる」からMake経由でDifyに依頼できます。
+
+   ■ セキュリティ
+   APIキーはフロントに置きません。生成は必ず Make Webhook 経由です。
+   ============================================================================ */
+
+/* 送信先は「接続設定」画面で切り替えます。コードを書き換える必要はありません。 */
+const OWNER = { name: "OWNER（指輪直人）", email: "owner@sashiwa.local" };
+
+/* =========================== プラットフォーム定義 ======================== */
+
+const PLATFORMS = [
+  {
+    id: "instagram", label: "Instagram", en: "INSTAGRAM", tone: "#C13584", soft: "#FBEAF4",
+    hashtag: "5〜10個。大規模タグより中小規模タグを混ぜる",
+    times: ["12:00", "20:00"], kpi: "保存数・リーチ",
+    win: "1枚目（表紙）で結論を言い切ること。保存される情報密度があるか。",
+    strength: { 認知: 4, 見込み客: 3, 販売: 4, 採用: 4, 信頼: 3 },
+    effort: 3,
+    formats: [
+      { id: "reel", label: "リール", ratio: "9:16", dur: "15〜60秒", cap: 2200, spec: "冒頭1秒でフックを出す。字幕は全編必須。音源は商用可のものだけ。" },
+      { id: "feed", label: "フィード", ratio: "4:5", cap: 2200, spec: "1枚目で完結させる。文字は最小限で大きく。" },
+      { id: "carousel", label: "カルーセル", ratio: "4:5", cap: 2200, pages: "5〜10枚", spec: "表紙→本編→まとめ→CTA。1枚1メッセージ。" },
+      { id: "story", label: "ストーリーズ", ratio: "9:16", dur: "15秒", cap: 0, spec: "リンク導線に使う。上下15%は安全マージンを空ける。" },
+    ],
+  },
+  {
+    id: "threads", label: "Threads", en: "THREADS", tone: "#1A2233", soft: "#ECEEF2",
+    hashtag: "1〜2個。付けすぎない",
+    times: ["08:00", "22:00"], kpi: "返信数・いいね",
+    win: "会話が始まる余白を残すこと。断定より問いかけ。",
+    strength: { 認知: 3, 見込み客: 3, 販売: 2, 採用: 2, 信頼: 3 },
+    effort: 1,
+    formats: [
+      { id: "text", label: "テキスト投稿", cap: 500, spec: "1投稿1論点。改行を多めに取り、スマホで読める塊にする。" },
+      { id: "thread", label: "連投（スレッド）", cap: 500, pages: "3〜7投稿", spec: "1本目で全体の結論、以降で分解。最後に問いかけ。" },
+      { id: "image", label: "画像つき投稿", ratio: "1:1", cap: 500, spec: "画像は文章の補足ではなく、単体で意味が通ること。" },
+    ],
+  },
+  {
+    id: "tiktok", label: "TikTok", en: "TIKTOK", tone: "#E0402F", soft: "#FDECEA",
+    hashtag: "3〜5個。ジャンルタグ中心",
+    times: ["19:00", "22:00"], kpi: "視聴完了率",
+    win: "最後まで見られること。冒頭2秒で離脱が決まる。",
+    strength: { 認知: 5, 見込み客: 2, 販売: 3, 採用: 3, 信頼: 2 },
+    effort: 4,
+    formats: [
+      { id: "short", label: "ショート動画", ratio: "9:16", dur: "15〜60秒", cap: 2200, spec: "冒頭2秒でフック。テンポは短めのカット割り。字幕必須。" },
+      { id: "long", label: "長尺動画", ratio: "9:16", dur: "1〜3分", cap: 2200, spec: "序盤で結論を提示してから展開する。中だるみを作らない。" },
+      { id: "photo", label: "フォトモード", ratio: "9:16", cap: 2200, pages: "5〜10枚", spec: "1枚目で疑問を投げ、めくらせる構成に。" },
+    ],
+  },
+  {
+    id: "yt_shorts", label: "YouTube Shorts", en: "YT SHORTS", tone: "#D3241C", soft: "#FCEAE9",
+    hashtag: "#Shorts を必ず含める",
+    times: ["07:00", "21:00"], kpi: "視聴維持率・チャンネル登録",
+    win: "ループして見られる構成。終わりと始まりを繋げる。",
+    strength: { 認知: 5, 見込み客: 2, 販売: 2, 採用: 3, 信頼: 3 },
+    effort: 4,
+    formats: [
+      { id: "short", label: "ショート", ratio: "9:16", dur: "〜60秒", cap: 100, spec: "タイトルは40文字以内。冒頭1.5秒でフック。ループ構成を狙う。" },
+      { id: "clip", label: "切り抜き", ratio: "9:16", dur: "30〜60秒", cap: 100, spec: "長尺の山場を切り出す。前後に文脈の補足字幕を足す。" },
+    ],
+  },
+  {
+    id: "youtube", label: "YouTube", en: "YOUTUBE", tone: "#B3181C", soft: "#FBE9E9",
+    hashtag: "3個まで。説明欄の先頭に",
+    times: ["19:00"], kpi: "総再生時間・クリック率",
+    win: "サムネイルとタイトルの組み合わせで開かれるか。",
+    strength: { 認知: 3, 見込み客: 4, 販売: 3, 採用: 4, 信頼: 5 },
+    effort: 5,
+    formats: [
+      { id: "long", label: "通常動画", ratio: "16:9", dur: "8〜15分", cap: 5000, spec: "冒頭30秒で得られるものを明示。章立てとタイムスタンプを付ける。" },
+      { id: "thumb", label: "サムネイル案", ratio: "16:9", cap: 0, spec: "文字は13文字以内。スマホの小さい表示で読めるか。" },
+      { id: "community", label: "コミュニティ投稿", cap: 1000, spec: "動画への導線か、視聴者への問いかけに絞る。" },
+    ],
+  },
+  {
+    id: "x", label: "X（旧Twitter）", en: "X", tone: "#1A2233", soft: "#ECEEF2",
+    hashtag: "0〜2個。無しでも良い",
+    times: ["08:00", "12:00", "22:00"], kpi: "インプレッション・リポスト",
+    win: "1行目だけで価値が伝わること。折り返される前に刺す。",
+    strength: { 認知: 4, 見込み客: 4, 販売: 3, 採用: 3, 信頼: 4 },
+    effort: 1,
+    formats: [
+      { id: "post", label: "単発投稿", cap: 140, spec: "1行目で完結。改行で余白を作る。" },
+      { id: "thread", label: "スレッド", cap: 140, pages: "5〜10投稿", spec: "1本目で結論と本数を提示。各投稿を単体で読めるように。" },
+      { id: "long", label: "長文投稿", cap: 3000, spec: "冒頭140文字で読ませきる。以降に詳細。" },
+    ],
+  },
+  {
+    id: "note", label: "note", en: "NOTE", tone: "#0E9F73", soft: "#E7F6F1",
+    hashtag: "3〜5個",
+    times: ["07:00"], kpi: "スキ・フォロー・読了率",
+    win: "見出しだけ読んでも筋が通ること。",
+    strength: { 認知: 2, 見込み客: 5, 販売: 3, 採用: 3, 信頼: 5 },
+    effort: 3,
+    formats: [
+      { id: "article", label: "記事", cap: 8000, spec: "冒頭200字で読む理由を提示。見出しは疑問形か結論形で。" },
+      { id: "paid", label: "有料記事", cap: 12000, spec: "無料部分で価値を証明し、有料部分に実践手順を置く。" },
+    ],
+  },
+];
+
+/* =============================== 選択肢 ================================= */
+
+const INDUSTRIES = [
+  { id: "btob", label: "BtoBサービス", pillars: ["導入前後の変化", "業界の課題整理", "自社の運用の裏側"], bias: ["x", "note", "youtube"] },
+  { id: "shigyo", label: "士業・コンサル", pillars: ["よくある相談と回答", "制度・法改正の解説", "失敗事例の共有"], bias: ["note", "x", "youtube"], legal: "各士業の広告規制（誇大広告・成功報酬の表示など）に注意してください。" },
+  { id: "food", label: "飲食", pillars: ["調理・仕込みの様子", "季節メニュー", "店主の思想"], bias: ["instagram", "tiktok", "yt_shorts"], legal: "「日本一」などの最上級表現には客観的な根拠が必要です（景品表示法）。" },
+  { id: "beauty", label: "美容・サロン", pillars: ["施術のビフォーアフター", "自宅ケアの方法", "スタッフ紹介"], bias: ["instagram", "tiktok", "yt_shorts"], legal: "施術の効果を断定する表現は薬機法に抵触します。ビフォーアフターの掲載条件も要確認。" },
+  { id: "retail", label: "小売・EC", pillars: ["商品の使い方", "選び方ガイド", "お客様の声"], bias: ["instagram", "tiktok", "x"], legal: "価格・割引の表示は二重価格表示に注意（景品表示法）。" },
+  { id: "school", label: "教育・スクール", pillars: ["ミニ講義", "受講生の変化", "学習法の解説"], bias: ["youtube", "instagram", "note"], legal: "合格率・就職率などの実績表示には根拠と算出条件の明示が必要です。" },
+  { id: "estate", label: "不動産", pillars: ["物件の見どころ", "エリア解説", "契約の注意点"], bias: ["youtube", "instagram", "x"], legal: "宅建業法の広告規制（おとり広告・取引態様の明示）に注意してください。" },
+  { id: "health", label: "医療・健康", pillars: ["症状の基礎知識", "受診の目安", "予防の習慣"], bias: ["note", "youtube", "x"], legal: "医療広告ガイドライン・薬機法の対象です。効果効能の断定、体験談の掲載は原則できません。検査は必ず「厳格」を選んでください。" },
+  { id: "creative", label: "制作・クリエイティブ", pillars: ["制作過程", "ビフォーアフター", "使っている道具"], bias: ["instagram", "x", "yt_shorts"] },
+  { id: "other", label: "その他", pillars: ["専門知識の共有", "現場の様子", "お客様との対話"], bias: ["x", "instagram", "note"] },
+];
+
+const GOALS = [
+  { id: "認知", label: "認知を広げる", note: "まず知ってもらう" },
+  { id: "見込み客", label: "見込み客を集める", note: "問い合わせにつなげる" },
+  { id: "販売", label: "商品を売る", note: "購入・申込を増やす" },
+  { id: "採用", label: "採用したい", note: "応募を集める" },
+  { id: "信頼", label: "信頼を積む", note: "専門性を示す" },
+];
+
+const RESOURCES = [
+  { id: "low", label: "ほぼ取れない", note: "週1時間未満", max: 1, cad: "週2本", eff: 2 },
+  { id: "mid", label: "少し取れる", note: "週2〜3時間", max: 2, cad: "週3〜4本", eff: 3 },
+  { id: "high", label: "しっかり取れる", note: "週5時間以上", max: 3, cad: "毎日", eff: 5 },
+];
+
+const TONES = ["丁寧・ですます", "フランク", "断定的・力強い", "専門的・硬め", "やわらかい・共感"];
+const STRUCTS = ["PREP法（結論→理由→例→結論）", "ストーリー型", "リスト型（○選）", "比較型", "実演・手順型", "Q&A型", "逆説型"];
+const HOOKS = ["数字を出す", "否定から入る", "疑問形で問う", "実体験を語る", "常識を覆す", "損失を示す", "実績で示す"];
+const PERSONS = ["私", "僕", "弊社", "当社", "使わない"];
+const EMOJI = ["使わない", "控えめ", "適度に"];
+const CTAS = ["プロフィールのリンクへ", "DMで相談", "コメントを促す", "LPへ誘導", "保存を促す", "CTAなし"];
+const EXTRAS = ["ハッシュタグ案", "フック案（冒頭）", "サムネ文言", "字幕テキスト", "投稿の狙い・解説", "CTA文案", "次回投稿の案"];
+const VARIANTS = [
+  { id: "1", label: "1案", note: "すぐ使いたいとき" },
+  { id: "3", label: "3案", note: "比較して選びたい（推奨）" },
+  { id: "5", label: "5案", note: "方向性から探りたい" },
+];
+const MODES = [
+  { id: "eco", label: "エコ", calls: 1, note: "1回だけ生成。検査・選抜・画像なし。デモや下書きに", tone: "#0E9F73" },
+  { id: "std", label: "標準", calls: 2, note: "生成＋検査。日常の投稿はこれで十分", tone: "#2456C8" },
+  { id: "high", label: "高品質", calls: 5, note: "構成設計＋生成＋検査＋修正＋ベスト選抜。勝負どころに", tone: "#E0402F" },
+];
+
+const QA_LEVELS = [
+  { id: "standard", label: "標準検査", note: "事実関係と表現の一次確認" },
+  { id: "strict", label: "厳格検査", note: "薬機法・景表法・著作権まで二重確認（納品用）" },
+];
+
+
+
+/* ============ お手本から、制作条件を自動で決める ============ */
+
+const EMOJI_RE2 = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}]/gu;
+
+/**
+ * お手本の文章から、トーン・構成・フック・一人称・絵文字・CTAを推定します。
+ * 通信は発生しません。ブラウザ内で判定します。
+ */
+function inferSettings(texts) {
+  const arr = (texts || []).filter((t) => String(t).trim().length > 5);
+  if (arr.length === 0) return null;
+  const all = arr.join("\n");
+  const firsts = arr.map((t) => (t.split("\n").find((l) => l.trim()) || "").trim());
+  const lasts = arr.map((t) => {
+    const ls = t.split("\n").filter((l) => l.trim());
+    return ls.length ? ls[ls.length - 1] : "";
+  });
+  const n = arr.length;
+  const cnt = (re) => (all.match(re) || []).length;
+
+  /* 一人称 */
+  const persons = [["私", /私(は|が|も|の|たち)/g], ["僕", /僕(は|が|も|の|ら)/g], ["弊社", /弊社/g], ["当社", /当社/g], ["うち", /うち(は|が|も|の)/g]];
+  let person = "使わない";
+  let pMax = 0;
+  persons.forEach(([label, re]) => {
+    const c = cnt(re);
+    if (c > pMax) { pMax = c; person = label === "うち" ? "私" : label; }
+  });
+
+  /* 絵文字 */
+  const emo = (all.match(EMOJI_RE2) || []).length / n;
+  const emoji = emo < 0.3 ? "使わない" : emo < 1.2 ? "控えめ" : "適度に";
+
+  /* トーン */
+  const desu = cnt(/(です|ます)[。、\n！？]/g);
+  const dearu = cnt(/(である|だ)[。\n]/g);
+  const casual = cnt(/(だよ|だね|かな|よね|しちゃ|めっちゃ|ヤバ|ね[！!]|いこう|しよう|くれてありがとう|〜|ー[！!])/g);
+  const soft = cnt(/(一緒に|大丈夫|わかります|寄り添|安心)/g);
+  const emoRate = (all.match(EMOJI_RE2) || []).length / n;
+  let tone = "丁寧・ですます";
+  // 絵文字が多い、または砕けた語尾が目立つ場合はフランクとみなします
+  if (casual >= n || emoRate >= 1.5) tone = "フランク";
+  else if (soft >= n) tone = "やわらかい・共感";
+  else if (dearu > desu) tone = "断定的・力強い";
+  else if (cnt(/[ぁ-ん]/g) / Math.max(1, all.length) < 0.32) tone = "専門的・硬め";
+
+  /* フックの型 */
+  const fj = firsts.join(" ");
+  let hook = "疑問形で問う";
+  if (/[?？]/.test(fj)) hook = "疑問形で問う";
+  else if (/\d/.test(fj)) hook = "数字を出す";
+  else if (/^(まだ|いや|違|そうじゃ|やめ|ダメ|間違)/.test(firsts[0] || "")) hook = "否定から入る";
+  else if (/(私|僕|うち|自分)/.test(fj)) hook = "実体験を語る";
+  else if (/(実は|意外|知らない|常識)/.test(fj)) hook = "常識を覆す";
+  else if (/(損|逃|もったいない|失|risk)/i.test(fj)) hook = "損失を示す";
+
+  /* 構成 */
+  const bullets = cnt(/^[\s]*[・●▪◦\-*]/gm);
+  let struct = "ストーリー型";
+  if (bullets >= n * 2) struct = "リスト型（○選）";
+  else if (cnt(/(一方|に対して|より|比べ)/g) >= n) struct = "比較型";
+  else if (cnt(/(まず|次に|最後に|手順|ステップ)/g) >= n) struct = "実演・手順型";
+  else if (cnt(/[?？]/g) >= n * 2) struct = "Q&A型";
+  else if (cnt(/(結論|つまり|要は)/g) >= n) struct = "PREP法（結論→理由→例→結論）";
+
+  /* CTA */
+  const lj = lasts.join(" ");
+  let cta = "CTAなし";
+  if (/DM/i.test(lj)) cta = "DMで相談";
+  else if (/(プロフィール|プロフ|固定)/.test(lj)) cta = "プロフィールのリンクへ";
+  else if (/保存/.test(lj)) cta = "保存を促す";
+  else if (/(コメント|教えて|どう思)/.test(lj)) cta = "コメントを促す";
+  else if (/(https?:\/\/|詳細は|続きは)/.test(lj)) cta = "LPへ誘導";
+
+  /* 文字数 */
+  const len = Math.round(arr.reduce((a, t) => a + t.replace(/\s/g, "").length, 0) / n);
+
+  return {
+    tone: tone,
+    struct: struct,
+    hook: hook,
+    person: person,
+    emoji: emoji,
+    cta: cta,
+    len: String(len),
+    from: n,
+  };
+}
+
+
+
+
+/* ============ 分析CSVの取り込み（API課金ゼロ） ============ */
+
+/** 各SNSのCSVで使われる列名を、こちらの項目に対応づけます */
+const CSV_MAP = {
+  post_id: ["post id", "tweet id", "投稿id", "id", "ツイートid", "video id", "動画id", "コンテンツ"],
+  投稿日時: ["date", "time", "日付", "投稿日", "投稿日時", "公開日", "作成日", "post time", "published"],
+  本文: ["post text", "tweet text", "投稿文", "本文", "テキスト", "キャプション", "title", "動画のタイトル", "タイトル", "content"],
+  表示回数: ["impressions", "インプレッション", "表示回数", "views", "再生回数", "video views", "リーチ", "reach", "表示"],
+  いいね: ["likes", "いいね", "いいね数", "like count", "high fives"],
+  "保存・RT": ["reposts", "retweets", "リポスト", "リツイート", "保存", "saves", "bookmarks", "ブックマーク", "shares", "シェア", "共有"],
+  返信: ["replies", "返信", "コメント", "comments", "リプライ"],
+  クリック: ["url clicks", "link clicks", "リンククリック", "クリック", "clicks", "プロフィールへのアクセス", "profile visits"],
+};
+
+function normHeader(h) {
+  return String(h || "").toLowerCase().replace(/[\s"'（）()]/g, "").trim();
+}
+
+/** 列名から、どの項目かを判定します */
+function matchColumn(header) {
+  const h = normHeader(header);
+  if (!h) return null;
+  for (const key of Object.keys(CSV_MAP)) {
+    for (const cand of CSV_MAP[key]) {
+      const c = normHeader(cand);
+      if (h === c || h.indexOf(c) >= 0) return key;
+    }
+  }
+  return null;
+}
+
+/** CSVを配列に分解します（引用符・改行に対応） */
+function parseCsvText(text) {
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let q = false;
+  const t = String(text).replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) {
+      if (c === '"') {
+        if (t[i + 1] === '"') { cur += '"'; i++; }
+        else q = false;
+      } else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === "," || c === "\t") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((v) => String(v).trim()));
+}
+
+/** 数値に変換します（1,234 や 12% にも対応） */
+function toNum(v) {
+  const n = Number(String(v || "").replace(/[,%\s円]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * 分析CSVを読み取り、実績の行に変換します。
+ * 列名は自動で判別するので、どのSNSのCSVでもそのまま入れられます。
+ */
+function importAnalyticsCsv(text, account, media) {
+  const rows = parseCsvText(text);
+  if (rows.length < 2) return { ok: false, error: "データが見つかりませんでした。CSVファイルをご確認ください。" };
+
+  // 見出し行を探します（対応づけできる列がいちばん多い行）
+  let headerAt = 0;
+  let best = 0;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const hit = rows[i].filter((h) => matchColumn(h)).length;
+    if (hit > best) { best = hit; headerAt = i; }
+  }
+  if (best < 2) {
+    return { ok: false, error: "列名を読み取れませんでした。分析画面から書き出したCSVをそのままお使いください。" };
+  }
+
+  const header = rows[headerAt];
+  const cols = header.map((h) => matchColumn(h));
+  const out = [];
+  const seen = {};
+
+  for (let i = headerAt + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const o = { アカウント: account, 媒体: media, メモ: "CSV取込" };
+    cols.forEach((k, ci) => {
+      if (!k) return;
+      const v = r[ci];
+      if (v === undefined) return;
+      if (k === "post_id" || k === "投稿日時" || k === "本文") {
+        if (!o[k]) o[k] = String(v).trim();
+      } else {
+        o[k] = Math.max(o[k] || 0, toNum(v));
+      }
+    });
+    if (!o.本文 && !o.post_id) continue;
+    if (!o.表示回数 && !o.いいね && !o["保存・RT"]) continue;
+    if (!o.post_id) {
+      o.post_id = "CSV_" + (o.投稿日時 || "") + "_" + String(o.本文 || "").slice(0, 12);
+    }
+    if (seen[o.post_id]) continue;
+    seen[o.post_id] = 1;
+    out.push(o);
+  }
+
+  if (!out.length) return { ok: false, error: "数値のある行が見つかりませんでした。" };
+  return { ok: true, rows: out, columns: cols.filter(Boolean) };
+}
+
+
+/* ============ アナリティクスCSVの取り込み ============ */
+
+const COL_MAP = [
+  { key: "表示回数", pats: [/インプレッション/, /表示/, /impression/i, /view/i, /reach/i, /リーチ/] },
+  { key: "いいね", pats: [/いいね/, /like/i, /♡/] },
+  { key: "保存・RT", pats: [/リポスト/, /リツイート/, /保存/, /repost/i, /retweet/i, /share/i, /シェア/, /bookmark/i] },
+  { key: "返信", pats: [/返信/, /コメント/, /reply|replies/i, /comment/i] },
+  { key: "クリック", pats: [/クリック/, /click/i, /プロフィールへ/] },
+  { key: "投稿日時", pats: [/日付/, /日時/, /時刻/, /date/i, /time/i, /created/i] },
+  { key: "本文", pats: [/本文/, /テキスト/, /投稿/, /text/i, /content/i, /caption/i, /タイトル/, /title/i] },
+  { key: "post_id", pats: [/^id$/i, /投稿id/i, /post.?id/i, /tweet.?id/i, /動画id/i, /video.?id/i] },
+];
+
+/** ヘッダー行から、どの列が何かを推測します */
+function guessColumns(header) {
+  const map = {};
+  header.forEach((h, i) => {
+    const t = String(h || "").trim();
+    if (!t) return;
+    for (const c of COL_MAP) {
+      if (map[c.key] !== undefined) continue;
+      if (c.pats.some((re) => re.test(t))) {
+        map[c.key] = i;
+        break;
+      }
+    }
+  });
+  return map;
+}
+
+/** CSV／TSV／表の貼り付けを、実績データに変換します */
+function parsePerfPaste(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { rows: [], map: {}, error: "" };
+
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { rows: [], map: {}, error: "見出し行とデータ行が必要です。" };
+
+  // 区切り文字を判定します（タブ優先＝スプレッドシートからの貼り付け）
+  const sep = lines[0].indexOf("\t") >= 0 ? "\t" : ",";
+  const split = (l) => {
+    if (sep === "\t") return l.split("\t");
+    const out = [];
+    let cur = "";
+    let q = false;
+    for (let i = 0; i < l.length; i++) {
+      const c = l[i];
+      if (q) {
+        if (c === '"') {
+          if (l[i + 1] === '"') { cur += '"'; i++; } else q = false;
+        } else cur += c;
+      } else if (c === '"') q = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  };
+
+  const header = split(lines[0]).map((x) => x.replace(/^"|"$/g, "").trim());
+  const map = guessColumns(header);
+  const hasNum = ["表示回数", "いいね", "保存・RT", "返信", "クリック"].some((k) => map[k] !== undefined);
+  if (!hasNum) {
+    return { rows: [], map: map, error: "数値の列（インプレッション・いいね など）が見つかりませんでした。見出し行ごと貼り付けてください。" };
+  }
+
+  const num = (v) => {
+    const n = String(v || "").replace(/[^\d.-]/g, "");
+    return n ? Math.round(Number(n)) : 0;
+  };
+  const rows = [];
+  for (let i = 1; i < lines.length && rows.length < 300; i++) {
+    const c = split(lines[i]).map((x) => x.replace(/^"|"$/g, "").trim());
+    if (c.every((x) => !x)) continue;
+    const r = {
+      post_id: map.post_id !== undefined ? c[map.post_id] : "",
+      投稿日時: map.投稿日時 !== undefined ? c[map.投稿日時] : "",
+      本文: map.本文 !== undefined ? c[map.本文] : "",
+      表示回数: num(map.表示回数 !== undefined ? c[map.表示回数] : 0),
+      いいね: num(map.いいね !== undefined ? c[map.いいね] : 0),
+      "保存・RT": num(map["保存・RT"] !== undefined ? c[map["保存・RT"]] : 0),
+      返信: num(map.返信 !== undefined ? c[map.返信] : 0),
+      クリック: num(map.クリック !== undefined ? c[map.クリック] : 0),
+    };
+    if (!r.post_id) r.post_id = "P" + (r.投稿日時 || i) + "_" + String(r.本文).slice(0, 20);
+    if (r.表示回数 || r.いいね || r["保存・RT"] || r.返信 || r.クリック) rows.push(r);
+  }
+  return { rows: rows, map: map, error: rows.length ? "" : "数値のある行が見つかりませんでした。" };
+}
+
+/* ============ 実績から「伸びる型」を学ぶ（ブラウザ内・無料） ============ */
+
+/** 1投稿の特徴を数値化します */
+function postFeatures(text) {
+  const t = String(text || "");
+  const lines = t.split("\n");
+  const first = (lines.find((l) => l.trim()) || "").trim();
+  return {
+    文字数: t.replace(/\s/g, "").length,
+    行数: lines.length,
+    空行: lines.filter((l) => !l.trim()).length,
+    冒頭文字数: first.length,
+    冒頭に数字: /\d/.test(first) ? 1 : 0,
+    冒頭が問い: /[?？]/.test(first) ? 1 : 0,
+    絵文字: (t.match(EMOJI_RE2) || []).length,
+    ハッシュタグ: (t.match(/#[^\s#]+/g) || []).length,
+    リンク: /https?:\/\//.test(t) ? 1 : 0,
+    問いかけ: (t.match(/[?？]/g) || []).length,
+    数字の量: (t.match(/\d+/g) || []).length,
+  };
+}
+
+/** 反応率を出します（表示回数がある場合はそれで割ります） */
+function engagement(p) {
+  const react = Number(p.いいね || 0) + Number(p["保存・RT"] || 0) * 2 + Number(p.返信 || 0) * 3 + Number(p.クリック || 0) * 2;
+  const imp = Number(p.表示回数 || 0);
+  return imp > 0 ? (react / imp) * 100 : react;
+}
+
+const FEATURE_LABEL = {
+  文字数: ["長め", "短め", "文字数"],
+  行数: ["行数が多い", "行数が少ない", "行数"],
+  空行: ["余白が多い", "余白が少ない", "空行"],
+  冒頭文字数: ["1行目が長い", "1行目が短い", "1行目の長さ"],
+  冒頭に数字: ["1行目に数字を入れる", "1行目に数字を入れない", "冒頭の数字"],
+  冒頭が問い: ["1行目を問いで始める", "1行目を問いで始めない", "冒頭の問い"],
+  絵文字: ["絵文字を使う", "絵文字を控える", "絵文字"],
+  ハッシュタグ: ["ハッシュタグを多めに", "ハッシュタグを少なめに", "ハッシュタグ"],
+  リンク: ["リンクを入れる", "リンクを入れない", "リンク"],
+  問いかけ: ["問いかけを増やす", "問いかけを減らす", "問いかけ"],
+  数字の量: ["具体的な数字を多く", "数字を控える", "数字の量"],
+};
+
+/**
+ * 実績のある投稿を、反応の良い上位と下位に分けて比べます。
+ * 差が大きい特徴だけを「学んだこと」として返します。
+ */
+function learnFromPerf(rows, account) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account) && String(p.本文 || "").length > 20)
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => ({ ...p, f: postFeatures(p.本文), e: engagement(p) }));
+
+  if (list.length < 6) {
+    return { ready: false, count: list.length, need: 6 - list.length, insights: [], best: null };
+  }
+
+  list.sort((a, b) => b.e - a.e);
+  const n = Math.max(2, Math.round(list.length / 3));
+  const top = list.slice(0, n);
+  const bottom = list.slice(-n);
+  const avg = (arr, k) => arr.reduce((s2, x) => s2 + (x.f[k] || 0), 0) / arr.length;
+
+  const insights = [];
+  Object.keys(FEATURE_LABEL).forEach((k) => {
+    const a = avg(top, k);
+    const b = avg(bottom, k);
+    if (a === 0 && b === 0) return;
+    const base = Math.max(a, b, 0.01);
+    const diff = (a - b) / base;
+    if (Math.abs(diff) < 0.25) return; // 差が小さいものは無視します
+    const L = FEATURE_LABEL[k];
+    insights.push({
+      key: k,
+      label: L[2],
+      advice: diff > 0 ? L[0] : L[1],
+      top: Math.round(a * 10) / 10,
+      bottom: Math.round(b * 10) / 10,
+      strength: Math.round(Math.abs(diff) * 100),
+    });
+  });
+  insights.sort((a, b) => b.strength - a.strength);
+
+  return {
+    ready: true,
+    count: list.length,
+    insights: insights.slice(0, 5),
+    best: top[0],
+    avgTop: Math.round(top.reduce((s2, x) => s2 + x.e, 0) / top.length * 100) / 100,
+    avgBottom: Math.round(bottom.reduce((s2, x) => s2 + x.e, 0) / bottom.length * 100) / 100,
+  };
+}
+
+/** 時間帯・曜日ごとの成績を出します */
+function analyzeTiming(rows, account) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account))
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => {
+      const d = new Date(String(p.投稿日時 || "").replace(/-/g, "/"));
+      return { ...p, e: engagement(p), h: isNaN(d) ? -1 : d.getHours(), w: isNaN(d) ? -1 : d.getDay() };
+    });
+  if (list.length < 4) return null;
+
+  const byHour = {};
+  const byDay = {};
+  list.forEach((x) => {
+    if (x.h >= 0) {
+      const band = x.h < 6 ? "深夜" : x.h < 11 ? "朝" : x.h < 15 ? "昼" : x.h < 19 ? "夕方" : "夜";
+      (byHour[band] = byHour[band] || []).push(x.e);
+    }
+    if (x.w >= 0) {
+      const w = ["日", "月", "火", "水", "木", "金", "土"][x.w];
+      (byDay[w] = byDay[w] || []).push(x.e);
+    }
+  });
+  const agg = (o) =>
+    Object.keys(o)
+      .map((k) => ({ k: k, n: o[k].length, avg: Math.round((o[k].reduce((a, b) => a + b, 0) / o[k].length) * 100) / 100 }))
+      .filter((x) => x.n >= 2)
+      .sort((a, b) => b.avg - a.avg);
+  const hours = agg(byHour);
+  const days = agg(byDay);
+  return { hours: hours, days: days, best: { hour: hours[0], day: days[0] } };
+}
+
+/** 上位・下位の投稿を返します */
+function rankPosts(rows, account, n) {
+  const list = (rows || [])
+    .filter((p) => (!account || p.アカウント === account) && String(p.本文 || "").length > 5)
+    .filter((p) => Number(p.表示回数 || 0) > 0 || Number(p.いいね || 0) > 0)
+    .map((p) => ({ ...p, e: engagement(p) }))
+    .sort((a, b) => b.e - a.e);
+  return { top: list.slice(0, n || 5), bottom: list.slice(-(n || 5)).reverse(), all: list };
+}
+
+/** 学んだことを、AIへの指示文にします */
+function learnToBrief(l, timing, best) {
+  if (!l || !l.ready || !l.insights.length) return "";
+  let t =
+    `過去${l.count}件の実績から分かった傾向：` +
+    l.insights.map((x) => `${x.advice}（伸びた投稿の平均${x.top}に対し、伸びなかった投稿は${x.bottom}）`).join("／") +
+    "。この傾向を今回の制作に反映すること。ただし内容の質を犠牲にしないこと。";
+  if (timing && timing.best && timing.best.hour) {
+    t += `／反応が良い時間帯は「${timing.best.hour.k}」${timing.best.day ? `、曜日は「${timing.best.day.k}」` : ""}。`;
+  }
+  if (best && best.本文) {
+    t += `／最も反応が良かった投稿の書き出しは「${String(best.本文).split("\n")[0].slice(0, 40)}」。この型を参考にすること（文章の流用はしないこと）。`;
+  }
+  return t;
+}
+
+
+/** 媒体ごとの投稿・予約画面 */
+const POST_TARGET = {
+  x: { name: "X", url: "https://x.com/compose/post", how: "リンクから本文入りで開けます。そのまま投稿できます", auto: true },
+  threads: { name: "Threads", url: "https://www.threads.net/", how: "本文入りで開き、⋯ → スケジュールで予約します", auto: false },
+  instagram: { name: "Instagram", url: "https://business.facebook.com/latest/composer", how: "Meta Business Suiteで日時を指定して予約します", auto: false },
+  tiktok: { name: "TikTok", url: "https://www.tiktok.com/tiktokstudio/upload", how: "動画をアップし、公開設定でスケジュールを選びます", auto: false },
+  youtube: { name: "YouTube", url: "https://studio.youtube.com/", how: "YouTube Studioで日時を指定します", auto: false },
+  yt_shorts: { name: "YouTube Shorts", url: "https://studio.youtube.com/", how: "YouTube Studioで日時を指定します", auto: false },
+  note: { name: "note", url: "https://note.com/notes/new", how: "本文を貼り付け、公開設定で日時を指定します", auto: false },
+};
+
+
+/* ============ 動画の道具立て（3つから選ぶ） ============ */
+const TOOLKIT = {
+  label: "Google AI Studio",
+  voice: "Gemini の音声生成",
+  visual: "Veo（音声つきで生成）",
+  edit: "つなぐだけ",
+};
+
+/* ============ 投稿スケジュール ============ */
+const DAYS = ["月", "火", "水", "木", "金", "土", "日"];
+
+function emptySlot(time) {
+  return { id: "s" + Math.random().toString(36).slice(2, 8), time: time || "07:00", brief: "", images: [], video: "", videoNote: "" };
+}
+
+function defaultSchedule(pfId2) {
+  const P = PLATFORMS.find((x) => x.id === pfId2);
+  const times = (P && P.times) || ["07:00"];
+  return { days: ["月", "火", "水", "木", "金"], slots: times.slice(0, 2).map((t) => emptySlot(t)) };
+}
+
+/* ============ 媒体ごとの「制作パーツ」定義 ============ */
+const PART_DEFS = {
+  x: [
+    { id: "post", label: "投稿本文", hint: "1投稿目。ここで止められるかが勝負", type: "text" },
+    { id: "thread", label: "ツリー（続きの投稿）", hint: "2投稿目以降の展開のしかた", type: "text" },
+    { id: "image", label: "添付画像", hint: "投稿に添える画像の雰囲気", type: "media" },
+  ],
+  note: [
+    { id: "title", label: "タイトル", hint: "クリックされる見出しの付け方", type: "text" },
+    { id: "thumb", label: "サムネイル画像", hint: "見出し画像の雰囲気・文字の置き方", type: "media" },
+    { id: "free", label: "無料枠", hint: "冒頭から有料ラインの手前まで", type: "text" },
+    { id: "paid", label: "有料枠", hint: "有料部分の書き方・情報の濃さ", type: "text" },
+    { id: "inline", label: "差し込み画像", hint: "記事中に入れる図や写真", type: "media" },
+  ],
+  instagram: [
+    { id: "caption", label: "キャプション本文", hint: "投稿文の書き方", type: "text" },
+    { id: "cover", label: "1枚目（表紙）", hint: "表紙のデザインと文字の置き方", type: "media" },
+    { id: "pages", label: "2枚目以降", hint: "情報の並べ方", type: "media" },
+  ],
+  threads: [
+    { id: "post", label: "投稿本文", hint: "会話が始まる書き方", type: "text" },
+    { id: "thread", label: "連投", hint: "分解のしかた", type: "text" },
+  ],
+  tiktok: [
+    { id: "script", label: "台本・テロップ", hint: "冒頭2秒の掴み方", type: "text" },
+    { id: "caption", label: "キャプション", hint: "投稿文の書き方", type: "text" },
+    { id: "visual", label: "映像の雰囲気", hint: "画面構成・テロップの見せ方", type: "media" },
+  ],
+  yt_shorts: [
+    { id: "script", label: "台本・テロップ", hint: "ループする構成", type: "text" },
+    { id: "visual", label: "映像の雰囲気", hint: "画面構成", type: "media" },
+  ],
+  youtube: [
+    { id: "title", label: "タイトル", hint: "クリック率を左右する見出し", type: "text" },
+    { id: "thumb", label: "サムネイル画像", hint: "文字数・配色・構図", type: "media" },
+    { id: "desc", label: "説明文", hint: "概要欄。導線とタイムスタンプ", type: "text" },
+    { id: "video", label: "動画", hint: "構成・テンポ・テロップの見せ方", type: "media" },
+  ],
+  other: [{ id: "body", label: "本文", hint: "全体の書き方", type: "text" }],
+};
+
+function emptyPartRef() {
+  return { texts: [""], images: [], video: "", videoNote: "" };
+}
+
+function partFilled(r) {
+  if (!r) return false;
+  return (r.texts || []).some((t) => String(t).trim().length > 5) || (r.images || []).length > 0 || !!String(r.video || "").trim();
+}
+
+/** 画像を縮小してから読み込みます（送信量を抑えるため） */
+function readImageSmall(file, cb) {
+  const r = new FileReader();
+  r.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 640;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => cb(String(r.result));
+    img.src = String(r.result);
+  };
+  r.readAsDataURL(file);
+}
+
+/* ===================== お手本の文体を測る（内蔵分析） ==================== */
+
+const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}]/gu;
+
+/**
+ * 貼り付けられた投稿から、文体の特徴を実測します。
+ * 通信もAPI費用も発生しません。数値化した特徴を制作指示に載せます。
+ */
+function analyzeStyle(samples) {
+  const list = (samples || []).map(function (t) { return String(t || "").trim(); }).filter(function (t) { return t.length > 10; });
+  if (list.length === 0) return null;
+
+  let chars = 0, lines = 0, sentences = 0, sentLen = 0, emoji = 0, q = 0, num = 0, tags = 0, firstLen = 0, blanks = 0;
+  const enders = {};
+
+  list.forEach(function (t) {
+    const ls = t.split("\n");
+    const body = t.replace(/#[^\s#]+/g, "");
+    chars += t.length;
+    lines += ls.length;
+    blanks += ls.filter(function (l) { return l.trim() === ""; }).length;
+    firstLen += (ls[0] || "").length;
+    tags += (t.match(/#[^\s#]+/g) || []).length;
+    emoji += (t.match(EMOJI_RE) || []).length;
+    const ss = body.split(/[。！？\n]+/).filter(function (x) { return x.trim().length > 1; });
+    sentences += ss.length;
+    ss.forEach(function (x) { sentLen += x.trim().length; });
+    if (/[？?]\s*$/.test(t.trim())) q++;
+    if (/[0-9０-９]/.test(t)) num++;
+    ss.forEach(function (x) {
+      const m = x.trim().match(/(です|ます|ました|でした|だ|である|ない|ん|よ|ね|た|る)$/);
+      if (m) enders[m[1]] = (enders[m[1]] || 0) + 1;
+    });
+  });
+
+  const n = list.length;
+  const topEnders = Object.keys(enders).sort(function (a, b) { return enders[b] - enders[a]; }).slice(0, 3);
+
+  const level =
+    n >= 7 ? { label: "非常に高い", note: "文体の再現度が最も高くなります", pct: 100 }
+    : n >= 4 ? { label: "高い", note: "あと3本足すと最高精度になります", pct: 75 }
+    : n >= 2 ? { label: "標準", note: "あと2本足すと精度が上がります", pct: 50 }
+    : { label: "不足", note: "最低2本は必要です", pct: 22 };
+
+  return {
+    count: n,
+    level: level,
+    avgChars: Math.round(chars / n),
+    avgLines: Math.round((lines / n) * 10) / 10,
+    avgBlank: Math.round((blanks / n) * 10) / 10,
+    avgSentLen: sentences ? Math.round(sentLen / sentences) : 0,
+    firstLen: Math.round(firstLen / n),
+    emojiPer: Math.round((emoji / n) * 10) / 10,
+    questionRate: Math.round((q / n) * 100),
+    numberRate: Math.round((num / n) * 100),
+    tagsPer: Math.round((tags / n) * 10) / 10,
+    enders: topEnders,
+  };
+}
+
+/** 分析結果を、AIに渡す1行の指示文にまとめます */
+function styleToBrief(a) {
+  if (!a) return "";
+  return [
+    "1投稿あたり約" + a.avgChars + "文字",
+    "行数は約" + a.avgLines + "行（うち空行" + a.avgBlank + "行）",
+    "一文は平均" + a.avgSentLen + "文字と短く保つ",
+    "1行目は約" + a.firstLen + "文字",
+    "絵文字は1投稿あたり" + a.emojiPer + "個程度",
+    a.questionRate >= 40 ? "末尾を問いかけで閉じることが多い" : "断定で閉じることが多い",
+    a.numberRate >= 50 ? "具体的な数字を入れる" : "数字は多用しない",
+    a.tagsPer >= 1 ? "ハッシュタグは" + a.tagsPer + "個程度" : "ハッシュタグはほぼ使わない",
+    a.enders.length ? "よく使う語尾は「" + a.enders.join("」「") + "」" : "",
+  ].filter(Boolean).join("／");
+}
+
+/* ===================== 画像の指示文を自動で書く ========================= */
+
+const IMG_LIGHT = ["朝の斜光", "曇天のやわらかい拡散光", "窓から差す逆光", "夕方の低い光", "均一なスタジオ照明"];
+const IMG_ANGLE = ["やや俯瞰", "目線の高さ", "低い位置から見上げる", "真上からの俯瞰", "斜め45度"];
+const IMG_MOOD = {
+  認知: "目を引く強いコントラスト",
+  見込み客: "落ち着いて信頼感のある静かなトーン",
+  販売: "明るく前向きで、手に取りたくなる質感",
+  採用: "人の気配が感じられるあたたかい空気",
+  信頼: "余白の多い、端正で静かな構成",
+};
+const IMG_SUBJECT = {
+  btob: ["誰もいない朝のオフィスで、モニターだけが淡く光っている机", "積み上がった書類の山が奥に向かって薄れて消えていく様子", "整然と並んだ机と、時計だけが動いている静かな室内"],
+  shigyo: ["万年筆と閉じられた書類が置かれた木製のデスク", "窓辺に置かれた分厚い専門書と眼鏡", "整理された書棚と、差し込む午後の光"],
+  food: ["湯気の立つ調理場の手元と、仕込み中の食材", "カウンターに並べられた器と、朝の仕込みの風景", "季節の食材が並んだまな板の俯瞰"],
+  beauty: ["清潔なサロンの施術台と、整えられた道具", "並べられたケア用品と、やわらかい布の質感", "鏡越しに映る、明るく整った室内"],
+  retail: ["棚に整然と並んだ商品と、やわらかい照明", "包装された商品と、開封される直前の様子", "手のひらに乗せた商品の質感を映した接写"],
+  school: ["黒板と、書きかけのノートが置かれた机", "並んだ椅子と、朝の教室に差す光", "ノートとペンを俯瞰でとらえた学習の風景"],
+  estate: ["朝の光が入る、家具のない部屋", "窓から見える街並みと、室内の余白", "鍵と間取り図が置かれたテーブル"],
+  health: ["清潔で明るい待合室の椅子と観葉植物", "整えられた器具と、白を基調とした室内", "窓辺の水差しと、静かな午前の光"],
+  creative: ["制作途中の机の上、道具が散らばった手元", "画面に映る作りかけのデザインと、余白のある机", "並べられた色見本とスケッチ"],
+  other: ["静かな作業机と、途中まで進んだ仕事の痕跡", "整えられた道具が並ぶ棚", "窓辺の机と、差し込む自然光"],
+};
+
+function pickOne(arr, seed) {
+  return arr[Math.abs(seed) % arr.length];
+}
+
+/**
+ * テーマ・業種・目的から、画像の指示文を3案つくります。
+ * 通信もAPI費用も発生しません。これを下書きにして、送信後にAIが
+ * 英語の詳細プロンプトへ仕上げます（2段階方式）。
+ */
+function suggestImagePrompts(ctx, style, ratio, theme, seed) {
+  const ind = ctx.industry || "other";
+  const subjects = IMG_SUBJECT[ind] || IMG_SUBJECT.other;
+  const mood = IMG_MOOD[ctx.goal] || IMG_MOOD.認知;
+  const t = (theme || "").trim();
+  const vertical = String(ratio).indexOf("9:16") >= 0 || String(ratio).indexOf("4:5") >= 0;
+  const frame = vertical ? "縦位置。主役を上寄せにして、下半分に文字を載せる余白を残す" : "横位置。中央から右に余白を残す";
+
+  const a = {
+    label: "状況を切り取る",
+    note: "いちばん外しにくい。実務の空気が伝わります",
+    text:
+      pickOne(subjects, seed) + "。" +
+      pickOne(IMG_ANGLE, seed + 1) + "の構図。" +
+      pickOne(IMG_LIGHT, seed + 2) + "。" +
+      mood + "。" + frame + "。人物の顔は写さない。",
+  };
+  const b = {
+    label: "たとえで見せる",
+    note: "抽象的なテーマ向き。印象に残ります",
+    text:
+      (t ? "「" + t + "」を象徴する物を1つだけ置いた、" : "テーマを象徴する物を1つだけ置いた、") +
+      "余白の多いミニマルな構図。背景は無地に近く、影はやわらかい。" +
+      pickOne(IMG_LIGHT, seed + 3) + "。" + mood + "。" + frame + "。文字は入れない。",
+  };
+  const c = {
+    label: "図解にする",
+    note: "手順や仕組みの説明向き",
+    text:
+      (t ? "「" + t + "」の流れを表す、" : "処理の流れを表す、") +
+      "3つのブロックが左から右へつながる図。細い線と大きな余白。色は2色まで。" +
+      "背景は淡い単色。立体感は付けず、平面的に。" + frame + "。文字は入れない。",
+  };
+
+  const arr = [a, b, c];
+  if (style === "図解・ダイアグラム") return [c, a, b];
+  if (style === "イラスト" || style === "フラットデザイン") return [b, c, a];
+  return arr;
+}
+
+/* ========================= AI推奨エンジン（内蔵） ======================== */
+
+function recommend({ industry, goal, resource, budgetVideo, want }) {
+  const ind = INDUSTRIES.find((i) => i.id === industry) || INDUSTRIES[9];
+  const res = RESOURCES.find((r) => r.id === resource) || RESOURCES[1];
+
+  const wish = want && want.length ? want : null;
+  const scored = PLATFORMS.map((p) => {
+    let s = (p.strength[goal] || 2) * 10;
+    if (wish) s += wish.indexOf(p.id) >= 0 ? 60 : -40;
+    const bi = ind.bias.indexOf(p.id);
+    if (bi >= 0) s += 18 - bi * 5;
+    if (p.effort > res.eff) s -= (p.effort - res.eff) * 9;
+    if (!budgetVideo && p.effort >= 4) s -= 14;
+    return { ...p, score: s };
+  }).sort((a, b) => b.score - a.score);
+
+  // 選んだ媒体は必ず全部入れます。選んでいない場合だけ、使える時間から本数を決めます
+  const chosen = wish
+    ? wish.map((id) => scored.find((p) => p.id === id)).filter(Boolean)
+    : scored.slice(0, res.max);
+
+  const picked = chosen.map((p, i) => {
+    const fmt = pickFormat(p, goal, res);
+    return {
+      id: p.id,
+      label: p.label,
+      format: fmt.id,
+      formatLabel: fmt.label,
+      rank: i + 1,
+      why: whyPlatform(p, goal, ind, res, i),
+    };
+  });
+
+  const tone =
+    goal === "採用" ? "やわらかい・共感"
+    : goal === "信頼" ? "専門的・硬め"
+    : goal === "販売" ? "断定的・力強い"
+    : industry === "health" || industry === "shigyo" ? "丁寧・ですます"
+    : "丁寧・ですます";
+
+  const times = Array.from(new Set(picked.flatMap((p) => PLATFORMS.find((x) => x.id === p.id).times))).sort().slice(0, 3);
+
+  return {
+    platforms: picked,
+    cadence: res.cad,
+    times,
+    tone,
+    struct: goal === "販売" ? "PREP法（結論→理由→例→結論）" : goal === "認知" ? "リスト型（○選）" : "ストーリー型",
+    hook: goal === "認知" ? "数字を出す" : goal === "信頼" ? "実績で示す" : goal === "販売" ? "損失を示す" : "疑問形で問う",
+    cta: goal === "見込み客" ? "DMで相談" : goal === "販売" ? "LPへ誘導" : goal === "認知" ? "保存を促す" : "プロフィールのリンクへ",
+    variants: res.id === "low" ? "3" : "3",
+    qa: industry === "health" || industry === "shigyo" || industry === "estate" ? "strict" : "standard",
+    pillars: ind.pillars,
+    kpi: PLATFORMS.find((x) => x.id === picked[0].id).kpi,
+    legal: ind.legal || "",
+    reason: `${ind.label}で「${GOALS.find((g) => g.id === goal).label}」を狙う場合、${picked[0].label}が最も効きます。使える時間が${res.note}なので、無理なく続く範囲として${res.max}媒体・${res.cad}を上限にしています。`,
+  };
+}
+
+function pickFormat(p, goal, res) {
+  const f = p.formats;
+  if (p.id === "instagram") return goal === "認知" ? f[0] : goal === "販売" ? f[2] : goal === "採用" ? f[1] : f[2];
+  if (p.id === "x") return goal === "見込み客" || goal === "信頼" ? f[1] : f[0];
+  if (p.id === "note") return f[0];
+  if (p.id === "youtube") return res.eff >= 5 ? f[0] : f[2];
+  if (p.id === "tiktok") return f[0];
+  if (p.id === "yt_shorts") return f[0];
+  return f[0];
+}
+
+function whyPlatform(p, goal, ind, res, rank) {
+  const g = GOALS.find((x) => x.id === goal).label;
+  if (rank === 0) return `${ind.label}と「${g}」の相性が最も良く、${p.kpi}で成果を測れます。`;
+  if (p.effort <= 2) return `手間が軽いので、主軸の投稿を転用して負担なく広げられます。`;
+  return `主軸を補完し、${p.kpi}という別の角度で接点を増やせます。`;
+}
+
+/* ===================== アカウント初期設定の生成 ========================= */
+
+function buildProfile({ company, service, target, goal, cta }) {
+  const g = GOALS.find((x) => x.id === goal);
+  return [
+    `${target || "◯◯でお悩みの方"}へ｜${company || "（社名）"}`,
+    `${service || "（サービス内容）"}`,
+    `▼${g ? g.note : "詳しくはこちら"}`,
+    `${cta === "LPへ誘導" ? "リンクからご覧ください" : cta === "DMで相談" ? "DMでお気軽にご相談ください" : "プロフィールのリンクへ"}`,
+  ].join("\n");
+}
+
+/* =============================== 部品 =================================== */
+
+function Sic({ name, size = 18 }) {
+  const s = { fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" };
+  const p = {
+    send: (<><path d="M21.5 2.5 11 13" {...s} /><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4z" {...s} /></>),
+    loader: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.9 2.9M15.5 15.5l2.9 2.9M18.4 5.6l-2.9 2.9M8.5 15.5l-2.9 2.9" {...s} />,
+    spark: (<><path d="M12 3.5 13.9 9.3 19.7 11.2 13.9 13.1 12 18.9 10.1 13.1 4.3 11.2 10.1 9.3Z" {...s} /><path d="M18.5 3.5v3M20 5h-3" {...s} /></>),
+    clock: (<><circle cx="12" cy="12" r="9" {...s} /><path d="M12 7v5.3l3.4 2" {...s} /></>),
+    check: (<><circle cx="12" cy="12" r="9" {...s} /><path d="m8 12.3 2.8 2.8L16 9.8" {...s} /></>),
+    warn: (<><path d="M12 3.6 21.4 20H2.6Z" {...s} /><path d="M12 10v4.2M12 17.4v.1" {...s} /></>),
+    trash: (<><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" {...s} /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2A1.5 1.5 0 0 0 16.6 19l.9-12.5" {...s} /></>),
+    doc: (<><path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} /><path d="M14 2.8V7h4M8.5 12h7M8.5 16h5" {...s} /></>),
+    image: (<><rect x="3" y="4.5" width="18" height="15" rx="2.6" {...s} /><circle cx="8.6" cy="10" r="1.9" {...s} /><path d="m4 17 4.6-4.4 3.4 3.2 3.4-3.6L20 17" {...s} /></>),
+    map: (<><path d="M9 3.5 3.5 6v14.5L9 18l6 2.5 5.5-2.5V3.5L15 6Z" {...s} /><path d="M9 3.5V18M15 6v14.5" {...s} /></>),
+    copy: (<><rect x="8.5" y="8.5" width="12" height="12" rx="2.4" {...s} /><path d="M15.5 8.5v-3a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3" {...s} /></>),
+  };
+  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>{p[name] || p.check}</svg>;
+}
+
+function Field({ label, hint, children, ai }) {
+  return (
+    <label className="stF">
+      <span className="stF__l">
+        {label}
+        {ai && <em className="stAiTag">AI推奨</em>}
+      </span>
+      {children}
+      {hint && <span className="stF__h">{hint}</span>}
+    </label>
+  );
+}
+
+function Chips({ options, value, onChange, multi }) {
+  const on = (o) => {
+    if (!multi) return onChange(o);
+    onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
+  };
+  return (
+    <div className="stChips">
+      {options.map((o) => (
+        <button key={o} type="button" className={(multi ? value.includes(o) : value === o) ? "is-on" : ""} onClick={() => on(o)}>{o}</button>
+      ))}
+    </div>
+  );
+}
+
+/* =============================== 本体 =================================== */
+
+function Studio({ pushLog }) {
+  const [step, setStep] = useState(1);
+  const { accounts } = useAccounts();
+  const { settings } = useSettings();
+  const endpoint = resolveEndpoint(settings);
+  const live = accounts.filter((a) => a.status === "運用中");
+  const [acctId, setAcctId] = useState("");
+  const acct = live.find((a) => a.id === acctId) || live[0] || null;
+  const mode = acct && acct.ownerType === "client" ? "CLIENT" : "OWNER";
+
+  /* STEP1 前提 */
+  const [ctx, setCtx] = useState({
+    company: "", industry: "btob", goal: "見込み客", resource: "mid",
+    service: "", target: "", pain: "", strength: "", price: "", ng: "", ref: "", budgetVideo: false, raw: "",
+  });
+  const [plan, setPlan] = useState(null);
+  const [touched, setTouched] = useState({});
+
+  /* STEP2 制作条件 */
+  const [pfId, setPfId] = useState("instagram");
+  const [fmtId, setFmtId] = useState("carousel");
+  const [tone, setTone] = useState("丁寧・ですます");
+  const [struct, setStruct] = useState("ストーリー型");
+  const [hook, setHook] = useState("疑問形で問う");
+  const [person, setPerson] = useState("私");
+  const [emoji, setEmoji] = useState("控えめ");
+  const [cta, setCta] = useState("プロフィールのリンクへ");
+  const [len, setLen] = useState("");
+  const [extras, setExtras] = useState(["ハッシュタグ案", "フック案（冒頭）"]);
+  const [variants, setVariants] = useState("3");
+  const [qa, setQa] = useState("standard");
+  const [theme, setTheme] = useState("");
+  const [points, setPoints] = useState("");
+  const [subTab, setSubTab] = useState("content");
+  const [imgDesc, setImgDesc] = useState("");
+  const [imgStyle, setImgStyle] = useState("写真風");
+  const [ideas, setIdeas] = useState([]);
+  const [seed, setSeed] = useState(1);
+  const [wantPlatforms, setWantPlatforms] = useState([]);
+  const [refImages, setRefImages] = useState([]);
+  const [refVideo, setRefVideo] = useState("");
+  const [refVideoNote, setRefVideoNote] = useState("");
+  const [wantImages, setWantImages] = useState(false);
+  const [videoRef, setVideoRef] = useState({ url: "", note: "", result: "", loading: false, error: "" });
+  const [deliverBest, setDeliverBest] = useState(true);
+  const [notePaid, setNotePaid] = useState(true);
+  const [noteToX, setNoteToX] = useState(true);
+  const [watch, setWatch] = useState(null);
+  const [refs, setRefs] = useState({});
+  const [refPf, setRefPf] = useState("x");
+  const [openPart, setOpenPart] = useState("");
+  const [autoSet, setAutoSet] = useState(null);
+  const [tweak, setTweak] = useState(false);
+  const [moreCtx, setMoreCtx] = useState(false);
+  const [qmode, setQmode] = useState("eco");
+  const [usage, setUsage] = useState(null);
+  const [perf, setPerf] = useState([]);
+  const [themes, setThemes] = useState([]);
+  const [themeing, setThemeing] = useState(false);
+  const [reviseFor, setReviseFor] = useState(null);
+  const [reviseText, setReviseText] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [approved, setApproved] = useState(null);
+  const [sched, setSched] = useState({});
+  const [schedPf, setSchedPf] = useState("x");
+  const [refSlot, setRefSlot] = useState("common");
+  const [prodSlot, setProdSlot] = useState("common");
+  const [refAcct, setRefAcct] = useState("");
+  const [samples, setSamples] = useState(["", ""]);
+  const [refPoints, setRefPoints] = useState(["文体・語り口", "テンポ・改行"]);
+  const style = useMemo(() => analyzeStyle(samples), [samples]);
+
+  /* STEP3 */
+  const [schedule, setSchedule] = useState({ at: "", repeat: "なし" });
+
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [copied, setCopied] = useState(false);
+
+  const pf = useMemo(() => PLATFORMS.find((p) => p.id === pfId) || PLATFORMS[0], [pfId]);
+  const fmt = useMemo(() => pf.formats.find((f) => f.id === fmtId) || pf.formats[0], [pf, fmtId]);
+  const ind = INDUSTRIES.find((i) => i.id === ctx.industry);
+
+  const note = useCallback((l) => { if (typeof pushLog === "function") pushLog(l); }, [pushLog]);
+  const mark = (k) => setTouched((t) => ({ ...t, [k]: true }));
+
+  /* ---- AI推奨を実行 ---- */
+  const runPlan = () => {
+    const r = recommend({ ...ctx, want: wantPlatforms });
+    setPlan(r);
+    setTouched({});
+    const p0 = r.platforms[0];
+    setPfId(p0.id);
+    setFmtId(p0.format);
+    setTone(r.tone);
+    setStruct(r.struct);
+    setHook(r.hook);
+    setCta(r.cta);
+    setVariants(r.variants);
+    setQa(r.qa);
+    note(`[${new Date().toLocaleTimeString()}] PLAN GENERATED: ${r.platforms.map((p) => p.label).join(" / ")} ／ ${r.cadence}`);
+  };
+
+  /* ---- 送信 ---- */
+  const buildMessage = (job, extra) => {
+    const billing = mode === "OWNER" ? "無料（社内利用）" : "課金対象";
+    const L = [`【事業】STUDIO／【JOB】${job}／【課金】${billing}`];
+
+    if (job === "REVISE") {
+      L.push(`【対象成果物】${extra.url}`);
+      L.push(`【ご意見】${String(extra.feedback).replace(/\n/g, " ／ ")}`);
+      if (acct) L.push(`【投稿先アカウント】${acct.name}`);
+      return L.join("／");
+    }
+
+    if (job === "PLAN") {
+      L.push(`【依頼】SNS運用設計書の作成`);
+      if (wantPlatforms.length) L.push(`【運用したい媒体】${wantPlatforms.map((id) => (PLATFORMS.find((x) => x.id === id) || {}).label).join("・")}`);
+      L.push(`【会社】${ctx.company}／【業種】${ind.label}／【目的】${ctx.goal}／【使える時間】${RESOURCES.find((r) => r.id === ctx.resource).note}`);
+      L.push(`【商品・サービス】${ctx.service}／【価格帯】${ctx.price}`);
+      L.push(`【ターゲット】${ctx.target}／【顧客の悩み】${ctx.pain}／【自社の強み】${ctx.strength}`);
+      if (ctx.ref) L.push(`【参考アカウント】${ctx.ref}`);
+      if (ctx.ng) L.push(`【NG】${ctx.ng}`);
+      if (plan) {
+        L.push(`【一次案（社内エンジン）】媒体=${plan.platforms.map((p) => `${p.label}:${p.formatLabel}`).join(" / ")}／頻度=${plan.cadence}／時間帯=${plan.times.join(",")}／柱=${plan.pillars.join(" / ")}`);
+      }
+      L.push(`【出力してほしいもの】媒体ごとの運用方針・プロフィール文案・固定投稿案・30日分の投稿テーマ案・KPIと計測方法・法令上の注意点`);
+      if (acct) L.push(`【対象アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}）／【現在の方針】${acct.note || "未設定"}`);
+      if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
+      if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
+      return L.join("／");
+    }
+
+    L.push(`【媒体】${pf.label}／【形式】${fmt.label}` +
+      (fmt.ratio ? `／【比率】${fmt.ratio}` : "") + (fmt.dur ? `／【尺】${fmt.dur}` : "") +
+      (fmt.cap ? `／【文字数上限】${fmt.cap}` : "") + (fmt.pages ? `／【枚数・本数】${fmt.pages}` : ""));
+    if (qmode === "eco") {
+      L.push(`【勝ち筋】${pf.win}`);
+    } else {
+      L.push(`【媒体仕様】${fmt.spec}／【勝ち筋】${pf.win}／【KPI】${pf.kpi}／【ハッシュタグ方針】${pf.hashtag}`);
+    }
+    L.push(`【業種】${ind.label}／【目的】${ctx.goal}／【ターゲット】${ctx.target || "未指定"}`);
+    if (ctx.pain) L.push(`【顧客の悩み】${ctx.pain}`);
+    if (ctx.strength) L.push(`【自社の強み】${ctx.strength}`);
+    L.push(`【トーン】${tone}／【構成】${struct}／【フックの型】${hook}／【一人称】${person}／【絵文字】${emoji}／【CTA】${cta}`);
+    if (len) L.push(`【目安文字数】${len}`);
+    if (ctx.ng) L.push(`【NG】${ctx.ng}`);
+    L.push(`【案数】${variants}案／【検査】${qa === "strict" ? "厳格（薬機法・景表法・著作権まで二重確認）" : "標準"}`);
+    if (ind.legal) L.push(`【業種特有の注意】${ind.legal}`);
+
+    if (job === "CONTENT") {
+      // 投稿スケジュール
+      const sc2 = getSched(pfId);
+      const slot2 = prodSlot !== "common" ? sc2.slots.find((x) => x.id === prodSlot) : null;
+      L.push(`【投稿予定】${sc2.days.join("・")}／${sc2.slots.map((x) => x.time).join("・")}（週${sc2.days.length * sc2.slots.length}投稿）`);
+      if (slot2) {
+        L.push(`【この投稿の時間】${slot2.time}` + (slot2.brief ? `／【この時間に出したい内容】${slot2.brief}` : ""));
+        if (slot2.video) L.push(`【この時間の参考動画】${slot2.video}`);
+      }
+
+      // お手本（パーツごと）
+      // モードごとに、送るお手本の量を変えます（入力トークンの節約）
+      const REF_CAP = qmode === "eco" ? 500 : qmode === "std" ? 1400 : 3000;
+      let refUsed = 0;
+      const acct2 = (refs[pfId] && refs[pfId].account) || "";
+      const parts = PART_DEFS[pfId] || PART_DEFS.other;
+      const used = parts.filter((pt) => partFilled(getPartRef(pfId, pt.id, prodSlot)));
+      if (acct2 || used.length) {
+        L.push(
+          `【お手本】${acct2 || "（貼り付けた内容）"}／【お手本の扱い】文体・構成・リズム・見せ方の型のみを抽出して適用すること。` +
+            `表現・文章・固有名詞・画像をそのまま流用しないこと。`
+        );
+        used.forEach((pt) => {
+          const r = getPartRef(pfId, pt.id, prodSlot);
+          const texts = r.texts.filter((t) => t.trim().length > 5);
+          const st2 = analyzeStyle(texts);
+          const bits = [];
+          if (st2) bits.push(`実測：${styleToBrief(st2)}`);
+          if (texts.length && refUsed < REF_CAP) {
+            const room = REF_CAP - refUsed;
+            const body = texts.map((t, i) => `〈${i + 1}〉${t.replace(/\n/g, " ⏎ ")}`).join(" ｜ ").slice(0, room);
+            refUsed += body.length;
+            bits.push(`見本${texts.length}本：${body}`);
+          } else if (texts.length) {
+            bits.push(`見本${texts.length}本：（実測値のみ参照）`);
+          }
+          if (r.images.length) bits.push(`参考画像${r.images.length}枚（${r.images.map((im) => im.note || "指定なし").join("／")}）`);
+          if (r.video) bits.push(`参考動画：${r.video}（${r.videoNote || "指定なし"}）`);
+          L.push(`【お手本・${pt.label}】${bits.join("／")}`);
+        });
+      }
+      L.push(`【追加で出す成果物】${extras.join(" / ") || "なし"}`);
+      L.push(`【テーマ】${theme}`);
+      if (points) L.push(`【伝えたい要点】${points.replace(/\n/g, " ／ ")}`);
+      const lb = learnToBrief(learned, timing, learned.best);
+      if (lb) L.push(`【実績から学んだこと】${lb}`);
+      L.push(`【品質モード】${(MODES.find((m) => m.id === qmode) || MODES[1]).label}`);
+      if (pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") {
+        L.push(`【道具立て】${TOOLKIT.label}／【音声】${TOOLKIT.voice}／【映像】${TOOLKIT.visual}／【編集】${TOOLKIT.edit}`);
+        if (videoRef.result) L.push(`【お手本動画の分析】${videoRef.result.replace(/\n/g, " ／ ").slice(0, 1800)}`);
+      }
+      L.push(`【納品パッケージ】${pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}`);
+      L.push(`【画像生成】${wantImages ? "あり" : "なし"}`);
+      if (refImages.length) {
+        L.push(
+          `【参考画像】${refImages.length}枚（${refImages.map((im) => im.note || "指定なし").join("／")}）` +
+            `／【参考画像の扱い】構図・配色・文字の置き方などの型のみ参考にし、複製しないこと`
+        );
+      }
+      if (refVideo) L.push(`【参考動画】${refVideo}／【参考点】${refVideoNote || "指定なし"}`);
+      if (deliverBest && variants !== "1") L.push(`【納品形式】ベスト1案（全案を作ったうえで、最も反応が取れる1案を選んで納品）`);
+      if (pfId === "note" && notePaid) {
+        L.push(
+          `【note形式】有料記事／【無料部分】冒頭の導入と、結論の入口まで。読む価値が伝わり切る手前で止める` +
+            `／【有料部分】具体的な手順、数値、判断基準、事例／【区切り】有料部分の直前の行に「ここから有料」とだけ書くこと`
+        );
+      }
+      if (pfId === "note" && noteToX) L.push(`【連携投稿】note→X（記事への誘導投稿も作る）`);
+      L.push(
+        `【出力形式】そのまま投稿できる本文だけを出力すること。講評・解説・前置きは書かない。` +
+          `JSONで包まない。複数案は【案1】【案2】で区切る。` +
+          (extras.length ? `追加成果物は本文の後に「──」で区切って出す。` : "")
+      );
+    }
+    if (job === "IMAGE") {
+      L.push(`【画像スタイル】${imgStyle}／【描画内容】${imgDesc}`);
+    }
+    if (job === "POST") {
+      L.push(`【投稿日時】${schedule.at}／【繰り返し】${schedule.repeat}／【本文】${theme}`);
+    }
+    if (acct) L.push(`【投稿先アカウント】${acct.name}（${(PLATFORM_META[acct.platform] || {}).label || acct.platform}${acct.handle ? " @" + acct.handle : ""}）／【持ち主】${acct.owner}／【アカウント方針】${acct.note || "指定なし"}`);
+    if (ctx.raw) L.push(`【原文依頼】${ctx.raw.replace(/\n/g, " ")}`);
+    return L.join("／");
+  };
+
+
+
+  /* ── 投稿スケジュール ── */
+  const getSched = useCallback((pf2) => sched[pf2] || defaultSchedule(pf2), [sched]);
+
+  const setSchedField = useCallback((pf2, key, val) => {
+    setSched((prev) => ({ ...prev, [pf2]: { ...(prev[pf2] || defaultSchedule(pf2)), [key]: val } }));
+  }, []);
+
+  const toggleDay = useCallback((pf2, d) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      const days = cur.days.indexOf(d) >= 0 ? cur.days.filter((x) => x !== d) : [...cur.days, d];
+      return { ...prev, [pf2]: { ...cur, days: DAYS.filter((x) => days.indexOf(x) >= 0) } };
+    });
+  }, []);
+
+  const updateSlot = useCallback((pf2, slotId, fn) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      return { ...prev, [pf2]: { ...cur, slots: cur.slots.map((sl) => (sl.id === slotId ? fn({ ...sl }) : sl)) } };
+    });
+  }, []);
+
+  const addSlot = useCallback((pf2) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      if (cur.slots.length >= 5) return prev;
+      return { ...prev, [pf2]: { ...cur, slots: [...cur.slots, emptySlot("12:00")] } };
+    });
+  }, []);
+
+  const removeSlot = useCallback((pf2, slotId) => {
+    setSched((prev) => {
+      const cur = prev[pf2] || defaultSchedule(pf2);
+      if (cur.slots.length <= 1) return prev;
+      return { ...prev, [pf2]: { ...cur, slots: cur.slots.filter((sl) => sl.id !== slotId) } };
+    });
+  }, []);
+
+  const attachSlotImages = useCallback((pf2, slotId, files, done) => {
+    Array.from(files || []).slice(0, 2).forEach((f) => {
+      readImageSmall(f, (data) => {
+        updateSlot(pf2, slotId, (sl) => ({ ...sl, images: [...sl.images, { name: f.name, data: data, note: "" }].slice(0, 2) }));
+      });
+    });
+    if (done) done();
+  }, [updateSlot]);
+
+  /* ── お手本（媒体×パーツ）の操作 ── */
+  const refTargets = useMemo(() => {
+    if (plan && plan.platforms && plan.platforms.length) return plan.platforms.map((p) => p.id);
+    if (wantPlatforms.length) return wantPlatforms;
+    return ["x"];
+  }, [plan, wantPlatforms]);
+
+  useEffect(() => {
+    if (refTargets.length && refTargets.indexOf(refPf) < 0) setRefPf(refTargets[0]);
+  }, [refTargets, refPf]);
+
+  const getPartRef = useCallback(
+    (pf2, partId, slotKey) => {
+      const k = slotKey || refSlot;
+      const bs = (refs[pf2] && refs[pf2].bySlot) || {};
+      const own = (bs[k] && bs[k][partId]) || null;
+      if (own && partFilled(own)) return own;
+      // 時間ごとの設定が無ければ、共通の設定を使います
+      const com = (bs.common && bs.common[partId]) || null;
+      return own || com || emptyPartRef();
+    },
+    [refs, refSlot]
+  );
+
+  const updatePart = useCallback((pf2, partId, fn) => {
+    setRefs((prev) => {
+      const cur = prev[pf2] || {};
+      const bs = cur.bySlot || {};
+      const slot = bs[refSlot] || {};
+      const part = slot[partId] || emptyPartRef();
+      return {
+        ...prev,
+        [pf2]: { ...cur, bySlot: { ...bs, [refSlot]: { ...slot, [partId]: fn({ ...part }) } } },
+      };
+    });
+  }, [refSlot]);
+
+  const setRefField = useCallback((pf2, key, val) => {
+    setRefs((prev) => ({ ...prev, [pf2]: { ...(prev[pf2] || {}), [key]: val } }));
+  }, []);
+
+  const setPartText = useCallback((pf2, partId, i, val) => {
+    updatePart(pf2, partId, (p) => {
+      const t = [...p.texts];
+      t[i] = val;
+      return { ...p, texts: t };
+    });
+  }, [updatePart]);
+
+  const addPartText = useCallback((pf2, partId) => {
+    updatePart(pf2, partId, (p) => ({ ...p, texts: [...p.texts, ""] }));
+  }, [updatePart]);
+
+  const removePartText = useCallback((pf2, partId, i) => {
+    updatePart(pf2, partId, (p) => ({ ...p, texts: p.texts.filter((_, k) => k !== i) }));
+  }, [updatePart]);
+
+  const setPartField = useCallback((pf2, partId, key, val) => {
+    updatePart(pf2, partId, (p) => ({ ...p, [key]: val }));
+  }, [updatePart]);
+
+  const attachImages = useCallback((pf2, partId, files, done) => {
+    Array.from(files || []).slice(0, 3).forEach((f) => {
+      if (f.size > 8 * 1024 * 1024) {
+        setFlash({ ok: false, msg: `${f.name} は大きすぎます（8MBまで）。` });
+        return;
+      }
+      readImageSmall(f, (data) => {
+        updatePart(pf2, partId, (p) => ({ ...p, images: [...p.images, { name: f.name, data: data, note: "" }].slice(0, 3) }));
+      });
+    });
+    if (done) done();
+  }, [updatePart]);
+
+  const setImageNote = useCallback((pf2, partId, i, val) => {
+    updatePart(pf2, partId, (p) => ({ ...p, images: p.images.map((x, k) => (k === i ? { ...x, note: val } : x)) }));
+  }, [updatePart]);
+
+  const removeImage = useCallback((pf2, partId, i) => {
+    updatePart(pf2, partId, (p) => ({ ...p, images: p.images.filter((_, k) => k !== i) }));
+  }, [updatePart]);
+
+  const platformRefStatus = useCallback(
+    (pf2, slotKey) => {
+      const parts = PART_DEFS[pf2] || PART_DEFS.other;
+      const done = parts.filter((pt) => partFilled(getPartRef(pf2, pt.id, slotKey))).length;
+      return { done: done, total: parts.length };
+    },
+    [getPartRef]
+  );
+
+  /** 選んだ時間のお手本・投稿内容を、制作条件に反映します */
+  const applySlot = useCallback(
+    (pf2, slotKey) => {
+      const parts = PART_DEFS[pf2] || PART_DEFS.other;
+      const bs = (refs[pf2] && refs[pf2].bySlot) || {};
+      const pick = (partId) => {
+        const own = (bs[slotKey] && bs[slotKey][partId]) || null;
+        const com = (bs.common && bs.common[partId]) || null;
+        return own && partFilled(own) ? own : com || emptyPartRef();
+      };
+      const texts = parts.flatMap((pt) => pick(pt.id).texts).filter((t) => String(t).trim().length > 5);
+      const inf = inferSettings(texts);
+      if (inf) {
+        setTone(inf.tone);
+        setStruct(inf.struct);
+        setHook(inf.hook);
+        setPerson(inf.person);
+        setEmoji(inf.emoji);
+        setCta(inf.cta);
+        setLen(inf.len);
+        setAutoSet(inf);
+        setTweak(false);
+      }
+      // その時間に投稿したい内容を、テーマの下書きとして入れます
+      if (slotKey !== "common") {
+        const sl = getSched(pf2).slots.find((x) => x.id === slotKey);
+        if (sl && sl.brief && !theme.trim()) setTheme(sl.brief);
+      }
+    },
+    [refs, getSched, theme]
+  );
+
+  /* 投稿実績を読み込み、学習した傾向を制作条件に反映します */
+  useEffect(() => {
+    if (!endpoint.isGas) return;
+    fetch(`${endpoint.url}?action=perf`)
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.perf)) setPerf(d.perf); })
+      .catch(() => {});
+  }, [endpoint.isGas, endpoint.url]);
+
+  const learned = useMemo(() => learnFromPerf(perf, acct ? acct.name : ""), [perf, acct]);
+  const timing = useMemo(() => analyzeTiming(perf, acct ? acct.name : ""), [perf, acct]);
+
+  /** お手本動画のURLを読み込んで、作り方の型を分析します */
+  const analyzeVideo = useCallback(async () => {
+    const u = videoRef.url.trim();
+    if (!u) return setVideoRef((v) => ({ ...v, error: "動画のURLを入力してください。" }));
+    if (!endpoint.isGas) return setVideoRef((v) => ({ ...v, error: "先に接続設定でGoogle Apps Scriptを接続してください。" }));
+    setVideoRef((v) => ({ ...v, loading: true, error: "", result: "" }));
+    try {
+      const q = `action=videoref&url=${encodeURIComponent(u)}&note=${encodeURIComponent(videoRef.note)}`;
+      const r = await fetch(`${endpoint.url}?${q}`);
+      const d = await r.json();
+      if (d && d.ok) {
+        setVideoRef((v) => ({ ...v, loading: false, result: d.analysis, error: "" }));
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] VIDEO REF ANALYZED`);
+      } else {
+        setVideoRef((v) => ({ ...v, loading: false, error: (d && d.error) || "解析できませんでした。" }));
+      }
+    } catch (e) {
+      setVideoRef((v) => ({ ...v, loading: false, error: "解析できませんでした。接続設定をご確認ください。" }));
+    }
+  }, [videoRef.url, videoRef.note, endpoint, pushLog]);
+
+  /** AIにテーマと要点を提案させます */
+  const suggestThemes = useCallback(async (auto) => {
+    if (!endpoint.isGas) {
+      if (!auto) setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      return;
+    }
+    setThemeing(true);
+    setFlash(null);
+    try {
+      const sl = getSched(pfId).slots.find((x) => x.id === prodSlot);
+      const q = new URLSearchParams({
+        action: "theme",
+        acct: acct ? acct.name : "",
+        policy: acct ? acct.note || "" : "",
+        industry: (INDUSTRIES.find((x) => x.id === ctx.industry) || {}).label || "",
+        media: `${pf.label} ${fmt.label}`,
+        brief: sl ? sl.brief : "",
+        style: autoSet ? `${autoSet.tone}／${autoSet.struct}／${autoSet.hook}` : "",
+      });
+      const r = await fetch(`${endpoint.url}?${q.toString()}`);
+      const d = await r.json();
+      if (d && d.ok && d.themes && d.themes.length) {
+        setThemes(d.themes);
+        // 自動のときは1案目をそのまま記入します
+        if (auto) {
+          setTheme(d.themes[0].theme || "");
+          setPoints((d.themes[0].points || []).join("\n"));
+        }
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] THEMES SUGGESTED: ${d.themes.length}`);
+      } else if (!auto) {
+        setFlash({ ok: false, msg: d && d.error ? d.error : "テーマを提案できませんでした。空欄のまま依頼すれば、AIが決めて書きます。" });
+      }
+    } catch (e) {
+      if (!auto) setFlash({ ok: false, msg: "テーマを取得できませんでした。空欄のままでも依頼できます。" });
+    } finally {
+      setThemeing(false);
+    }
+  }, [endpoint, acct, ctx, pf, fmt, prodSlot, getSched, autoSet, pushLog]);
+
+  /** 直近で納品されたものを読み込んで、プレビューします */
+  const loadPreview = useCallback(async () => {
+    if (!endpoint.isGas) {
+      setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      return;
+    }
+    setPreviewing(true);
+    setFlash(null);
+    try {
+      const r = await fetch(`${endpoint.url}?action=jobs`);
+      const d = await r.json();
+      const done = (d.jobs || []).find(
+        (j) => j["状態"] === "完了" && String(j["成果物URL"]).indexOf("http") === 0
+      );
+      if (!done) {
+        setFlash({ ok: false, msg: "完了した成果物がまだありません。先に制作を依頼してください。" });
+        return;
+      }
+      const r2 = await fetch(`${endpoint.url}?action=doc&url=${encodeURIComponent(done["成果物URL"])}`);
+      const d2 = await r2.json();
+      if (d2 && d2.ok) setPreview({ url: done["成果物URL"], text: String(d2.text || "").slice(0, 12000) });
+      else setFlash({ ok: false, msg: (d2 && d2.error) || "成果物を読み込めませんでした。" });
+    } catch (e) {
+      setFlash({ ok: false, msg: "読み込みに失敗しました。接続設定をご確認ください。" });
+    } finally {
+      setPreviewing(false);
+    }
+  }, [endpoint]);
+
+  /** 依頼したあと、完成するまで状態を追いかけます */
+  const watchJob = useCallback(
+    (jobId, url) => {
+      setWatch({ id: jobId, status: "受付", url: "", tries: 0 });
+      let tries = 0;
+      const timer = setInterval(async () => {
+        tries++;
+        if (tries > 40) {
+          clearInterval(timer);
+          setWatch((w) => (w && w.id === jobId ? { ...w, status: "時間切れ" } : w));
+          return;
+        }
+        try {
+          const r = await fetch(`${url}?action=jobs`);
+          const d = await r.json();
+          const hit = (d.jobs || []).find((j) => j.job_id === jobId);
+          if (!hit) return;
+          setWatch({ id: jobId, status: hit["状態"], url: hit["成果物URL"] || "", tries: tries });
+          if (hit["状態"] === "完了" || hit["状態"] === "エラー") {
+            clearInterval(timer);
+            if (typeof pushLog === "function") {
+              pushLog(`[${new Date().toLocaleTimeString()}] JOB ${hit["状態"] === "完了" ? "DELIVERED" : "FAILED"}: ${jobId}`);
+            }
+          }
+        } catch (e) {
+          /* 一時的な失敗は無視して、次の巡回に任せます */
+        }
+      }, 8000);
+    },
+    [pushLog]
+  );
+
+  const send = async (job, label, extra) => {
+    if (sending) return;
+    if (!acct) return setFlash({ ok: false, msg: "先にアカウント管理でアカウントを登録してください。" });
+    if (job === "REVISE" && (!extra || !extra.feedback)) return setFlash({ ok: false, msg: "修正のご意見を入力してください。" });
+
+    if (job === "IMAGE" && !imgDesc.trim()) return setFlash({ ok: false, msg: "画像の内容を入力してください。" });
+    if (job === "POST") {
+      if (!theme.trim()) return setFlash({ ok: false, msg: "投稿本文を入力してください。" });
+      if (!schedule.at) return setFlash({ ok: false, msg: "投稿日時を指定してください。" });
+      if (new Date(schedule.at).getTime() < Date.now()) return setFlash({ ok: false, msg: "過去の日時は指定できません。" });
+      if (fmt.cap && theme.length > fmt.cap) return setFlash({ ok: false, msg: `上限 ${fmt.cap} 文字を超えています。` });
+    }
+
+    setSending(true); setFlash(null);
+    const t0 = Date.now();
+    const refImagesPayload = [];
+    (PART_DEFS[pfId] || PART_DEFS.other).forEach((pt) => {
+      const r = getPartRef(pfId, pt.id, prodSlot);
+      (r.images || []).slice(0, 2).forEach((im) => {
+        if (refImagesPayload.length < 3) {
+          refImagesPayload.push({ part: pt.label, note: im.note || "", data: im.data });
+        }
+      });
+    });
+
+    const payload = {
+      client_name: acct ? (acct.ownerType === "own" ? `${OWNER.name}／${acct.name}` : `${acct.owner}／${acct.name}`) : OWNER.name,
+      client_email: acct && acct.email ? acct.email : OWNER.email,
+      message: buildMessage(job, extra),
+      ref_images: job === "CONTENT" ? refImagesPayload : [],
+    };
+    let ok = true;
+    let detail = "";
+    let newJobId = "";
+    if (settings.liveSubmit !== false) {
+      try {
+        const r = await fetch(endpoint.url, {
+          method: "POST",
+          headers: { "Content-Type": endpoint.contentType },
+          body: JSON.stringify(payload),
+        });
+        ok = r.ok;
+        if (ok && endpoint.isGas) {
+          // GASはエラーでもHTTP 200を返すため、中身を確認します
+          try {
+            const d = JSON.parse(await r.text());
+            if (d && d.ok === false) {
+              ok = false;
+              detail = String(d.error || "").slice(0, 200);
+            } else if (d && d.job_id) {
+              newJobId = d.job_id;
+            }
+          } catch (e2) {
+            /* 応答が読めなくても、送信自体は届いているとみなします */
+          }
+        }
+      } catch (e) {
+        ok = false;
+        detail = "通信に失敗しました";
+      }
+    }
+    await new Promise((r) => setTimeout(r, Math.max(0, 1100 - (Date.now() - t0))));
+
+    const now = new Date();
+    setJobs((j) => [{
+      id: String(now.getTime()), pf: job === "PLAN" ? "運用設計" : pf.label, tone: job === "PLAN" ? "#7C5CD6" : pf.tone,
+      soft: job === "PLAN" ? "#F1EDFC" : pf.soft, kind: label,
+      title: (job === "IMAGE" ? imgDesc : job === "REVISE" ? "修正：" + String((extra && extra.feedback) || "").slice(0, 30) : theme).slice(0, 40),
+      at: job === "POST" ? schedule.at.replace("T", " ") : now.toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
+      status: ok ? (job === "POST" ? "予約済み" : "制作中") : "送信失敗",
+      billing: acct && acct.ownerType === "client" ? "課金" : "無料", isPost: job === "POST",
+    }, ...j].slice(0, 40));
+
+    note(`[${now.toLocaleTimeString()}] STUDIO ${job} ${ok ? "SUBMITTED" : "FAILED"}${!ok && detail ? " — " + detail.slice(0, 90) : ""}`);
+    setFlash({
+      ok,
+      msg: ok
+        ? job === "POST"
+          ? "予約しました。予約投稿タブで確認できます。"
+          : "依頼を受け付けました。5分以内に処理が始まり、完成するとメールとGoogle Driveに届きます。"
+        : "送信できませんでした。" + (detail ? "（" + detail + "）" : "接続設定で状態を確認してください。"),
+    });
+    if (ok && newJobId && endpoint.isGas && job !== "POST") {
+      watchJob(newJobId, endpoint.url);
+    }
+
+    if (job === "CONTENT") { setTheme(""); setPoints(""); }
+    if (job === "IMAGE") setImgDesc("");
+    if (job === "POST") { setTheme(""); setSchedule({ at: "", repeat: "なし" }); }
+    setSending(false);
+    setTimeout(() => setFlash(null), 7000);
+  };
+
+  const scheduled = jobs.filter((j) => j.isPost && j.status === "予約済み");
+  const profileText = buildProfile({ company: ctx.company, service: ctx.service, target: ctx.target, goal: ctx.goal, cta });
+
+  return (
+    <div className="stRoot" style={{ "--t": pf.tone, "--s": pf.soft }}>
+      <Style id="CSS_STUDIO" css={CSS_STUDIO} />
+
+      <header className="stHead">
+        <p className="stHead__en">PRODUCTION STUDIO</p>
+        <h1>制作スタジオ</h1>
+        <p className="stHead__s">最適な条件をAIが提案し、そこから調整して制作します。</p>
+      </header>
+
+      {!endpoint.isGas && (
+        <div className="stAlert">
+          <Sic name="warn" size={17} />
+          <p>
+            バックエンドが未接続です。このまま送信しても<b>成果物は保存・納品されません</b>。
+            左メニューの「接続設定」からGoogle Apps Scriptを接続してください。
+          </p>
+        </div>
+      )}
+
+      {/* 投稿先アカウント */}
+      <div className="stAcct">
+        {live.length === 0 ? (
+          <div className="stAcct__none">
+            <Sic name="warn" size={17} />
+            <p>運用中のアカウントがありません。左メニューの<b>「アカウント管理」</b>から登録してください。</p>
+          </div>
+        ) : (
+          <>
+            <span className="stAcct__k">投稿先</span>
+            <select className="stAcct__s" value={acct ? acct.id : ""} onChange={(e) => setAcctId(e.target.value)}>
+              {live.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.owner}／{a.name}（{(PLATFORM_META[a.platform] || {}).label || a.platform}）
+                </option>
+              ))}
+            </select>
+            {acct && (
+              <span className={`stAcct__b ${acct.ownerType === "own" ? "is-own" : ""}`}>
+                {acct.ownerType === "own" ? "社内利用（無料）" : "お客様案件（課金）"}
+              </span>
+            )}
+            {acct && acct.handle && <span className="stAcct__h">@{acct.handle}</span>}
+          </>
+        )}
+      </div>
+
+      {/* ステップ */}
+      <div className="stSteps">
+        {[
+          { n: 1, l: "運用設計", s: "何をどこにどれだけ" },
+          { n: 2, l: "お手本分析", s: "文体を読み取る" },
+          { n: 3, l: "制作", s: "条件を詰めて生成" },
+          { n: 4, l: "プレビュー", s: "確認して直す" },
+          { n: 5, l: "投稿予約", s: "キューに積む" },
+        ].map((s) => (
+          <button
+            key={s.n}
+            className={`stStep ${step === s.n ? "is-on" : ""} ${step > s.n ? "is-done" : ""} ${!plan && s.n > 1 ? "is-lock" : ""}`}
+            onClick={() => {
+              if (!plan && s.n > 1) {
+                setStep(1);
+                setFlash({ ok: false, msg: "先にSTEP1でAIに運用プランを提案させてください。" });
+                setTimeout(() => setFlash(null), 4000);
+                return;
+              }
+              if (s.n === 5 && !approved) {
+                setStep(4);
+                setFlash({ ok: false, msg: "先にSTEP4で成果物を確認し、「この内容で進む」を押してください。" });
+                setTimeout(() => setFlash(null), 5000);
+                return;
+              }
+              setStep(s.n);
+            }}
+          >
+            <span className="stStep__n">{step > s.n ? <Sic name="check" size={15} /> : s.n}</span>
+            <span><b>{s.l}</b><em>{s.s}</em></span>
+            {!plan && s.n > 1 && <span className="stStep__lock">未</span>}
+            {plan && s.n === 5 && !approved && <span className="stStep__lock">未</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="stGrid">
+        <section className="stCard">
+          {/* ============== STEP 1 ============== */}
+          {step === 1 && (
+            <>
+              <div className="stRow">
+                <Field label="会社・屋号">
+                  <input type="text" value={ctx.company} onChange={(e) => setCtx({ ...ctx, company: e.target.value })} placeholder="株式会社SASHIWA" />
+                </Field>
+                <Field label="業種">
+                  <select value={ctx.industry} onChange={(e) => setCtx({ ...ctx, industry: e.target.value })}>
+                    {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
+                  </select>
+                </Field>
+              </div>
+
+              <Field label="運用したいSNS" hint="決まっていなければ選ばなくて構いません。AIが業種と目的から提案します" ai>
+                <div className="stChips">
+                  {PLATFORMS.map((pf2) => (
+                    <button
+                      key={pf2.id}
+                      type="button"
+                      className={wantPlatforms.indexOf(pf2.id) >= 0 ? "is-on" : ""}
+                      onClick={() =>
+                        setWantPlatforms(
+                          wantPlatforms.indexOf(pf2.id) >= 0
+                            ? wantPlatforms.filter((x) => x !== pf2.id)
+                            : [...wantPlatforms, pf2.id]
+                        )
+                      }
+                    >
+                      {pf2.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="運用に使える時間" hint="無理のない範囲を選んでください。続かない計画は意味がありません">
+                <div className="stCards">
+                  {RESOURCES.map((r) => (
+                    <button key={r.id} type="button" className={ctx.resource === r.id ? "is-on" : ""} onClick={() => setCtx({ ...ctx, resource: r.id })}>
+                      <b>{r.label}</b><em>{r.note}</em>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <button className="stMore" onClick={() => setMoreCtx((v) => !v)}>
+                {moreCtx ? "詳しい情報を閉じる" : "＋ 詳しく書く（任意・精度が上がります）"}
+              </button>
+
+              <div style={{ display: moreCtx ? "block" : "none" }}>
+              <div className="stRow">
+                <Field label="商品・サービス"><input type="text" value={ctx.service} onChange={(e) => setCtx({ ...ctx, service: e.target.value })} placeholder="AI社員構築代行" /></Field>
+                <Field label="価格帯"><input type="text" value={ctx.price} onChange={(e) => setCtx({ ...ctx, price: e.target.value })} placeholder="30万円〜" /></Field>
+              </div>
+              <div className="stRow">
+                <Field label="ターゲット"><input type="text" value={ctx.target} onChange={(e) => setCtx({ ...ctx, target: e.target.value })} placeholder="従業員10〜50名の中小企業の経営者" /></Field>
+                <Field label="参考にしたいアカウント" hint="任意"><input type="text" value={ctx.ref} onChange={(e) => setCtx({ ...ctx, ref: e.target.value })} placeholder="@example" /></Field>
+              </div>
+              <Field label="顧客が抱えている悩み"><textarea rows={2} value={ctx.pain} onChange={(e) => setCtx({ ...ctx, pain: e.target.value })} placeholder="人手が足りないが、採用する余裕もない" /></Field>
+              <Field label="自社の強み・他と違う点"><textarea rows={2} value={ctx.strength} onChange={(e) => setCtx({ ...ctx, strength: e.target.value })} placeholder="自社の業務を実際に100%AIで回している" /></Field>
+              <Field label="NG・避けたい表現"><input type="text" value={ctx.ng} onChange={(e) => setCtx({ ...ctx, ng: e.target.value })} placeholder="煽り表現、効果の断定" /></Field>
+              <label className="stCheck">
+                <input type="checkbox" checked={ctx.budgetVideo} onChange={(e) => setCtx({ ...ctx, budgetVideo: e.target.checked })} />
+                <span>動画制作もできる（撮影・編集の手が確保できる）</span>
+              </label>
+              <Field label="依頼文をそのまま貼り付け" hint="任意。メールやチャットの原文をそのまま入れて構いません">
+                <textarea rows={3} value={ctx.raw} onChange={(e) => setCtx({ ...ctx, raw: e.target.value })} placeholder="お客様からいただいたご要望をそのまま貼り付けてください。" />
+              </Field>
+
+              </div>
+
+              <button className="stBig" onClick={runPlan}>
+                <Sic name="spark" size={17} />
+                {plan ? "条件を変えて、もう一度提案させる" : "AIに最適な運用プランを提案させる"}
+              </button>
+
+              {!plan && (
+                <p className="stGate">
+                  <Sic name="warn" size={15} />
+                  上のボタンでAIに提案させると、次のステップに進めます。
+                  {wantPlatforms.length > 0
+                    ? `選んだ${wantPlatforms.length}媒体を優先して、形式・頻度・時間帯・トーンを設計します。`
+                    : "媒体が未選択の場合は、業種と目的から最適な媒体をAIが選びます。"}
+                </p>
+              )}
+
+              {plan && (
+                <div className="stPlan">
+                  <p className="stPlan__k"><Sic name="spark" size={14} />AIの提案</p>
+                  <p className="stPlan__r">{plan.reason}</p>
+
+                  <div className="stPlan__pf">
+                    {plan.platforms.map((p) => {
+                      const P = PLATFORMS.find((x) => x.id === p.id);
+                      return (
+                        <div className="stPlan__c" key={p.id} style={{ "--t": P.tone, "--s": P.soft }}>
+                          <div className="stPlan__ch">
+                            <span className="stPlan__rank">{p.rank === 1 ? "主軸" : `第${p.rank}`}</span>
+                            <b>{p.label}</b>
+                            <em>{p.formatLabel}</em>
+                          </div>
+                          <p>{p.why}</p>
+                          <button className="stPlan__use" onClick={() => { setPfId(p.id); setFmtId(p.format); setStep(3); }}>
+                            この媒体で制作する →
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 投稿スケジュール（媒体ごと） */}
+                  <div className="stSched">
+                    <div className="stRefTabs">
+                      {plan.platforms.map((pp) => {
+                        const P = PLATFORMS.find((x) => x.id === pp.id);
+                        const sc = getSched(pp.id);
+                        return (
+                          <button
+                            key={pp.id}
+                            className={`stRefTab ${schedPf === pp.id ? "is-on" : ""}`}
+                            style={{ "--t": P.tone, "--s": P.soft }}
+                            onClick={() => setSchedPf(pp.id)}
+                          >
+                            <span className="stRefTab__d" />
+                            <b>{P.label}</b>
+                            <em>週{sc.days.length}日 × {sc.slots.length}回</em>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {(() => {
+                      const sc = getSched(schedPf);
+                      return (
+                        <>
+                          <Field label="投稿する曜日" hint="クリックで選び直せます。複数選択できます">
+                            <div className="stDays">
+                              {DAYS.map((d) => (
+                                <button
+                                  key={d}
+                                  type="button"
+                                  className={`stDay ${sc.days.indexOf(d) >= 0 ? "is-on" : ""} ${d === "土" || d === "日" ? "is-we" : ""}`}
+                                  onClick={() => toggleDay(schedPf, d)}
+                                >
+                                  {d}
+                                </button>
+                              ))}
+                            </div>
+                          </Field>
+
+                          <p className="stSlots__k">
+                            1日の投稿回数と時刻
+                            <em>{sc.slots.length}回／日</em>
+                          </p>
+
+                          <div className="stSlots">
+                            {sc.slots.map((sl, i) => (
+                              <div className="stSlot" key={sl.id}>
+                                <div className="stSlot__h">
+                                  <input
+                                    className="stSlot__time"
+                                    type="time"
+                                    value={sl.time}
+                                    onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, time: e.target.value }))}
+                                  />
+                                  <span className="stSlot__n">{i + 1}回目</span>
+                                  {sc.slots.length > 1 && (
+                                    <button className="stSlot__x" onClick={() => removeSlot(schedPf, sl.id)} aria-label="削除">×</button>
+                                  )}
+                                </div>
+                                <textarea
+                                  rows={2}
+                                  value={sl.brief}
+                                  onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, brief: e.target.value }))}
+                                  placeholder={`この時間に投稿したい内容（例：朝は挨拶と今日の注目、夜は解説）`}
+                                />
+                                <div className="stSlot__media">
+                                  <label className="stMedia__add">
+                                    <Sic name="image" size={14} />
+                                    画像
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      hidden
+                                      onChange={(e) => attachSlotImages(schedPf, sl.id, e.target.files, () => (e.target.value = ""))}
+                                    />
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={sl.video}
+                                    onChange={(e) => updateSlot(schedPf, sl.id, (x) => ({ ...x, video: e.target.value }))}
+                                    placeholder="参考動画のURL（任意）"
+                                  />
+                                </div>
+                                {sl.images.length > 0 && (
+                                  <div className="stSlot__imgs">
+                                    {sl.images.map((im, k) => (
+                                      <span key={k}>
+                                        <img src={im.data} alt="" />
+                                        <button
+                                          onClick={() =>
+                                            updateSlot(schedPf, sl.id, (x) => ({ ...x, images: x.images.filter((_, j) => j !== k) }))
+                                          }
+                                          aria-label="削除"
+                                        >×</button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {sc.slots.length < 5 && (
+                            <button className="stPart__add" onClick={() => addSlot(schedPf)}>
+                              ＋ 投稿する時間を追加する
+                            </button>
+                          )}
+
+                          <p className="stSched__sum">
+                            {PLATFORMS.find((x) => x.id === schedPf).label}：
+                            <b>{sc.days.join("・")}</b> の <b>{sc.slots.map((x) => x.time).join(" / ")}</b>
+                            　＝ 週 {sc.days.length * sc.slots.length} 投稿
+                          </p>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  <Field label="コンテンツの柱" ai={!touched.pillars} hint="この3本を軸に投稿を作り分けます。書き換えられます">
+                    <textarea rows={3} value={plan.pillars.join("\n")} onChange={(e) => { setPlan({ ...plan, pillars: e.target.value.split("\n") }); mark("pillars"); }} />
+                  </Field>
+
+                  <Field label="プロフィール文案" hint="そのままコピーして各SNSのプロフィール欄に貼れます">
+                    <textarea rows={4} value={profileText} readOnly />
+                  </Field>
+                  <button
+                    className="stCopy"
+                    onClick={() => {
+                      try {
+                        navigator.clipboard.writeText(profileText);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      } catch (e) {
+                        setFlash({ ok: false, msg: "コピーできませんでした。手動で選択してください。" });
+                      }
+                    }}
+                  >
+                    <Sic name={copied ? "check" : "copy"} size={14} />
+                    {copied ? "コピーしました" : "プロフィール文をコピー"}
+                  </button>
+
+                  {plan.legal && (
+                    <div className="stWarn">
+                      <Sic name="warn" size={17} />
+                      <p><b>{ind.label}の広告規制について</b>{plan.legal}</p>
+                    </div>
+                  )}
+
+                  <div className="stPlan__f">
+
+                    <button className="stNext" onClick={() => setStep(2)}>お手本の設定へ進む →</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ============== STEP 2：お手本分析（媒体・パーツ別） ============== */}
+          {step === 2 && (
+            <>
+              <div className="stHint">
+                <Sic name="spark" size={16} />
+                <p>
+                  制作するパーツごとに、<b>お手本を1つ以上</b>設定してください。文章・画像・動画のいずれでも構いません。
+                  文章は文字数や改行のリズムを実測し、画像は内容をAIが読み取って制作条件に反映します。
+                </p>
+              </div>
+
+              {/* 媒体タブ */}
+              <div className="stRefTabs">
+                {refTargets.map((id) => {
+                  const P = PLATFORMS.find((x) => x.id === id);
+                  const st = platformRefStatus(id, "common");
+                  return (
+                    <button
+                      key={id}
+                      className={`stRefTab ${refPf === id ? "is-on" : ""} ${st.done === st.total ? "is-ok" : ""}`}
+                      style={{ "--t": P.tone, "--s": P.soft }}
+                      onClick={() => setRefPf(id)}
+                    >
+                      <span className="stRefTab__d" />
+                      <b>{P.label}</b>
+                      <em>
+                        {st.done}/{st.total}
+                      </em>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <Field label="お手本にするアカウント" hint="任意。名前だけでは推測になるため、下の設定が本命です">
+                <input
+                  type="text"
+                  value={(refs[refPf] && refs[refPf].account) || ""}
+                  onChange={(e) => setRefField(refPf, "account", e.target.value)}
+                  placeholder="@example ／ https://note.com/example"
+                />
+              </Field>
+
+              {(refPf === "tiktok" || refPf === "yt_shorts" || refPf === "youtube") && (
+                <div className="stVref">
+                  <p className="stVref__k">
+                    お手本の動画を読み込む
+                    <em>YouTube・Shorts のみ</em>
+                  </p>
+                  <p className="stVref__n">
+                    真似したい動画のURLを入れると、<b>構成・カット割り・テロップの出し方・話し方</b>を読み取り、
+                    制作条件に反映します。文章を貼るより正確です。
+                  </p>
+
+                  <div className="stVref__f">
+                    <input
+                      type="text"
+                      value={videoRef.url}
+                      onChange={(e) => setVideoRef((v) => ({ ...v, url: e.target.value }))}
+                      placeholder="https://www.youtube.com/watch?v=... ／ https://youtube.com/shorts/..."
+                    />
+                    <button className="stIdeaBtn" onClick={analyzeVideo} disabled={videoRef.loading}>
+                      <span className={videoRef.loading ? "stSpin" : ""}>
+                        <Sic name={videoRef.loading ? "loader" : "spark"} size={15} />
+                      </span>
+                      {videoRef.loading ? "読み込み中..." : "読み込んで分析"}
+                    </button>
+                  </div>
+
+                  <input
+                    className="stVref__note"
+                    type="text"
+                    value={videoRef.note}
+                    onChange={(e) => setVideoRef((v) => ({ ...v, note: e.target.value }))}
+                    placeholder="特に注目してほしい点（任意。例：冒頭2秒の見せ方、テロップの出し方）"
+                  />
+
+                  {videoRef.error && (
+                    <p className="stVref__err">
+                      {videoRef.error}
+                    </p>
+                  )}
+
+                  {videoRef.result && (
+                    <div className="stVref__r">
+                      <p className="stVref__rk">
+                        読み取った「作り方の型」
+                        <button onClick={() => setVideoRef((v) => ({ ...v, result: "" }))}>消す</button>
+                      </p>
+                      <pre>{videoRef.result}</pre>
+                    </div>
+                  )}
+
+                  <p className="stVref__t">
+                    TikTok・Instagramは直接読み取れません。その場合は、下のパーツに
+                    <b>画面のスクリーンショットを添付</b>するか、<b>字幕をコピーして貼り付け</b>てください。
+                  </p>
+                </div>
+              )}
+
+              {/* 時間ごとのお手本 */}
+              <Field label="どの時間の投稿に使うお手本か" hint="共通のまま進めても構いません。時間ごとに変えたいときだけ切り替えてください">
+                <div className="stSlotTabs">
+                  <button className={refSlot === "common" ? "is-on" : ""} onClick={() => setRefSlot("common")}>
+                    すべての時間に共通
+                  </button>
+                  {getSched(refPf).slots.map((sl) => {
+                    const st2 = platformRefStatus(refPf, sl.id);
+                    return (
+                      <button key={sl.id} className={refSlot === sl.id ? "is-on" : ""} onClick={() => setRefSlot(sl.id)}>
+                        {sl.time}
+                        <em>{st2.done}/{st2.total}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              {refSlot !== "common" && (
+                <p className="stSlotNote">
+                  {getSched(refPf).slots.find((x) => x.id === refSlot)
+                    ? `${getSched(refPf).slots.find((x) => x.id === refSlot).time} の投稿に使うお手本です。設定しなかったパーツは、共通のお手本が使われます。`
+                    : ""}
+                </p>
+              )}
+
+              {/* パーツごとの設定 */}
+              <div className="stParts">
+                {(PART_DEFS[refPf] || PART_DEFS.other).map((part) => {
+                  const r = getPartRef(refPf, part.id);
+                  const filled = partFilled(r);
+                  const open = openPart === `${refPf}:${part.id}`;
+                  const st = analyzeStyle(r.texts);
+                  return (
+                    <div className={`stPart ${filled ? "is-ok" : ""} ${open ? "is-open" : ""}`} key={part.id}>
+                      <button className="stPart__h" onClick={() => setOpenPart(open ? "" : `${refPf}:${part.id}`)}>
+                        <span className="stPart__m">{filled ? <Sic name="check" size={14} /> : "必"}</span>
+                        <span className="stPart__t">
+                          <b>{part.label}</b>
+                          <em>{part.hint}</em>
+                        </span>
+                        <span className="stPart__c">
+                          {filled
+                            ? `${r.texts.filter((t) => t.trim()).length ? r.texts.filter((t) => t.trim()).length + "本" : ""}${
+                                r.images.length ? " 画像" + r.images.length : ""
+                              }${r.video ? " 動画" : ""}`
+                            : "未設定"}
+                        </span>
+                        <span className={`stPart__a ${open ? "is-up" : ""}`}><Sic name="chev" size={16} /></span>
+                      </button>
+
+                      {open && (
+                        <div className="stPart__b">
+                          {part.type !== "media" && (
+                            <>
+                              {r.texts.map((t, i) => (
+                                <div className="stPart__row" key={i}>
+                                  <span className="stPart__n">{i + 1}</span>
+                                  <textarea
+                                    rows={i === 0 ? 4 : 3}
+                                    value={t}
+                                    onChange={(e) => setPartText(refPf, part.id, i, e.target.value)}
+                                    placeholder={
+                                      i === 0
+                                        ? `お手本にしたい${part.label}を、そのまま貼り付けてください。`
+                                        : "2本目以降を貼るほど精度が上がります。"
+                                    }
+                                  />
+                                  {r.texts.length > 1 && (
+                                    <button className="stPart__x" onClick={() => removePartText(refPf, part.id, i)} aria-label="削除">×</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button className="stPart__add" onClick={() => addPartText(refPf, part.id)}>
+                                ＋ もう1本追加する
+                              </button>
+
+                              {st && (
+                                <div className="stPart__stat">
+                                  <span className={`stPart__lv lv-${st.level.pct}`}>{st.level.label}</span>
+                                  {styleToBrief(st)}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          <div className="stPart__media">
+                            <label className="stMedia__add">
+                              <Sic name="image" size={15} />
+                              画像を添付
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                hidden
+                                onChange={(e) => attachImages(refPf, part.id, e.target.files, () => (e.target.value = ""))}
+                              />
+                            </label>
+                            <input
+                              className="stPart__vid"
+                              type="text"
+                              value={r.video}
+                              onChange={(e) => setPartField(refPf, part.id, "video", e.target.value)}
+                              placeholder="参考動画のURL（任意）"
+                            />
+                          </div>
+
+                          {r.images.length > 0 && (
+                            <div className="stMedia__l">
+                              {r.images.map((im, i) => (
+                                <div className="stMedia__i" key={i}>
+                                  <img src={im.data} alt="" />
+                                  <div>
+                                    <p>{im.name}</p>
+                                    <input
+                                      type="text"
+                                      value={im.note}
+                                      onChange={(e) => setImageNote(refPf, part.id, i, e.target.value)}
+                                      placeholder="この画像のどこを参考にするか（例：文字の置き方、色数の少なさ）"
+                                    />
+                                  </div>
+                                  <button onClick={() => removeImage(refPf, part.id, i)} aria-label="削除">×</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {r.video && (
+                            <input
+                              className="stPart__vnote"
+                              type="text"
+                              value={r.videoNote}
+                              onChange={(e) => setPartField(refPf, part.id, "videoNote", e.target.value)}
+                              placeholder="その動画の、どこを参考にするか（例：冒頭2秒のテロップ、カットの速さ）"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="stWarn">
+                <Sic name="warn" size={17} />
+                <p>
+                  参考にするのは文体や構成の <b>型</b> です。表現や画像をそのまま複製することはしません。
+                  貼り付けた文章と画像は、分析のためだけに使われます。
+                </p>
+              </div>
+
+              <div className="stFoot">
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(1)}>← 運用設計に戻る</button>
+                  <span>進捗</span>
+                  {(() => {
+                    const a = refTargets.map((id) => platformRefStatus(id));
+                    const done = a.reduce((n, x) => n + x.done, 0);
+                    const total = a.reduce((n, x) => n + x.total, 0);
+                    return `${done} / ${total} パーツ設定済み`;
+                  })()}
+                </p>
+                <button
+                  className="stSend"
+                  onClick={() => {
+                    const st = platformRefStatus(refPf, "common");
+                    if (st.done < st.total) {
+                      setFlash({ ok: false, msg: `${(PLATFORMS.find((x) => x.id === refPf) || {}).label} の「すべての時間に共通」で未設定のパーツがあります（${st.done}/${st.total}）。` });
+                      setTimeout(() => setFlash(null), 5000);
+                      return;
+                    }
+                    setPfId(refPf);
+                    setProdSlot("common");
+                    const P = PLATFORMS.find((x) => x.id === refPf);
+                    if (P) setFmtId(P.formats[0].id);
+
+                    // お手本から制作条件を自動で決めます
+                    const allTexts = (PART_DEFS[refPf] || PART_DEFS.other)
+                      .flatMap((pt) => getPartRef(refPf, pt.id, "common").texts)
+                      .filter((t) => String(t).trim().length > 5);
+                    const inf = inferSettings(allTexts);
+                    if (inf) {
+                      setTone(inf.tone);
+                      setStruct(inf.struct);
+                      setHook(inf.hook);
+                      setPerson(inf.person);
+                      setEmoji(inf.emoji);
+                      setCta(inf.cta);
+                      setLen(inf.len);
+                      setAutoSet(inf);
+                      setTweak(false);
+                      if (typeof pushLog === "function") {
+                        pushLog(`[${new Date().toLocaleTimeString()}] STYLE APPLIED: ${inf.tone} / ${inf.struct} / ${inf.hook}`);
+                      }
+                    }
+                    setStep(3);
+                    // 標準以上のときだけ、お手本を読んでテーマを下書きします
+                    // （エコでは呼び出しを1回に抑えるため、制作時にAIがテーマも決めます）
+                    if (qmode !== "eco") setTimeout(() => suggestThemes(true), 200);
+                  }}
+                >
+                  <Sic name="send" size={16} />
+                  この媒体の制作へ進む
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ============== STEP 3：制作 ============== */}
+          {step === 3 && (
+            <>
+              {!plan && (
+                <div className="stHint">
+                  <Sic name="spark" size={16} />
+                  <p>
+                    先に<b>STEP1「運用設計」</b>でAIに提案させると、媒体・トーン・構成・検査レベルが自動で設定されます。
+                    このまま手動で指定して進めることもできます。
+                  </p>
+                  <button onClick={() => setStep(1)}>設計する →</button>
+                </div>
+              )}
+              <div className="stPf">
+                {PLATFORMS.filter((p) => refTargets.indexOf(p.id) >= 0).map((p) => (
+                  <button key={p.id} className={`stPf__b ${pfId === p.id ? "is-on" : ""}`} style={{ "--t": p.tone, "--s": p.soft }}
+                    onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); setProdSlot("common"); }}>
+                    <span className="stPf__d" /><b>{p.label}</b>
+                  </button>
+                ))}
+              </div>
+
+              {getSched(pfId).slots.length > 0 && (
+                <Field label="どの時間の投稿をつくるか" hint="時間ごとにお手本や投稿内容を設定していれば、それが反映されます">
+                  <div className="stSlotTabs">
+                    <button className={prodSlot === "common" ? "is-on" : ""} onClick={() => { setProdSlot("common"); applySlot(pfId, "common"); }}>
+                      指定しない
+                    </button>
+                    {getSched(pfId).slots.map((sl) => (
+                      <button key={sl.id} className={prodSlot === sl.id ? "is-on" : ""} onClick={() => { setProdSlot(sl.id); applySlot(pfId, sl.id); }}>
+                        {sl.time}
+                        {sl.brief && <em>設定あり</em>}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              )}
+
+              <Field label="形式">
+                <div className="stChips">
+                  {pf.formats.map((f) => (
+                    <button key={f.id} type="button" className={fmtId === f.id ? "is-on" : ""} onClick={() => setFmtId(f.id)}>{f.label}</button>
+                  ))}
+                </div>
+              </Field>
+
+              <div className="stTabs">
+                {[{ id: "content", label: "コンテンツ", ic: "doc" }, { id: "image", label: "画像・サムネ", ic: "image" }].map((t) => (
+                  <button key={t.id} className={subTab === t.id ? "is-on" : ""} onClick={() => { setSubTab(t.id); setFlash(null); }}>
+                    <Sic name={t.ic} size={15} />{t.label}
+                  </button>
+                ))}
+              </div>
+
+              {subTab === "content" ? (
+                <>
+                  {themeing && (
+                    <div className="stThemeBar">
+                      <span className="stSpin"><Sic name="loader" size={15} /></span>
+                      <span>AIがテーマを考えています。しばらくお待ちください。</span>
+                    </div>
+                  )}
+                  {!themeing && (
+                    <div className="stThemeBar">
+                      <button className="stIdeaBtn" onClick={suggestThemes}>
+                        <Sic name="spark" size={15} />
+                        {themes.length ? "別のテーマを出す" : "テーマを出し直す"}
+                      </button>
+                      <span>空欄のまま依頼すると、AIがテーマを決めて書きます。</span>
+                    </div>
+                  )}
+
+                  {themes.length > 0 && (
+                    <div className="stThemes">
+                      {themes.map((t, i) => (
+                        <button
+                          key={i}
+                          className={`stTheme ${theme === t.theme ? "is-on" : ""}`}
+                          onClick={() => {
+                            setTheme(t.theme);
+                            setPoints((t.points || []).join("\n"));
+                          }}
+                        >
+                          <b>{t.theme}</b>
+                          <span>{(t.points || []).map((p2, k) => <em key={k}>{p2}</em>)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <Field label="テーマ" hint="空欄でも構いません。その場合はAIがテーマを決めて書きます">
+                    <input type="text" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="問い合わせ対応を自動化したら何時間浮いたか" />
+                  </Field>
+                  <Field label="伝えたい要点" hint="空欄でも構いません。1行ずつ書くと構成に反映されます">
+                    <textarea rows={4} value={points} onChange={(e) => setPoints(e.target.value)} placeholder={"深夜の問い合わせにも即返信\n担当者の確認は朝1回だけ\n月20時間が浮いた"} />
+                  </Field>
+
+                  {autoSet && !tweak && (
+                    <div className="stAuto">
+                      <p className="stAuto__k">
+                        <Sic name="spark" size={15} />
+                        お手本{autoSet.from}本から、制作条件を決めました
+                        <button onClick={() => setTweak(true)}>調整する</button>
+                      </p>
+                      <ul className="stAuto__l">
+                        {[
+                          ["トーン", tone],
+                          ["構成", struct],
+                          ["フック", hook],
+                          ["一人称", person],
+                          ["絵文字", emoji],
+                          ["CTA", cta],
+                          ["文字数", len + " 字"],
+                        ].map(([k, v]) => (
+                          <li key={k}>
+                            <span>{k}</span>
+                            {v}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="stAuto__n">
+                        このまま制作を依頼できます。変えたいところがあれば「調整する」を押してください。
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="stDetail" style={{ display: autoSet && !tweak ? "none" : "block" }}>
+                    <p className="stDetail__k">
+                      細かい条件
+                      {autoSet && (
+                        <button className="stDetail__back" onClick={() => setTweak(false)}>
+                          判定結果に戻す
+                        </button>
+                      )}
+                    </p>
+                    <Field label="トーン" ai={plan && !touched.tone}><Chips options={TONES} value={tone} onChange={(v) => { setTone(v); mark("tone"); }} /></Field>
+                    <Field label="構成の型" ai={plan && !touched.struct}><Chips options={STRUCTS} value={struct} onChange={(v) => { setStruct(v); mark("struct"); }} /></Field>
+                    <Field label="冒頭フックの型" ai={plan && !touched.hook}><Chips options={HOOKS} value={hook} onChange={(v) => { setHook(v); mark("hook"); }} /></Field>
+                    <div className="stRow">
+                      <Field label="一人称"><Chips options={PERSONS} value={person} onChange={setPerson} /></Field>
+                      <Field label="絵文字"><Chips options={EMOJI} value={emoji} onChange={setEmoji} /></Field>
+                    </div>
+                    <Field label="CTA（読後にしてほしいこと）" ai={plan && !touched.cta}><Chips options={CTAS} value={cta} onChange={(v) => { setCta(v); mark("cta"); }} /></Field>
+                    <div className="stRow">
+                      <Field label="目安文字数" hint={fmt.cap ? `上限 ${fmt.cap} 文字` : "指定なし"}>
+                        <input type="text" value={len} onChange={(e) => setLen(e.target.value)} placeholder={fmt.cap ? String(Math.round(fmt.cap * 0.6)) : "800"} />
+                      </Field>
+                      <Field label="一緒に出す成果物"><Chips options={EXTRAS} value={extras} onChange={setExtras} multi /></Field>
+                    </div>
+                  </div>
+
+                </>
+              ) : (
+                <>
+                  <Field label="スタイル"><Chips options={["写真風", "イラスト", "フラットデザイン", "図解・ダイアグラム", "文字主体"]} value={imgStyle} onChange={setImgStyle} /></Field>
+                  <div className="stIdeaBar">
+                    <button className="stIdeaBtn" onClick={() => { setIdeas(suggestImagePrompts(ctx, imgStyle, fmt.ratio || "1:1", theme, seed)); setSeed(seed + 1); }}>
+                      <Sic name="spark" size={15} />
+                      {ideas.length ? "別の案を出す" : "AIに指示文を書かせる"}
+                    </button>
+                    <span className="stIdeaBar__n">
+                      テーマ・業種・目的から3案つくります。選んでそのまま送れます。
+                    </span>
+                  </div>
+
+                  {ideas.length > 0 && (
+                    <div className="stIdeas">
+                      {ideas.map((it, i) => (
+                        <button
+                          key={it.label + i}
+                          className={`stIdea ${imgDesc === it.text ? "is-on" : ""}`}
+                          onClick={() => setImgDesc(it.text)}
+                        >
+                          <span className="stIdea__h">
+                            <b>{it.label}</b>
+                            <em>{it.note}</em>
+                          </span>
+                          <span className="stIdea__t">{it.text}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <Field label="描いてほしい内容" hint="上の案を選ぶと入ります。そのまま編集できます。送信後、AIが英語の詳細プロンプトに仕上げます">
+                    <textarea rows={4} value={imgDesc} onChange={(e) => setImgDesc(e.target.value)} placeholder="朝のオフィス。誰もいないデスクでモニターだけが光っている。俯瞰気味、寒色系。" />
+                  </Field>
+                  <div className="stWarn">
+                    <Sic name="warn" size={17} />
+                    <p>実在の人物・キャラクター・企業ロゴは指定できません。納品前に、生成物が既存の作品に似すぎていないか必ず目視で確認してください。</p>
+                  </div>
+                </>
+              )}
+
+              {learned.ready && learned.insights.length > 0 && (
+                <div className="stLearn">
+                  <p className="stLearn__k">
+                    <Sic name="spark" size={15} />
+                    実績{learned.count}件から学んだ傾向を、今回の制作に反映します
+                  </p>
+                  <ul className="stLearn__l">
+                    {learned.insights.map((x) => (
+                      <li key={x.key}>
+                        <b>{x.advice}</b>
+                        <em>
+                          伸びた {x.top} ／ 伸びず {x.bottom}
+                        </em>
+                        <span className="stLearn__bar">
+                          <i style={{ width: `${Math.min(100, x.strength)}%` }} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="stLearn__n">
+                    反応の良い上位と下位を比べて、差の大きい特徴だけを抽出しています。
+                    投稿の数値を入れるほど精度が上がります。
+                  </p>
+                </div>
+              )}
+
+              {!learned.ready && perf.length > 0 && (
+                <p className="stLearnNote">
+                  実績があと {learned.need} 件たまると、伸びた投稿の傾向を自動で反映できるようになります。
+                  アカウント管理から、投稿の数値を入力してください。
+                </p>
+              )}
+
+              <div className="stQ">
+                <p className="stQ__k">品質モード（費用が変わります）</p>
+                <div className="stModes">
+                  {MODES.map((m) => {
+                    const est = usage && usage["モード別"] && usage["モード別"][m.id];
+                    return (
+                      <button
+                        key={m.id}
+                        className={`stMode ${qmode === m.id ? "is-on" : ""}`}
+                        style={{ "--t": m.tone }}
+                        onClick={() => setQmode(m.id)}
+                      >
+                        <b>{m.label}</b>
+                        <em>{m.note}</em>
+                        <span className="stMode__c">
+                          {est ? `約 $${est["費用"]}（${Math.round(est["費用"] * 150)}円）／1件` : `AI呼び出し ${m.calls}回`}
+                          {est && est["作れる件数"] ? ` ・残高であと${est["作れる件数"]}件` : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="stQ__k" style={{ marginTop: 16 }}>細かい品質オプション</p>
+                <div className="stQ__g">
+                  <div>
+                    <span className="stQ__l">生成する案の数{plan && !touched.var && <em className="stAiTag">AI推奨</em>}</span>
+                    <div className="stSeg">
+                      {VARIANTS.map((v) => <button key={v.id} className={variants === v.id ? "is-on" : ""} onClick={() => { setVariants(v.id); mark("var"); }}>{v.label}</button>)}
+                    </div>
+                    <span className="stQ__n">{VARIANTS.find((v) => v.id === variants).note}</span>
+                  </div>
+                  <div>
+                    <span className="stQ__l">検査レベル{plan && !touched.qa && <em className="stAiTag">AI推奨</em>}</span>
+                    <div className="stSeg">
+                      {QA_LEVELS.map((q) => <button key={q.id} className={qa === q.id ? "is-on" : ""} onClick={() => { setQa(q.id); mark("qa"); }}>{q.label}</button>)}
+                    </div>
+                    <span className="stQ__n">{QA_LEVELS.find((q) => q.id === qa).note}</span>
+                  </div>
+                </div>
+
+                {variants !== "1" && (
+                  <div className="stQ__row">
+                    <span className="stQ__l">納品のしかた</span>
+                    <div className="stSeg">
+                      <button className={deliverBest ? "is-on" : ""} onClick={() => setDeliverBest(true)}>AIが選んだ1案</button>
+                      <button className={!deliverBest ? "is-on" : ""} onClick={() => setDeliverBest(false)}>{variants}案すべて</button>
+                    </div>
+                    <span className="stQ__n">
+                      {deliverBest
+                        ? `${variants}案つくったうえで、最も反応が取れる1案をAIが選んで先頭に置きます。残りも参考として付きます。`
+                        : "すべての案を並べて納品します。自分で選びたいときに。"}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="stPack">
+                <p className="stPack__k">
+                  納品パッケージ
+                  <em>{pfId === "note" ? "note一式" : pfId === "x" ? "X一式" : "標準"}</em>
+                </p>
+                <ul className="stPack__l">
+                  {(pfId === "note"
+                    ? ["記事本文（無料枠・有料枠つき）", "タイトル案5つ", "サムネイル画像", "差し込み画像2枚", "X誘導投稿3案"]
+                    : pfId === "x"
+                    ? ["投稿本文", "続きのスレッド3〜5投稿", "添付画像1枚"]
+                    : pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube"
+                    ? [
+                        "秒数つきのカット割り",
+                        "ナレーション原稿（音声合成にそのまま貼れます）",
+                        "カットごとの映像生成プロンプト（英語）",
+                        "テロップ文言",
+                        "BGM・効果音の指定",
+                        "サムネイル案3つ",
+                        "編集の手順",
+                      ]
+                    : ["本文", "ハッシュタグ案・フック案"]
+                  ).map((t) => (
+                    <li key={t}>
+                      <Sic name="check" size={14} />
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+                <label className="stCheck">
+                  <input type="checkbox" checked={wantImages} onChange={(e) => setWantImages(e.target.checked)} />
+                  <span>
+                    <b>画像も生成する</b>
+                    <em>1枚あたり数十円の実費がかかります。文章だけでよければ外してください</em>
+                  </span>
+                </label>
+              </div>
+
+              {(pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") && (
+                <div className="stVideo">
+                  <p className="stVideo__k">
+                    動画のつくり方
+                    <em>Google AI Studio</em>
+                  </p>
+
+                  <p className="stVideo__one">
+                    <Sic name="check" size={15} />
+                    <span>
+                      <b>音声・映像・編集が1つの画面で完結します。</b>
+                      Veoは音声つきで映像を生成できるため、音声合成ソフトも編集ソフトも要りません。
+                      納品されるのは、そのまま貼れる<b>セリフ込みのプロンプト</b>です。
+                    </span>
+                  </p>
+
+                  <ol className="stVideo__l">
+                    {[
+                      ["プロンプトを貼る", "納品された「Veo用プロンプト」をGoogle AI Studioに貼り付けます。セリフも含まれているので、音声つきの映像がそのまま出ます"],
+                      ["気になれば直す", "「もう少し明るく」のように言葉で伝えれば、その場で作り直せます"],
+                      ["つなぐ", "カットが複数あるときだけ順番につなぎ、必要ならテロップを足します"],
+                      ["書き出す", "縦型か横型かを確認して書き出します"],
+                    ].map(([t2, d2]) => (
+                      <li key={t2}>
+                        <b>{t2}</b>
+                        {d2}
+                      </li>
+                    ))}
+                  </ol>
+
+                  <p className="stVideo__n">
+                    <b>注意：</b>生成物の商用利用は認められていますが、第三者の権利を侵害していないかはご自身での確認が必要です。
+                    無料で使える範囲は変わることがあるため、料金は公式でご確認ください。
+                  </p>
+                </div>
+              )}
+
+              {pfId === "note" && (
+                <div className="stNote">
+                  <p className="stNote__k">
+                    note の書き方
+                    <em>任意</em>
+                  </p>
+                  <label className="stCheck">
+                    <input type="checkbox" checked={notePaid} onChange={(e) => setNotePaid(e.target.checked)} />
+                    <span>
+                      <b>有料記事の構成にする</b>
+                      <em>導入と結論の入口までを無料、具体的な手順・数値・事例を有料部分に。区切り位置も指定されます</em>
+                    </span>
+                  </label>
+                  <label className="stCheck">
+                    <input type="checkbox" checked={noteToX} onChange={(e) => setNoteToX(e.target.checked)} />
+                    <span>
+                      <b>X への誘導投稿もつくる</b>
+                      <em>記事公開後にXへ流すための告知文を3案。140字以内・「詳細はnoteへ」つき</em>
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {(() => {
+                const chars = buildMessage("CONTENT").length;
+                const m = MODES.find((x) => x.id === qmode) || MODES[1];
+                const est = usage && usage["モード別"] && usage["モード別"][qmode];
+                return (
+                  <p className="stEst">
+                    <span className="stEst__k">この依頼</span>
+                    AI呼び出し {m.calls}回{wantImages ? " ＋ 画像" : ""}／指示文 約{Math.round(chars / 2.2)}トークン
+                    {est ? `／目安 $${est["費用"]}（約${Math.round(est["費用"] * 150)}円）` : ""}
+                  </p>
+                );
+              })()}
+
+              <div className="stFoot">
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(2)}>← お手本分析に戻る</button>
+                  <span>納品前</span>{qa === "strict" ? "QA_Ethics_AIが二重検査します" : "QA_Ethics_AIが一次検査します"}
+                  {(pfId === "tiktok" || pfId === "yt_shorts" || pfId === "youtube") && (
+                    <em className="stNoteInline">映像は台本→自動書き出し（未設定時は台本のみ納品）</em>
+                  )}
+                </p>
+                <button className="stSend" onClick={() => send(subTab === "content" ? "CONTENT" : "IMAGE", subTab === "content" ? `${fmt.label}・${variants}案` : "画像")} disabled={sending}>
+                  <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "send"} size={16} /></span>
+                  {sending ? "送信中..." : subTab === "content" ? `${variants}案の制作を依頼` : "画像の制作を依頼"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ============== STEP 3 ============== */}
+          {step === 4 && (
+            <>
+              <div className="stPrev">
+                <p className="stPrev__k">
+                  できあがったものを確認
+                  <button onClick={loadPreview} disabled={previewing}>
+                    <span className={previewing ? "stSpin" : ""}><Sic name={previewing ? "loader" : "doc"} size={14} /></span>
+                    {previewing ? "読み込み中..." : "最新の成果物を読み込む"}
+                  </button>
+                </p>
+
+                {preview ? (
+                  <>
+                    <div className="stPrev__b">{preview.text}</div>
+                    <div className="stPrev__f">
+                      <span className="stPrev__c">{preview.text.replace(/\s/g, "").length} 文字</span>
+                      <button className="stRevBtn" onClick={() => setReviseFor(preview.url)}>
+                        修正を依頼する
+                      </button>
+                      <a href={preview.url} target="_blank" rel="noopener noreferrer" className="stPrev__link">
+                        原本を開く →
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <p className="stPrev__e">
+                    「最新の成果物を読み込む」を押すと、直近で納品されたものをここで確認できます。
+                    直したいところがあれば、そのまま修正を依頼できます。
+                  </p>
+                )}
+
+                {reviseFor && (
+                  <div className="stRevise">
+                    <p className="stRevise__k">
+                      どこを直しますか
+                      <button onClick={() => { setReviseFor(null); setReviseText(""); }}>×</button>
+                    </p>
+                    <textarea
+                      rows={4}
+                      value={reviseText}
+                      onChange={(e) => setReviseText(e.target.value)}
+                      placeholder={"例：\n・冒頭がありきたりなので、数字から始めてほしい\n・専門用語が多いので、初めての人にも分かる言葉に"}
+                    />
+                    <div className="stRevise__f">
+                      <span>ご意見に沿って書き直し、修正版として納品します。</span>
+                      <button
+                        className="stSend"
+                        disabled={sending || !reviseText.trim()}
+                        onClick={async () => {
+                          const url = reviseFor;
+                          const fb = reviseText.trim();
+                          setReviseFor(null);
+                          setReviseText("");
+                          setPreview(null);
+                          await send("REVISE", "修正版", { url: url, feedback: fb });
+                        }}
+                      >
+                        <Sic name="send" size={16} />
+                        この意見で直してもらう
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+
+              <div className="stFoot">
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(3)}>← 制作に戻る</button>
+                  <span>確認</span>
+                  {approved ? "確認済みです。投稿予約に進めます。" : "内容を読んで、問題なければ右のボタンを押してください。"}
+                </p>
+                <button
+                  className="stSend"
+                  disabled={!preview}
+                  onClick={() => {
+                    const body = preview.text
+                      .replace(/^[\s\S]*?■ そのまま投稿できる本文\n?/, "")
+                      .replace(/^下記をコピーして[^\n]*\n/, "")
+                      .replace(/【案\s*\d+】/g, "")
+                      .trim();
+                    setApproved({ url: preview.url, text: body });
+                    setTheme(body.slice(0, 3000));
+                    setStep(5);
+                  }}
+                >
+                  <Sic name="check" size={16} />
+                  {preview ? "この内容で進む" : "先に読み込んでください"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ============== STEP 5：投稿予約 ============== */}
+          {step === 5 && (
+            <>
+              {(() => {
+                const tg = POST_TARGET[pfId] || {};
+                return (
+                  <div className={`stTarget ${tg.auto ? "is-auto" : ""}`}>
+                    <p className="stTarget__k">
+                      {tg.auto ? "自動投稿できます" : "予約のしかた"}
+                      <em>{pf.label}</em>
+                    </p>
+                    <p className="stTarget__h">
+                      {tg.auto
+                        ? "接続設定でXの自動投稿を設定していれば、予約した時刻に自動で投稿されます。未設定の場合は、時刻になると本文入りのリンクがメールで届きます。"
+                        : `${tg.how}。予約すると、時刻になると本文と手順がメールで届きます。`}
+                    </p>
+                    {tg.url && (
+                      <a href={tg.url} target="_blank" rel="noopener noreferrer" className="stTarget__a">
+                        {tg.name} の投稿画面を開く →
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {approved && (
+                <div className="stOk">
+                  <Sic name="check" size={16} />
+                  <p>
+                    STEP4で確認した本文が入っています。必要なら手直ししてから予約してください。
+                    <a href={approved.url} target="_blank" rel="noopener noreferrer">原本を開く →</a>
+                  </p>
+                </div>
+              )}
+
+              <Field label="投稿先">
+                <div className="stChips">
+                  {PLATFORMS.map((p) => (
+                    <button key={p.id} type="button" className={pfId === p.id ? "is-on" : ""} onClick={() => { setPfId(p.id); setFmtId(p.formats[0].id); }}>{p.label}</button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="投稿本文">
+                <textarea rows={6} value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="投稿する本文をそのまま入力してください。" />
+              </Field>
+              {fmt.cap > 0 && <p className={`stCount ${theme.length > fmt.cap ? "is-over" : ""}`}>{theme.length} / {fmt.cap} 文字</p>}
+              <div className="stRow">
+                <Field label="投稿日時"><input type="datetime-local" value={schedule.at} onChange={(e) => setSchedule({ ...schedule, at: e.target.value })} /></Field>
+                <Field label="繰り返し">
+                  <select value={schedule.repeat} onChange={(e) => setSchedule({ ...schedule, repeat: e.target.value })}>
+                    <option>なし</option><option>毎日</option><option>平日のみ</option><option>毎週</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="stWarn">
+                <Sic name="warn" size={17} />
+                <p>各SNSの自動投稿に関する規約は変更されることがあります。運用開始前と規約改定時には必ずご確認ください。</p>
+              </div>
+              <div className="stFoot">
+                <p className="stFoot__c">
+                  <button className="stBack" onClick={() => setStep(3)}>← 制作に戻る</button>
+                  <span>配信</span>指定時刻の直近の配信タイミングで投稿されます
+                </p>
+                <button className="stSend" onClick={() => send("POST", "予約投稿")} disabled={sending}>
+                  <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "clock"} size={16} /></span>
+                  {sending ? "送信中..." : "予約する"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
+
+          {reviseFor && (
+            <div className="stRevise">
+              <p className="stRevise__k">
+                どこを直しますか
+                <button onClick={() => { setReviseFor(null); setReviseText(""); }}>×</button>
+              </p>
+              <textarea
+                rows={4}
+                value={reviseText}
+                onChange={(e) => setReviseText(e.target.value)}
+                placeholder={"例：\n・冒頭がありきたりなので、数字から始めてほしい\n・専門用語が多いので、初めての人にも分かる言葉に\n・案2の締めが弱い"}
+              />
+              <div className="stRevise__f">
+                <span>ご意見に沿って書き直し、修正版として納品します。</span>
+                <button
+                  className="stSend"
+                  disabled={sending || !reviseText.trim()}
+                  onClick={async () => {
+                    const url = reviseFor;
+                    const fb = reviseText.trim();
+                    setReviseFor(null);
+                    setReviseText("");
+                    await send("REVISE", "修正版", { url: url, feedback: fb });
+                  }}
+                >
+                  <Sic name="send" size={16} />
+                  この意見で直してもらう
+                </button>
+              </div>
+            </div>
+          )}
+
+          {watch && (
+            <div className={`stWatch is-${watch.status}`}>
+              <div className="stWatch__bar">
+                {["受付", "制作中", "完了"].map((st) => {
+                  const order = { 受付: 0, 保留: 0, 制作中: 1, 完了: 2, エラー: 1, 時間切れ: 1 };
+                  const cur = order[watch.status] !== undefined ? order[watch.status] : 0;
+                  const idx = { 受付: 0, 制作中: 1, 完了: 2 }[st];
+                  return (
+                    <span key={st} className={`stWatch__s ${idx <= cur ? "is-on" : ""} ${idx === cur ? "is-now" : ""}`}>
+                      <em />
+                      {st}
+                    </span>
+                  );
+                })}
+              </div>
+              <p className="stWatch__t">
+                {watch.status === "完了" ? (
+                  <>
+                    納品しました。
+                    {watch.url && (
+                      <a href={watch.url} target="_blank" rel="noopener noreferrer">
+                        成果物を開く →
+                      </a>
+                    )}
+                    <button className="stRevBtn" onClick={() => { setStep(4); setTimeout(loadPreview, 300); }}>
+                      確認する →
+                    </button>
+                  </>
+                ) : watch.status === "エラー" ? (
+                  "処理に失敗しました。接続設定の「バックエンドの状態を確認」で原因をご覧ください。"
+                ) : watch.status === "時間切れ" ? (
+                  "時間内に完了しませんでした。成果物ライブラリで状態をご確認ください。"
+                ) : (
+                  "AIが制作しています。このまま少しお待ちください（1〜3分ほど）。"
+                )}
+                <button className="stWatch__x" onClick={() => setWatch(null)} aria-label="閉じる">×</button>
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* ---------- 右カラム ---------- */}
+        <aside className="stSide">
+          {step >= 3 && (
+            <section className="stCard stCard--sm stSpec">
+              <h2 className="stCardT">{pf.label} ／ {fmt.label}<em>SPEC</em></h2>
+              <dl className="stSpec__l">
+                {fmt.ratio && <div><dt>比率</dt><dd>{fmt.ratio}</dd></div>}
+                {fmt.dur && <div><dt>尺</dt><dd>{fmt.dur}</dd></div>}
+                {fmt.pages && <div><dt>枚数・本数</dt><dd>{fmt.pages}</dd></div>}
+                {fmt.cap > 0 && <div><dt>文字数上限</dt><dd>{fmt.cap}</dd></div>}
+                <div><dt>ハッシュタグ</dt><dd>{pf.hashtag}</dd></div>
+                <div><dt>狙い目の時間</dt><dd>{pf.times.join(" / ")}</dd></div>
+                <div><dt>KPI</dt><dd>{pf.kpi}</dd></div>
+              </dl>
+              <p className="stSpec__s"><b>制作ルール</b>{fmt.spec}</p>
+              <p className="stSpec__w"><b>この媒体の勝ち筋</b>{pf.win}</p>
+            </section>
+          )}
+
+          {plan && (
+            <section className="stCard stCard--sm">
+              <h2 className="stCardT">現在のプラン<em>PLAN</em></h2>
+              <ul className="stMini">
+                <li><span>媒体</span>{plan.platforms.map((p) => p.label).join(" / ")}</li>
+                <li><span>頻度</span>{plan.cadence}</li>
+                <li><span>時間帯</span>{plan.times.join(" / ")}</li>
+                <li><span>KPI</span>{plan.kpi}</li>
+              </ul>
+            </section>
+          )}
+
+          <section className="stCard stCard--sm">
+            <h2 className="stCardT">予約中の投稿<em>{scheduled.length}</em></h2>
+            {scheduled.length === 0 ? <p className="stEmpty">予約された投稿はありません。</p> : (
+              <ul className="stSch">
+                {scheduled.map((j) => (
+                  <li key={j.id}>
+                    <span className="stSch__t"><Sic name="clock" size={13} />{j.at}</span>
+                    <span className="stSch__d">{j.pf}／{j.title}</span>
+                    <button className="stSch__x" aria-label="取り消す" onClick={() => setJobs((v) => v.filter((x) => x.id !== j.id))}><Sic name="trash" size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="stCard stCard--sm">
+            <h2 className="stCardT">送信した依頼<em>{jobs.length}</em></h2>
+            {jobs.length === 0 ? <p className="stEmpty">まだ依頼がありません。</p> : (
+              <ul className="stJobs">
+                {jobs.map((j) => (
+                  <li key={j.id} style={{ "--t": j.tone, "--s": j.soft }}>
+                    <div className="stJobs__h"><em className="stJobs__k">{j.pf}</em><span className={`stJobs__s ${j.status === "送信失敗" ? "is-ng" : ""}`}>{j.status}</span></div>
+                    <p className="stJobs__t">{j.kind}／{j.title}</p>
+                    <p className="stJobs__m">{j.at}<span>{j.billing}</span></p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ================================ CSS_STUDIO ================================== */
+
+const CSS_STUDIO = `
+.stRoot{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
+.stRoot *,.stRoot *::before,.stRoot *::after{box-sizing:border-box;}
+.stRoot h1,.stRoot h2,.stRoot p,.stRoot ul,.stRoot li,.stRoot dl,.stRoot dd,.stRoot dt{margin:0;padding:0;}
+.stRoot ul{list-style:none;}
+.stRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.stRoot :focus-visible{outline:2px solid var(--t);outline-offset:2px;}
+.stSpin{display:inline-flex;animation:stSpin 1s linear infinite;}
+@keyframes stSpin{to{transform:rotate(360deg);}}
+.stAiTag{font-style:normal;font-size:9px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:2px 7px;margin-left:7px;letter-spacing:.04em;}
+
+.stHead{margin-bottom:20px;}
+.stHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--t);font-weight:700;margin-bottom:8px;}
+.stHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.stHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
+
+.stMode{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.stMode__l{display:flex;gap:5px;background:var(--bg);border-radius:999px;padding:4px;}
+.stMode__l button{font-size:12.5px;font-weight:700;padding:8px 17px;border-radius:999px;color:var(--muted);transition:all .2s;}
+.stMode__l button.is-on{background:var(--ink);color:#fff;}
+.stMode__n{font-size:12px;color:var(--muted);}
+.stMode__c{display:flex;gap:8px;flex:1;min-width:280px;flex-wrap:wrap;}
+.stMode__c input{flex:1;min-width:130px;background:var(--bg);border:1.5px solid transparent;border-radius:10px;padding:10px 12px;font:inherit;font-size:13px;}
+.stMode__c input:focus{outline:none;border-color:var(--t);background:var(--white);}
+
+/* ステップ */
+.stSteps{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:16px;}
+@media (max-width:1100px){.stSteps{grid-template-columns:repeat(2,1fr);}}
+.stStep{display:flex;align-items:center;gap:11px;background:var(--white);border:1.5px solid var(--line);border-radius:16px;padding:13px 16px;transition:all .2s;}
+.stStep:hover{border-color:var(--ai);}
+.stStep.is-on{border-color:var(--ai);background:#F5F1FE;}
+.stStep__n{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--bg);color:var(--muted);font-family:var(--mono);font-size:13px;font-weight:700;flex-shrink:0;}
+.stStep.is-on .stStep__n{background:var(--ai);color:#fff;}
+.stStep.is-done .stStep__n{background:#E8F7F0;color:#0E9F73;}
+.stStep b{display:block;font-size:13.5px;font-weight:700;}
+.stStep em{font-style:normal;font-size:10.5px;color:var(--muted);}
+@media (max-width:760px){.stSteps{grid-template-columns:1fr;}}
+
+.stGrid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
+@media (max-width:1150px){.stGrid{grid-template-columns:1fr;}}
+.stCard{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:22px;}
+.stCard--sm{padding:18px;margin-bottom:13px;}
+.stCardT{font-size:13px;font-weight:700;margin-bottom:13px;display:flex;align-items:center;gap:8px;}
+.stCardT em{font-style:normal;font-family:var(--mono);font-size:9px;color:var(--t);background:var(--s);border-radius:999px;padding:2px 9px;margin-left:auto;}
+
+.stF{display:block;margin-bottom:17px;}
+.stF__l{display:flex;align-items:center;font-size:12px;font-weight:700;margin-bottom:8px;}
+.stF__h{display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.7;}
+.stRoot input[type=text],.stRoot input[type=email],.stRoot input[type=datetime-local],.stRoot textarea,.stRoot select{
+  width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;padding:12px 14px;
+  font-family:var(--sans);font-size:14px;line-height:1.8;color:var(--ink);resize:vertical;transition:all .2s;}
+.stRoot textarea::placeholder,.stRoot input::placeholder{color:#9BA3B1;}
+.stRoot input:focus,.stRoot textarea:focus,.stRoot select:focus{outline:none;background:var(--white);border-color:var(--t);box-shadow:0 0 0 4px var(--s);}
+.stRow{display:grid;grid-template-columns:1fr 1fr;gap:13px;}
+@media (max-width:640px){.stRow{grid-template-columns:1fr;}}
+
+.stChips{display:flex;flex-wrap:wrap;gap:7px;}
+.stChips button{font-size:12.5px;border:1.5px solid var(--line);border-radius:999px;padding:7px 15px;color:var(--muted);transition:all .2s;}
+.stChips button:hover{border-color:var(--t);color:var(--t);}
+.stChips button.is-on{background:var(--t);border-color:var(--t);color:#fff;font-weight:700;}
+
+.stCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;}
+.stCards button{border:1.5px solid var(--line);border-radius:13px;padding:12px 14px;transition:all .2s;}
+.stCards button:hover{border-color:var(--ai);}
+.stCards button.is-on{border-color:var(--ai);background:#F5F1FE;}
+.stCards b{display:block;font-size:13px;font-weight:700;margin-bottom:2px;}
+.stCards em{font-style:normal;font-size:11px;color:var(--muted);}
+
+.stCheck{display:flex;align-items:center;gap:10px;font-size:13.5px;margin-bottom:17px;cursor:pointer;}
+.stCheck input{width:18px;height:18px;accent-color:var(--ai);}
+.stCount{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right;margin:-9px 0 17px !important;}
+.stCount.is-over{color:var(--sig);font-weight:700;}
+.stWarn{display:flex;gap:11px;align-items:flex-start;background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:13px 15px;margin-bottom:17px;}
+.stWarn svg{color:#B47C10;margin-top:3px;}
+.stWarn p{font-size:12px;line-height:1.9;color:#7A5A12;}
+.stWarn b{display:block;margin-bottom:3px;}
+
+/* 大ボタン */
+.stBig{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:var(--ai);color:#fff;font-size:14.5px;font-weight:700;border-radius:14px;padding:16px;transition:all .2s;box-shadow:0 14px 28px -16px rgba(124,92,214,.85);}
+.stBig:hover{filter:brightness(.94);transform:translateY(-1px);}
+
+/* 提案 */
+.stPlan{margin-top:20px;padding-top:20px;border-top:2px dashed var(--line);}
+.stPlan__k{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--ai);margin-bottom:10px;}
+.stPlan__r{font-size:13px;line-height:1.95;color:var(--muted);background:#F5F1FE;border-radius:12px;padding:14px 16px;margin-bottom:16px;}
+.stPlan__pf{display:grid;gap:10px;margin-bottom:18px;}
+.stPlan__c{border:1.5px solid var(--line);border-left:3px solid var(--t);border-radius:12px;padding:14px 16px;}
+.stPlan__ch{display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;}
+.stPlan__rank{font-size:9.5px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 9px;}
+.stPlan__ch b{font-size:14px;font-weight:700;}
+.stPlan__ch em{font-style:normal;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px;}
+.stPlan__c p{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:8px;}
+.stPlan__use{font-size:12px;font-weight:700;color:var(--t);}
+.stPlan__g{display:grid;grid-template-columns:1fr 1fr;gap:13px;}
+@media (max-width:640px){.stPlan__g{grid-template-columns:1fr;}}
+.stPlan__f{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px;}
+.stNext{font-size:13px;font-weight:700;color:var(--ai);padding:12px 18px;border:1.5px solid var(--ai);border-radius:999px;transition:all .2s;}
+.stNext:hover{background:var(--ai);color:#fff;}
+
+/* 詳細条件 */
+.stDetail{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.stDetail__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);margin-bottom:13px;}
+.stDetail .stF:last-child{margin-bottom:0;}
+
+.stPf{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;}
+.stPf__b{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;white-space:nowrap;transition:all .2s;}
+.stPf__b:hover{border-color:var(--t);}
+.stPf__b.is-on{border-color:var(--t);background:var(--s);}
+.stPf__d{width:8px;height:8px;border-radius:50%;background:var(--t);}
+.stPf__b b{font-size:13px;font-weight:700;}
+.stPf::-webkit-scrollbar{height:5px;}
+.stPf::-webkit-scrollbar-thumb{background:#CBD2DC;border-radius:6px;}
+
+.stTabs{display:flex;gap:6px;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:20px;}
+.stTabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:700;padding:10px;border-radius:9px;color:var(--muted);transition:all .2s;}
+.stTabs button.is-on{background:var(--white);color:var(--t);box-shadow:0 1px 4px rgba(26,34,51,.1);}
+
+.stQ{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.stQ__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);margin-bottom:12px;}
+.stQ__g{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+.stQ__l{display:flex;align-items:center;font-size:11.5px;font-weight:700;margin-bottom:8px;}
+.stQ__n{display:block;font-size:11px;color:var(--muted);margin-top:7px;line-height:1.7;}
+.stSeg{display:flex;gap:5px;flex-wrap:wrap;}
+.stSeg button{font-size:12px;font-weight:700;border:1.5px solid var(--line);background:var(--white);border-radius:999px;padding:7px 14px;color:var(--muted);transition:all .2s;}
+.stSeg button.is-on{background:var(--t);border-color:var(--t);color:#fff;}
+@media (max-width:640px){.stQ__g{grid-template-columns:1fr;}}
+
+.stFoot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding-top:17px;border-top:1px solid var(--line);}
+.stFoot__c{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.stFoot__c span{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;border:1px solid var(--line);border-radius:999px;padding:3px 9px;}
+.stSend{display:inline-flex;align-items:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:13px 26px;transition:all .2s;}
+.stSend:hover:not(:disabled){filter:brightness(.92);transform:translateY(-1px);}
+.stSend:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+.stFlash{margin-top:13px;font-size:12.5px;line-height:1.85;color:var(--t);background:var(--s);border-radius:10px;padding:12px 15px;}
+.stFlash.is-ng{color:var(--sig);background:#FDECEA;}
+
+.stSpec{border-top:3px solid var(--t);}
+.stSpec__l > div{display:grid;grid-template-columns:88px 1fr;gap:10px;padding:8px 0;align-items:baseline;}
+.stSpec__l > div + div{border-top:1px solid var(--line);}
+.stSpec__l dt{font-size:11px;color:var(--muted);}
+.stSpec__l dd{font-size:12.5px;font-weight:500;line-height:1.7;}
+.stSpec__s,.stSpec__w{font-size:12px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 14px;margin-top:12px;}
+.stSpec__w{background:var(--s);color:var(--ink);}
+.stSpec__s b,.stSpec__w b{display:block;font-size:10px;font-weight:700;color:var(--t);margin-bottom:5px;letter-spacing:.06em;}
+
+.stMini li{display:grid;grid-template-columns:66px 1fr;gap:10px;padding:7px 0;font-size:12.5px;align-items:baseline;}
+.stMini li + li{border-top:1px solid var(--line);}
+.stMini li span{font-size:10.5px;color:var(--muted);}
+
+.stEmpty{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:16px;text-align:center;}
+.stSch li{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:11px 0;align-items:center;}
+.stSch li + li{border-top:1px solid var(--line);}
+.stSch__t{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--t);font-weight:700;}
+.stSch__d{grid-column:1;font-size:12.5px;line-height:1.6;}
+.stSch__x{grid-row:1/3;grid-column:2;color:#B9C0CB;padding:6px;border-radius:8px;transition:all .2s;}
+.stSch__x:hover{color:var(--sig);background:#FDECEA;}
+
+.stJobs li{border-left:2px solid var(--t);padding:9px 0 9px 11px;margin-bottom:9px;background:linear-gradient(90deg,var(--s),transparent 62%);border-radius:0 10px 10px 0;}
+.stJobs__h{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.stJobs__k{font-style:normal;font-size:9.5px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 9px;}
+.stJobs__s{font-size:11px;color:var(--muted);margin-left:auto;}
+.stJobs__s.is-ng{color:var(--sig);font-weight:700;}
+.stJobs__t{font-size:12.5px;line-height:1.65;margin-bottom:4px;}
+.stJobs__m{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;gap:8px;align-items:center;}
+.stJobs__m span{border:1px solid var(--line);border-radius:999px;padding:1px 7px;}
+
+.stCopy{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--ai);border:1.5px solid var(--ai);border-radius:999px;padding:8px 16px;margin:-8px 0 18px;transition:all .2s;}
+.stCopy:hover{background:var(--ai);color:#fff;}
+.stBack{font-size:12px;font-weight:700;color:var(--muted);padding:6px 12px;border:1px solid var(--line);border-radius:999px;transition:all .2s;}
+.stBack:hover{border-color:var(--ink);color:var(--ink);}
+.stHint{display:flex;align-items:center;gap:12px;background:#F5F1FE;border:1px solid #DCD0F7;border-radius:14px;padding:14px 16px;margin-bottom:16px;flex-wrap:wrap;}
+.stHint svg{color:var(--ai);flex-shrink:0;}
+.stHint p{flex:1;min-width:200px;font-size:12.5px;line-height:1.85;color:#4A3A75;}
+.stHint b{font-weight:700;}
+.stHint button{font-size:12px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:8px 16px;white-space:nowrap;}
+
+.stAcct{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:16px;padding:13px 16px;margin-bottom:14px;flex-wrap:wrap;}
+.stAcct__k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;}
+.stAcct__s{flex:1;min-width:220px;background:var(--bg);border:1.5px solid transparent;border-radius:11px;padding:10px 13px;font:inherit;font-size:13.5px;font-weight:700;}
+.stAcct__s:focus{outline:none;background:var(--white);border-color:var(--ai);}
+.stAcct__b{font-size:11.5px;font-weight:700;color:#fff;background:var(--sig);border-radius:999px;padding:5px 13px;}
+.stAcct__b.is-own{background:#0E9F73;}
+.stAcct__h{font-family:var(--mono);font-size:12px;color:var(--muted);}
+.stAcct__none{display:flex;align-items:center;gap:11px;width:100%;}
+.stAcct__none svg{color:#B47C10;flex-shrink:0;}
+.stAcct__none p{font-size:12.5px;line-height:1.85;color:#7A5A12;}
+
+.stAlert{display:flex;align-items:center;gap:11px;background:#FDECEA;border:1px solid #F5C4BF;border-radius:14px;padding:13px 16px;margin-bottom:14px;}
+.stAlert svg{color:var(--sig);flex-shrink:0;}
+.stAlert p{font-size:12.5px;line-height:1.85;color:#8C2A22;}
+.stAlert b{font-weight:700;}
+`;
+
+
+/* ========================= AI社員 設計（主力事業） ======================= */
+
+const DESIGN_SIZES = ["1〜5名", "6〜20名", "21〜50名", "51〜100名", "100名以上"];
+const DESIGN_TROUBLES = [
+  "問い合わせ・メール対応",
+  "定例レポートの作成",
+  "資料・提案書づくり",
+  "データの転記・集計",
+  "社内の情報検索",
+  "見積・請求の処理",
+  "SNS・記事の更新",
+  "予約・日程調整",
+];
+
+function DesignView({ pushLog }) {
+  const { settings } = useSettings();
+  const endpoint = resolveEndpoint(settings);
+  const [f, setF] = useState({
+    company: "",
+    industry: "btob",
+    size: "6〜20名",
+    troubles: [],
+    detail: "",
+    hours: "",
+    tools: "",
+    ng: "",
+    budget: "",
+  });
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const [watch, setWatch] = useState(null);
+
+  const toggle = (t) =>
+    setF((v) => ({ ...v, troubles: v.troubles.indexOf(t) >= 0 ? v.troubles.filter((x) => x !== t) : [...v.troubles, t] }));
+
+  const submit = async () => {
+    if (!f.company.trim()) return setFlash({ ok: false, msg: "会社名を入力してください。" });
+    if (!f.troubles.length && !f.detail.trim()) {
+      return setFlash({ ok: false, msg: "困っている業務を1つ以上選ぶか、下の欄に書いてください。" });
+    }
+    if (!endpoint.isGas) return setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+
+    setSending(true);
+    setFlash(null);
+    const ind = (INDUSTRIES.find((x) => x.id === f.industry) || {}).label || "";
+    const msg = [
+      "【事業】AGENT／【JOB】DESIGN",
+      `【会社】${f.company}／【業種】${ind}／【従業員】${f.size}`,
+      `【困っている業務】${f.troubles.join("・") || "指定なし"}`,
+      f.detail ? `【詳しい状況】${f.detail.replace(/\n/g, " ／ ")}` : "",
+      f.hours ? `【今かかっている時間】${f.hours}` : "",
+      f.tools ? `【使っている道具】${f.tools}` : "",
+      f.ng ? `【AIに触れさせたくない情報】${f.ng}` : "",
+      f.budget ? `【予算感】${f.budget}` : "",
+    ]
+      .filter(Boolean)
+      .join("／");
+
+    try {
+      const r = await fetch(endpoint.url, {
+        method: "POST",
+        headers: { "Content-Type": endpoint.contentType },
+        body: JSON.stringify({ client_name: f.company, client_email: "", message: msg }),
+      });
+      const d = await r.json();
+      if (d && d.ok !== false) {
+        setFlash({ ok: true, msg: "受け付けました。5つの部署が順に検討します。3〜5分ほどで提案書が届きます。" });
+        if (d.job_id) watchJob(d.job_id);
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] DESIGN REQUESTED: ${f.company}`);
+      } else {
+        setFlash({ ok: false, msg: "送信できませんでした。" + ((d && d.error) || "") });
+      }
+    } catch (e) {
+      setFlash({ ok: false, msg: "送信できませんでした。接続設定をご確認ください。" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const watchJob = (jobId) => {
+    setWatch({ id: jobId, status: "受付", url: "" });
+    let n = 0;
+    const t = setInterval(async () => {
+      n++;
+      if (n > 40) return clearInterval(t);
+      try {
+        const r = await fetch(`${endpoint.url}?action=jobs`);
+        const d = await r.json();
+        const hit = (d.jobs || []).find((j) => j.job_id === jobId);
+        if (!hit) return;
+        setWatch({ id: jobId, status: hit["状態"], url: hit["成果物URL"] || "" });
+        if (hit["状態"] === "完了" || hit["状態"] === "エラー") clearInterval(t);
+      } catch (e) {}
+    }, 8000);
+  };
+
+  const STAGES = [
+    ["統括室", "業務を洗い出し、渡す順番を決める"],
+    ["技術・運用部", "AI社員の設計書をつくる"],
+    ["原価・資源部", "工数と費用と期間を出す"],
+    ["品質・倫理部", "法令と情報のリスクを検査する"],
+    ["制作・広報部", "提案書にまとめる"],
+  ];
+
+  return (
+    <div className="dsRoot">
+      <Style id="CSS_DESIGN" css={CSS_DESIGN} />
+
+      <header className="dsHead">
+        <p className="dsHead__en">AI EMPLOYEE DESIGN</p>
+        <h1>AI社員の設計</h1>
+        <p className="dsHead__s">
+          お客様の状況を入れると、5つの部署が順に検討し、そのまま出せる提案書ができます。
+        </p>
+      </header>
+
+      <div className="dsFlow">
+        {STAGES.map((x, i) => (
+          <div className="dsFlow__i" key={x[0]}>
+            <span className="dsFlow__n">{i + 1}</span>
+            <div>
+              <b>{x[0]}</b>
+              <em>{x[1]}</em>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="dsCard">
+        <div className="dsRow">
+          <label className="dsF">
+            <span>会社名・屋号</span>
+            <input type="text" value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} placeholder="株式会社◯◯" />
+          </label>
+          <label className="dsF">
+            <span>業種</span>
+            <select value={f.industry} onChange={(e) => setF({ ...f, industry: e.target.value })}>
+              {INDUSTRIES.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="dsF">
+            <span>従業員数</span>
+            <select value={f.size} onChange={(e) => setF({ ...f, size: e.target.value })}>
+              {DESIGN_SIZES.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label className="dsF">
+          <span>困っている業務（複数選べます）</span>
+          <div className="dsChips">
+            {DESIGN_TROUBLES.map((t) => (
+              <button key={t} type="button" className={f.troubles.indexOf(t) >= 0 ? "is-on" : ""} onClick={() => toggle(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </label>
+
+        <label className="dsF">
+          <span>詳しい状況</span>
+          <textarea
+            rows={4}
+            value={f.detail}
+            onChange={(e) => setF({ ...f, detail: e.target.value })}
+            placeholder={"具体的に困っていることを、そのまま書いてください。\n例：問い合わせが1日30件。担当が1人で、返信が翌日になることがある。内容の8割は同じような質問。"}
+          />
+        </label>
+
+        <div className="dsRow">
+          <label className="dsF">
+            <span>今かかっている時間</span>
+            <input type="text" value={f.hours} onChange={(e) => setF({ ...f, hours: e.target.value })} placeholder="1日2時間 ／ 週10時間 など" />
+          </label>
+          <label className="dsF">
+            <span>使っている道具</span>
+            <input type="text" value={f.tools} onChange={(e) => setF({ ...f, tools: e.target.value })} placeholder="Gmail、スプレッドシート、kintone など" />
+          </label>
+        </div>
+
+        <div className="dsRow">
+          <label className="dsF">
+            <span>AIに触れさせたくない情報</span>
+            <input type="text" value={f.ng} onChange={(e) => setF({ ...f, ng: e.target.value })} placeholder="顧客の個人情報、原価表 など" />
+          </label>
+          <label className="dsF">
+            <span>予算感</span>
+            <input type="text" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} placeholder="30万円まで ／ 未定 など" />
+          </label>
+        </div>
+
+        <div className="dsFoot">
+          <p>
+            5つの部署が順に動くため、3〜5分かかります。提案書のほかに、社内用の検討資料（設計書・見積内訳・リスク検査）も一緒に納品されます。
+          </p>
+          <button className="dsSend" onClick={submit} disabled={sending}>
+            {sending ? "送信中..." : "提案書をつくる"}
+          </button>
+        </div>
+
+        {flash && <p className={`dsFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
+
+        {watch && (
+          <div className={`dsWatch is-${watch.status}`}>
+            <b>{watch.status}</b>
+            {watch.status === "完了" ? (
+              <>
+                提案書ができました。
+                {watch.url && (
+                  <a href={watch.url} target="_blank" rel="noopener noreferrer">
+                    開く →
+                  </a>
+                )}
+              </>
+            ) : watch.status === "エラー" ? (
+              "処理に失敗しました。接続設定の「詳細ログを見る」で原因をご確認ください。"
+            ) : (
+              "5つの部署が順に検討しています。このままお待ちください。"
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const CSS_DESIGN = `
+.dsRoot{--bg:#F4F6F9;--white:#fff;--ink:#1A2233;--muted:#616B7D;--line:#E2E6EC;--sig:#E0402F;--ai:#7C5CD6;
+  --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;font-family:var(--sans);color:var(--ink);}
+.dsRoot *,.dsRoot *::before,.dsRoot *::after{box-sizing:border-box;}
+.dsRoot h1,.dsRoot p{margin:0;padding:0;}
+.dsRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.dsRoot a{color:inherit;}
+.dsHead{margin-bottom:18px;}
+.dsHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--sig);font-weight:700;margin-bottom:8px;}
+.dsHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.dsHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;line-height:1.85;}
+.dsFlow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px;}
+.dsFlow__i{display:flex;align-items:flex-start;gap:9px;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:12px;}
+.dsFlow__n{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--sig);color:#fff;font-size:11px;font-weight:700;flex-shrink:0;}
+.dsFlow__i b{display:block;font-size:12px;font-weight:700;margin-bottom:3px;}
+.dsFlow__i em{font-style:normal;font-size:10.5px;line-height:1.65;color:var(--muted);}
+@media (max-width:1000px){.dsFlow{grid-template-columns:repeat(2,1fr);}}
+.dsCard{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:22px;}
+.dsRow{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;}
+.dsRow:has(> :nth-child(2):last-child){grid-template-columns:repeat(2,1fr);}
+@media (max-width:760px){.dsRow{grid-template-columns:1fr;}}
+.dsF{display:block;margin-bottom:16px;}
+.dsF > span{display:block;font-size:12px;font-weight:700;margin-bottom:7px;}
+.dsRoot input[type=text],.dsRoot select,.dsRoot textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;padding:12px 14px;font-family:var(--sans);font-size:14px;line-height:1.8;color:var(--ink);resize:vertical;}
+.dsRoot input:focus,.dsRoot select:focus,.dsRoot textarea:focus{outline:none;background:var(--white);border-color:var(--sig);box-shadow:0 0 0 4px #FDECEA;}
+.dsChips{display:flex;flex-wrap:wrap;gap:7px;}
+.dsChips button{font-size:12.5px;border:1.5px solid var(--line);border-radius:999px;padding:8px 15px;color:var(--muted);transition:all .2s;}
+.dsChips button:hover{border-color:var(--sig);color:var(--sig);}
+.dsChips button.is-on{background:var(--sig);border-color:var(--sig);color:#fff;font-weight:700;}
+.dsFoot{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--line);}
+.dsFoot p{font-size:11.5px;line-height:1.85;color:var(--muted);max-width:34em;}
+.dsSend{background:var(--sig);color:#fff;font-size:14px;font-weight:700;border-radius:999px;padding:14px 32px;transition:all .2s;box-shadow:0 12px 24px -14px rgba(224,64,47,.9);}
+.dsSend:hover:not(:disabled){filter:brightness(.93);transform:translateY(-1px);}
+.dsSend:disabled{opacity:.45;cursor:not-allowed;}
+.dsFlash{margin-top:14px;font-size:12.5px;line-height:1.85;color:#0B6B4F;background:#E6F7F0;border-radius:10px;padding:12px 15px;}
+.dsFlash.is-ng{color:var(--sig);background:#FDECEA;}
+.dsWatch{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-top:14px;background:var(--bg);border-radius:12px;padding:13px 16px;font-size:12.5px;color:var(--muted);}
+.dsWatch b{font-size:11px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:4px 12px;}
+.dsWatch.is-完了 b{background:#0E9F73;}
+.dsWatch.is-エラー b{background:var(--sig);}
+.dsWatch a{font-weight:700;color:#0E9F73;text-decoration:underline;}
+`;
+
+
+/* ======================= AI社員 設計スタジオ ======================= */
+
+const AGENT_EXAMPLES = [
+  { label: "問い合わせ対応", biz: "メールでの問い合わせ対応", now: "担当者が毎朝メールを確認し、内容を読んで、過去の返信を探して、返信文を書いている", pain: "1件20分。日に10件来ると午前中が消える" },
+  { label: "見積作成", biz: "見積書の作成", now: "営業がヒアリング内容を持ち帰り、価格表を見ながらExcelで作成、上長が確認して送付", pain: "作成に1時間、確認待ちで半日" },
+  { label: "日報の集約", biz: "日報の集計と共有", now: "各自がチャットに日報を投稿し、リーダーが読んでまとめ、翌朝に共有している", pain: "毎日30分。読み落としも起きる" },
+];
+
+function AgentStudio({ pushLog }) {
+  const { settings } = useSettings();
+  const endpoint = resolveEndpoint(settings);
+  const [form, setForm] = useState({
+    client: "",
+    industry: "btob",
+    dept: "",
+    biz: "",
+    now: "",
+    pain: "",
+    rule: "",
+    volume: "",
+    ng: "",
+  });
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const [watch, setWatch] = useState(null);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const useExample = (ex) => {
+    setForm((f) => ({ ...f, biz: ex.biz, now: ex.now, pain: ex.pain }));
+  };
+
+  const submit = async () => {
+    if (!form.biz.trim() || !form.now.trim()) {
+      setFlash({ ok: false, msg: "「どの業務か」と「今のやり方」は必ずご記入ください。" });
+      setTimeout(() => setFlash(null), 4000);
+      return;
+    }
+    if (!endpoint.isGas) {
+      setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+      return;
+    }
+    setSending(true);
+    setFlash(null);
+    const ind = (INDUSTRIES.find((x) => x.id === form.industry) || {}).label || "";
+    const msg = [
+      "【事業】AGENT／【JOB】AGENT",
+      `【お客様】${form.client || "（未記入）"}／【業種】${ind}`,
+      form.dept ? `【部署】${form.dept}` : "",
+      `【対象業務】${form.biz}`,
+      `【今のやり方】${form.now.replace(/\n/g, " ／ ")}`,
+      form.pain ? `【困っていること】${form.pain.replace(/\n/g, " ／ ")}` : "",
+      form.rule ? `【判断の基準】${form.rule.replace(/\n/g, " ／ ")}` : "",
+      form.volume ? `【件数・頻度】${form.volume}` : "",
+      form.ng ? `【任せたくないこと】${form.ng}` : "",
+    ].filter(Boolean).join("／");
+
+    try {
+      const r = await fetch(endpoint.url, {
+        method: "POST",
+        headers: { "Content-Type": endpoint.contentType },
+        body: JSON.stringify({
+          client_name: form.client || "自社",
+          client_email: "",
+          message: msg,
+        }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setFlash({ ok: true, msg: "設計を開始しました。5つの部署が同時に担当分を作成します（1〜2分）。" });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] AGENT DESIGN STARTED: ${d.job_id}`);
+        if (d.job_id) watchJob(d.job_id);
+      } else {
+        setFlash({ ok: false, msg: "送信できませんでした。" + ((d && d.error) || "") });
+      }
+    } catch (e) {
+      setFlash({ ok: false, msg: "送信できませんでした。接続設定をご確認ください。" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const watchJob = (jobId) => {
+    setWatch({ id: jobId, status: "受付", url: "" });
+    let n = 0;
+    const t = setInterval(async () => {
+      n++;
+      if (n > 40) { clearInterval(t); setWatch((w) => (w ? { ...w, status: "時間切れ" } : w)); return; }
+      try {
+        const r = await fetch(`${endpoint.url}?action=jobs`);
+        const d = await r.json();
+        const hit = (d.jobs || []).find((j) => j.job_id === jobId);
+        if (!hit) return;
+        setWatch({ id: jobId, status: hit["状態"], url: hit["成果物URL"] || "" });
+        if (hit["状態"] === "完了" || hit["状態"] === "エラー") clearInterval(t);
+      } catch (e) {}
+    }, 8000);
+  };
+
+  return (
+    <div className="stRoot" style={{ "--t": "#E0402F", "--s": "#FDECEA" }}>
+      <Style id="CSS_STUDIO" css={CSS_STUDIO} />
+
+      <header className="stHead">
+        <p className="stHead__en">AI EMPLOYEE DESIGN</p>
+        <h1>AI社員 設計スタジオ</h1>
+        <p className="stHead__s">
+          お客様の業務を伝えると、5つの部署が同時に設計書一式を作ります。そのまま提案・実装に使えます。
+        </p>
+      </header>
+
+      <div className="agDept">
+        {[
+          ["統括室", "業務を工程に分解し、AI社員の構成を決める", "#E0402F"],
+          ["技術・運用部", "各AI社員の指示文と、つなぎ方を書く", "#0E9F73"],
+          ["品質・倫理部", "検査項目と、人に戻す条件を決める", "#7C5CD6"],
+          ["原価・資源部", "構築費用・運用費・効果の見立てを出す", "#E08A1F"],
+          ["制作・広報部", "お客様にお見せする提案書を書く", "#2456C8"],
+        ].map(([n, d, c]) => (
+          <div className="agDept__i" key={n} style={{ "--c": c }}>
+            <b>{n}</b>
+            <em>{d}</em>
+          </div>
+        ))}
+      </div>
+
+      <section className="stCard">
+        <div className="agEx">
+          <span>よくある業務から埋める</span>
+          {AGENT_EXAMPLES.map((ex) => (
+            <button key={ex.label} onClick={() => useExample(ex)}>{ex.label}</button>
+          ))}
+        </div>
+
+        <div className="stRow">
+          <Field label="お客様名" hint="自社の業務を整理する場合は空欄で構いません">
+            <input type="text" value={form.client} onChange={(e) => set("client", e.target.value)} placeholder="株式会社◯◯" />
+          </Field>
+          <Field label="業種">
+            <select value={form.industry} onChange={(e) => set("industry", e.target.value)}>
+              {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
+            </select>
+          </Field>
+        </div>
+
+        <div className="stRow">
+          <Field label="部署" hint="任意">
+            <input type="text" value={form.dept} onChange={(e) => set("dept", e.target.value)} placeholder="営業部" />
+          </Field>
+          <Field label="件数・頻度" hint="任意。見積の精度が上がります">
+            <input type="text" value={form.volume} onChange={(e) => set("volume", e.target.value)} placeholder="1日10件" />
+          </Field>
+        </div>
+
+        <Field label="どの業務をAIに任せたいか" hint="1行で。ここが設計の起点になります">
+          <input type="text" value={form.biz} onChange={(e) => set("biz", e.target.value)} placeholder="メールでの問い合わせ対応" />
+        </Field>
+
+        <Field label="今はどうやっているか" hint="人が動く順番を、そのまま書いてください。ここが最も重要です">
+          <textarea
+            rows={4}
+            value={form.now}
+            onChange={(e) => set("now", e.target.value)}
+            placeholder={"担当者が毎朝メールを確認し、内容を読んで、過去の返信を探して、返信文を書いている"}
+          />
+        </Field>
+
+        <Field label="困っていること" hint="時間・件数・ミスなど、具体的に">
+          <textarea rows={2} value={form.pain} onChange={(e) => set("pain", e.target.value)} placeholder="1件20分。日に10件来ると午前中が消える" />
+        </Field>
+
+        <Field label="判断の基準" hint="任意。「こういうときはこうする」という社内のルール">
+          <textarea rows={2} value={form.rule} onChange={(e) => set("rule", e.target.value)} placeholder="金額が50万を超える相談は、必ず上長に確認してから返信する" />
+        </Field>
+
+        <Field label="AIに任せたくないこと" hint="任意。ここは人が残す、と決めている範囲">
+          <input type="text" value={form.ng} onChange={(e) => set("ng", e.target.value)} placeholder="金額の最終決定、クレーム対応" />
+        </Field>
+
+        <div className="stFoot">
+          <p className="stFoot__c">
+            <span>納品</span>
+            工程の分解／各AI社員の指示文／検査基準／見積／提案書が、1つのドキュメントになります
+          </p>
+          <button className="stSend" onClick={submit} disabled={sending}>
+            <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "send"} size={16} /></span>
+            {sending ? "送信中..." : "5部署で設計する"}
+          </button>
+        </div>
+
+        {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
+
+        {watch && (
+          <div className={`stWatch is-${watch.status}`}>
+            <div className="stWatch__bar">
+              {["受付", "制作中", "完了"].map((st) => {
+                const order = { 受付: 0, 保留: 0, 制作中: 1, 完了: 2, エラー: 1, 時間切れ: 1 };
+                const cur = order[watch.status] !== undefined ? order[watch.status] : 0;
+                const idx = { 受付: 0, 制作中: 1, 完了: 2 }[st];
+                return (
+                  <span key={st} className={`stWatch__s ${idx <= cur ? "is-on" : ""} ${idx === cur ? "is-now" : ""}`}>
+                    <em />
+                    {st}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="stWatch__t">
+              {watch.status === "完了" ? (
+                <>
+                  設計書ができました。
+                  {watch.url && <a href={watch.url} target="_blank" rel="noopener noreferrer">開く →</a>}
+                </>
+              ) : watch.status === "エラー" ? (
+                "作成に失敗しました。接続設定の「詳細ログを見る」で原因をご確認ください。"
+              ) : (
+                "5つの部署が同時に作成しています。1〜2分ほどお待ちください。"
+              )}
+              <button className="stWatch__x" onClick={() => setWatch(null)} aria-label="閉じる">×</button>
+            </p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+
+/* ============================ 案件ボード ============================ */
+
+const DEAL_STAGES = [
+  { id: "問い合わせ", tone: "#9BA3B1", note: "返信案を確認して送る" },
+  { id: "提案中", tone: "#2456C8", note: "設計書をお出しする" },
+  { id: "受注", tone: "#E08A1F", note: "構築に着手する" },
+  { id: "納品", tone: "#7C5CD6", note: "動かしながら直す" },
+  { id: "完了", tone: "#0E9F73", note: "継続の相談をする" },
+  { id: "見送り", tone: "#C4342A", note: "理由を記録する" },
+];
+
+function DealsView({ pushLog }) {
+  const { settings } = useSettings();
+  const [deals, setDeals] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!settings.gasUrl) return;
+    setLoading(true);
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=deals`);
+      const d = await r.json();
+      if (d && Array.isArray(d.deals)) setDeals(d.deals);
+    } catch (e) {
+    } finally {
+      setLoading(false);
+    }
+  }, [settings.gasUrl]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (deal) => {
+    if (!settings.gasUrl) return;
+    try {
+      await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ type: "deal", ...deal }),
+      });
+      setForm(null);
+      load();
+      if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] DEAL SAVED: ${deal.案件名 || deal.deal_id}`);
+    } catch (e) {}
+  };
+
+  const move = (d, stage) => save({ ...d, 状態: stage });
+
+  const won = deals.filter((d) => ["受注", "納品", "完了"].indexOf(d.状態) >= 0);
+  const total = won.reduce((n, d) => n + Number(d.金額 || 0), 0);
+  const open2 = deals.filter((d) => ["問い合わせ", "提案中"].indexOf(d.状態) >= 0);
+
+  return (
+    <div className="stRoot" style={{ "--t": "#E08A1F", "--s": "#FBF2E1" }}>
+      <Style id="CSS_STUDIO" css={CSS_STUDIO} />
+
+      <header className="stHead">
+        <p className="stHead__en">DEALS</p>
+        <h1>案件ボード</h1>
+        <p className="stHead__s">問い合わせから完了までを1枚で追います。取りこぼしを防ぐための場所です。</p>
+      </header>
+
+      <div className="dlSum">
+        <div><span>対応中</span>{open2.length} 件</div>
+        <div><span>受注済み</span>{won.length} 件</div>
+        <div><span>受注金額</span>{total.toLocaleString()} 円</div>
+        <button className="stIdeaBtn" onClick={() => setForm({ 状態: "問い合わせ", 登録日: new Date().toISOString().slice(0, 10) })}>
+          <Sic name="spark" size={15} />
+          案件を追加
+        </button>
+      </div>
+
+      {loading && <p className="stFlash">読み込んでいます...</p>}
+
+      {!loading && deals.length === 0 ? (
+        <div className="lbEmpty">
+          <Sic name="doc" size={30} />
+          <h2>案件がまだありません</h2>
+          <p>サイトから問い合わせが届くと、自動でここに登録されます。手動で追加することもできます。</p>
+        </div>
+      ) : (
+        <div className="dlBoard">
+          {DEAL_STAGES.map((st) => {
+            const list = deals.filter((d) => d.状態 === st.id);
+            return (
+              <div className="dlCol" key={st.id} style={{ "--c": st.tone }}>
+                <p className="dlCol__k">
+                  {st.id}
+                  <em>{list.length}</em>
+                </p>
+                <p className="dlCol__n">{st.note}</p>
+                <div className="dlCol__l">
+                  {list.map((d) => (
+                    <div className="dlCard" key={d.deal_id} onClick={() => setForm(d)}>
+                      <p className="dlCard__c">{d.お客様 || "（未記入）"}</p>
+                      <p className="dlCard__t">{d.案件名}</p>
+                      {Number(d.金額) > 0 && <p className="dlCard__p">{Number(d.金額).toLocaleString()} 円</p>}
+                      {d["次の一手"] && <p className="dlCard__x">{d["次の一手"]}</p>}
+                      <div className="dlCard__f" onClick={(e) => e.stopPropagation()}>
+                        {DEAL_STAGES.filter((x) => x.id !== st.id).slice(0, 2).map((x) => (
+                          <button key={x.id} onClick={() => move(d, x.id)}>{x.id}へ</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {form && (
+        <div className="acModal" onClick={() => setForm(null)}>
+          <div className="acModal__b" onClick={(e) => e.stopPropagation()}>
+            <div className="acModal__h">
+              <h2>{form.deal_id ? "案件を編集" : "案件を追加"}</h2>
+              <button onClick={() => setForm(null)} aria-label="閉じる"><Sic name="x" size={18} /></button>
+            </div>
+            <div className="acForm">
+              <div className="acForm__r">
+                <label><span>お客様</span>
+                  <input type="text" value={form.お客様 || ""} onChange={(e) => setForm({ ...form, お客様: e.target.value })} placeholder="株式会社◯◯" />
+                </label>
+                <label><span>業種</span>
+                  <input type="text" value={form.業種 || ""} onChange={(e) => setForm({ ...form, 業種: e.target.value })} placeholder="製造業" />
+                </label>
+              </div>
+              <label><span>案件名</span>
+                <input type="text" value={form.案件名 || ""} onChange={(e) => setForm({ ...form, 案件名: e.target.value })} placeholder="問い合わせ対応のAI社員構築" />
+              </label>
+              <div className="acForm__r">
+                <label><span>状態</span>
+                  <select value={form.状態 || "問い合わせ"} onChange={(e) => setForm({ ...form, 状態: e.target.value })}>
+                    {DEAL_STAGES.map((x) => <option key={x.id}>{x.id}</option>)}
+                  </select>
+                </label>
+                <label><span>金額（円・税別）</span>
+                  <input type="number" value={form.金額 || 0} onChange={(e) => setForm({ ...form, 金額: e.target.value })} />
+                </label>
+              </div>
+              <div className="acForm__r">
+                <label><span>次の一手</span>
+                  <input type="text" value={form["次の一手"] || ""} onChange={(e) => setForm({ ...form, "次の一手": e.target.value })} placeholder="設計書を送る" />
+                </label>
+                <label><span>期限</span>
+                  <input type="text" value={form.期限 || ""} onChange={(e) => setForm({ ...form, 期限: e.target.value })} placeholder="8/20" />
+                </label>
+              </div>
+              <label><span>メモ</span>
+                <textarea rows={3} value={form.メモ || ""} onChange={(e) => setForm({ ...form, メモ: e.target.value })} />
+              </label>
+            </div>
+            <div className="acModal__f">
+              {form.deal_id && (
+                <button className="acGhost" onClick={() => save({ ...form, remove: true })}>削除</button>
+              )}
+              <button className="acGhost" onClick={() => setForm(null)}>キャンセル</button>
+              <button className="acAdd" onClick={() => save(form)}>保存する</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ========================= 4. コントロール本体 =========================== */
+
+/* ============================================================================
+   株式会社SASHIWA — コントロールダッシュボード（社長専用）
+   配置：src/Dashboard.jsx
+   表示：#/dashboard （App.jsx 側に3行追加。手順は導入ガイド参照）
+
+   依存パッケージなし（React のみ）。lucide-react は使わず SVG を内蔵しています。
+   ============================================================================ */
+
+/* ================================ 設定 ================================== */
+
+// ① ダッシュボードの簡易パスコード。必ず変更してください。
+//    ※これはフロント側だけの目隠しです。本気の認証ではありません。
+const PASSCODE = "sashiwa0713";
+
+// ② 既存 Make の Webhook（App.jsx と同じもの）。指示送信で実際にAI社員が動きます。
+const WEBHOOK_URL = "https://hook.us2.make.com/umnotcrw2pg8twacx68irmjcnnzyjmwv";
+
+// ③ 実データ連携。Google スプレッドシートを「ウェブに公開（CSV）」したURLを入れると
+//    デモデータではなく実際の処理履歴を表示します。空文字ならデモモード。
+//    想定カラム：timestamp, run_id, client_name, agent, status, summary
+const SHEET_CSV_URL = "";
+
+// ④ true にすると指示送信で本当に Make が起動します（1回あたり約7オペレーション消費）。
+//    無料プランのオペレーション残量に注意。false なら画面上だけのシミュレーション。
+const LIVE_COMMAND = true;
+
+/* ================================ データ ================================ */
+
+/* 3事業ブランド。Webhook の message 先頭 【事業】XXX と対応します。 */
+const SERVICES = [
+  { code: "AGENT", name: "AI社員構築代行", theme: "#E0402F", soft: "#FDECEA" },
+  { code: "STUDIO", name: "文書・動画 自動制作", theme: "#2456C8", soft: "#E8EEFB" },
+  { code: "SOCIAL", name: "SNSアカウント運用", theme: "#7C5CD6", soft: "#F1EDFC" },
+];
+
+const DEPARTMENTS = [
+  {
+    id: "exec",
+    name: "統括室",
+    en: "EXECUTIVE",
+    theme: "#E0402F",
+    soft: "#FDECEA",
+    desc: "依頼を読み解き、担当を決め、実行計画を立てる司令塔。",
+    agents: [
+      {
+        id: "ceo",
+        name: "CEO_AI",
+        role: "統括責任者",
+        tier: "高推論",
+        difyApp: "SASHIWA_CEO_AI",
+        mission: "依頼内容の構造化・担当エージェントの選定・実行計画の策定",
+        status: "稼働中",
+        currentTask: "受信した依頼の要件を構造化し、担当を選定中",
+        skills: ["要件定義", "作業分解", "進行管理", "優先度判定"],
+      },
+    ],
+  },
+  {
+    id: "creative",
+    name: "制作・広報部",
+    en: "CREATIVE & PR",
+    theme: "#7C5CD6",
+    soft: "#F1EDFC",
+    desc: "原稿・構成・デザイン方針・広報文をつくる。",
+    agents: [
+      {
+        id: "creative",
+        name: "Creative_PR_AI",
+        role: "クリエイティブ責任者",
+        tier: "高推論",
+        difyApp: "Creative_PR_AI",
+        mission: "コピー、構成設計、デザイン方針、広報文の作成",
+        status: "稼働中",
+        currentTask: "コーポレートサイトの改稿案を生成中",
+        skills: ["原稿執筆", "構成設計", "広報", "SNS運用"],
+      },
+    ],
+  },
+  {
+    id: "engineering",
+    name: "技術・運用部",
+    en: "ENGINEERING",
+    theme: "#0E9F73",
+    soft: "#E7F6F1",
+    desc: "実装・技術調査・稼働監視を担当する。",
+    agents: [
+      {
+        id: "engineer",
+        name: "Engineer_DevOps_AI",
+        role: "技術responsible",
+        tier: "高推論",
+        difyApp: "Engineer_DevOps_AI",
+        mission: "コード実装、技術調査、稼働監視、障害対応",
+        status: "稼働中",
+        currentTask: "Make シナリオのタイムアウト設定を点検中",
+        skills: ["実装", "技術選定", "運用監視", "自動化設計"],
+      },
+    ],
+  },
+  {
+    id: "qa",
+    name: "品質・倫理部",
+    en: "QA & ETHICS",
+    theme: "#2F6FD0",
+    soft: "#E9F1FC",
+    desc: "全成果物を検査し、基準を満たさないものを差し戻す。",
+    agents: [
+      {
+        id: "qa",
+        name: "QA_Ethics_AI",
+        role: "監査責任者",
+        tier: "高推論",
+        difyApp: "QA_Ethics_AI",
+        mission: "成果物の品質検査、表現・法令上のリスク確認、差戻し判断",
+        status: "待機中",
+        currentTask: "次の検査対象を待機中",
+        skills: ["品質検査", "倫理審査", "リスク評価", "差戻し判断"],
+      },
+    ],
+  },
+  {
+    id: "finance",
+    name: "原価・資源部",
+    en: "FINANCE",
+    theme: "#D08A16",
+    soft: "#FBF2E1",
+    desc: "工数とコストを算出し、資源配分を管理する。",
+    agents: [
+      {
+        id: "cfo",
+        name: "CFO_Resource_AI",
+        role: "原価管理責任者",
+        tier: "軽量",
+        difyApp: "CFO_Resource_AI",
+        mission: "工数の試算、コストの算出、資源配分の提案",
+        status: "待機中",
+        currentTask: "月次のAPIコスト集計を待機中",
+        skills: ["工数見積", "原価計算", "資源配分"],
+      },
+    ],
+  },
+];
+
+/* デモ用の処理履歴。SHEET_CSV_URL を設定すると実データに置き換わります。 */
+const DEMO_TASKS = [
+  {
+    service: "SOCIAL",
+    timestamp: "2026-08-06 22:00",
+    run_id: "s-260806",
+    client_name: "自社アカウント",
+    agent: "Creative_PR_AI",
+    status: "完了",
+    summary: "翌日分の投稿5本を生成し、予約配信を設定",
+  },
+  {
+    service: "SOCIAL",
+    timestamp: "2026-08-06 05:30",
+    run_id: "s-260806a",
+    client_name: "自社アカウント",
+    agent: "CEO_AI",
+    status: "完了",
+    summary: "業界ニュースを収集し、投稿テーマ12件を抽出",
+  },
+  {
+    service: "STUDIO",
+    timestamp: "2026-08-06 22:00",
+    run_id: "w-260806",
+    client_name: "サンプル商事",
+    agent: "Creative_PR_AI",
+    status: "完了",
+    summary: "SEO記事「業務自動化の始め方」2,800字を納品",
+  },
+  {
+    service: "STUDIO",
+    timestamp: "2026-08-06 22:00",
+    run_id: "w-260806",
+    client_name: "サンプル商事",
+    agent: "QA_Ethics_AI",
+    status: "完了",
+    summary: "表現検査を通過（薬機法・景表法の抵触なし）",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-05 21:00",
+    run_id: "32753b2c",
+    client_name: "指輪 直人",
+    agent: "CEO_AI",
+    status: "完了",
+    summary: "問い合わせの要件を構造化し、4体へ展開",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-05 21:00",
+    run_id: "32753b2c",
+    client_name: "指輪 直人",
+    agent: "Creative_PR_AI",
+    status: "完了",
+    summary: "サイト改稿の構成案を出力",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-05 21:00",
+    run_id: "32753b2c",
+    client_name: "指輪 直人",
+    agent: "Engineer_DevOps_AI",
+    status: "完了",
+    summary: "実装方針とタイムアウト設定を提案",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-05 21:00",
+    run_id: "32753b2c",
+    client_name: "指輪 直人",
+    agent: "QA_Ethics_AI",
+    status: "完了",
+    summary: "表現リスクなし。通過判定",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-05 21:00",
+    run_id: "32753b2c",
+    client_name: "指輪 直人",
+    agent: "CFO_Resource_AI",
+    status: "完了",
+    summary: "想定工数 3.5h / 概算 ¥4,200",
+  },
+  {
+    service: "AGENT",
+    timestamp: "2026-08-04 14:22",
+    run_id: "a91c4de0",
+    client_name: "テスト送信",
+    agent: "CEO_AI",
+    status: "完了",
+    summary: "テスト依頼を受領し解析",
+  },
+];
+
+const SEED_LOG = [
+  "SASHIWA CONTROL CONSOLE v1.0",
+  "connecting to orchestration layer ...",
+  "dify: 5 apps reachable",
+  "make: scenario SASHIWA_Core_Routing = ACTIVE",
+  "ready.",
+];
+
+/* ================================ 部品 ================================== */
+
+function Ico({ name, size = 18 }) {
+  const s = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
+  const p = {
+    grid: (
+      <>
+        <rect x="3" y="3" width="7.5" height="7.5" rx="2" {...s} />
+        <rect x="13.5" y="3" width="7.5" height="7.5" rx="2" {...s} />
+        <rect x="3" y="13.5" width="7.5" height="7.5" rx="2" {...s} />
+        <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" {...s} />
+      </>
+    ),
+    bot: (
       <>
         <rect x="4" y="8" width="16" height="12" rx="4" {...s} />
-        <path d="M12 4v4" {...s} />
+        <path d="M12 4.6V8" {...s} />
         <circle cx="12" cy="3.2" r="1.4" {...s} />
-        <circle cx="9.2" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
-        <circle cx="14.8" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
-        <path d="M9.5 17h5" {...s} />
+        <circle cx="9.2" cy="13.6" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="14.8" cy="13.6" r="1.1" fill="currentColor" stroke="none" />
       </>
     ),
-    flow: (
+    send: (
       <>
-        <rect x="2.5" y="9" width="6" height="6" rx="1.6" {...s} />
-        <rect x="15.5" y="9" width="6" height="6" rx="1.6" {...s} />
-        <path d="M8.5 12h7" {...s} />
-        <path d="M13.4 10.2 15.5 12l-2.1 1.8" {...s} />
-        <path d="M5.5 9V5.5h13V9" {...s} opacity=".4" />
+        <path d="M21.5 2.5 11 13" {...s} />
+        <path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4z" {...s} />
       </>
     ),
-    chip: (
+    loader: (
       <>
-        <rect x="6" y="6" width="12" height="12" rx="2.4" {...s} />
-        <rect x="9.5" y="9.5" width="5" height="5" rx="1" {...s} />
-        <path d="M9 6V3M15 6V3M9 21v-3M15 21v-3M6 9H3M6 15H3M21 9h-3M21 15h-3" {...s} />
+        <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.9 2.9M15.5 15.5l2.9 2.9M18.4 5.6l-2.9 2.9M8.5 15.5l-2.9 2.9" {...s} />
       </>
     ),
-    mail: (
+    pulse: (
       <>
-        <rect x="2.5" y="5" width="19" height="14" rx="2.4" {...s} />
-        <path d="m3.5 7 8.5 6 8.5-6" {...s} />
-      </>
-    ),
-    doc: (
-      <>
-        <path d="M6 2.8h8l4 4V21a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3.8a1 1 0 0 1 1-1Z" {...s} />
-        <path d="M14 2.8V7h4" {...s} />
-        <path d="M8.5 12h7M8.5 16h5" {...s} />
-      </>
-    ),
-    sns: (
-      <>
-        <circle cx="6" cy="12" r="2.6" {...s} />
-        <circle cx="17.5" cy="6.5" r="2.6" {...s} />
-        <circle cx="17.5" cy="17.5" r="2.6" {...s} />
-        <path d="m8.4 10.8 6.8-3.2M8.4 13.2l6.8 3.2" {...s} />
-      </>
-    ),
-    slide: (
-      <>
-        <rect x="2.5" y="4" width="19" height="12.5" rx="2" {...s} />
-        <path d="M12 16.5V20M8.5 20h7" {...s} />
-        <path d="M7 12.5V9M11 12.5V7M15 12.5v-2.5" {...s} />
-      </>
-    ),
-    search: (
-      <>
-        <circle cx="10.8" cy="10.8" r="6.8" {...s} />
-        <path d="m15.8 15.8 4.4 4.4" {...s} />
+        <path d="M2.5 12h4l2.5-7 4.5 14 2.5-7h5.5" {...s} />
       </>
     ),
     yen: (
       <>
+        <path d="m7.5 5.5 4.5 6.5 4.5-6.5M8 13h8M8 16h8M12 12v6.5" {...s} />
+      </>
+    ),
+    clock: (
+      <>
         <circle cx="12" cy="12" r="9" {...s} />
-        <path d="m8.5 7.5 3.5 5 3.5-5M8.5 13.5h7M8.5 16h7M12 12.5V17.5" {...s} />
+        <path d="M12 7v5.3l3.4 2" {...s} />
       </>
     ),
     check: (
@@ -482,2009 +6437,1480 @@ function Icon({ name, size = 28 }) {
         <path d="m8 12.3 2.8 2.8L16 9.8" {...s} />
       </>
     ),
-    pen: (
+    back: <path d="M15 5l-7 7 7 7" {...s} />,
+    lock: (
       <>
-        <path d="M16.8 3.4a2.3 2.3 0 0 1 3.3 3.3L8.4 18.4l-4.4 1.2 1.2-4.4Z" {...s} />
-        <path d="m15 5.2 3.3 3.3" {...s} />
+        <rect x="4.5" y="10.5" width="15" height="10" rx="3" {...s} />
+        <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" {...s} />
       </>
     ),
-    social: (
+    refresh: (
       <>
-        <circle cx="12" cy="7.4" r="3.4" {...s} />
-        <path d="M5.2 20.2a6.8 6.8 0 0 1 13.6 0" {...s} />
-        <path d="M19.4 4.6a4 4 0 0 1 0 5.6M4.6 4.6a4 4 0 0 0 0 5.6" {...s} opacity=".5" />
+        <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" {...s} />
+        <path d="M20.5 4.5V10H15" {...s} />
       </>
     ),
-    studio: (
+    out: (
       <>
-        <path d="M4 3.2h7.5l3.2 3.2v9.4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4.2a1 1 0 0 1 1-1Z" {...s} />
-        <path d="M11.5 3.2v3.4h3.2" {...s} />
-        <path d="M6 10h5M6 13h3.5" {...s} />
-        <rect x="12.5" y="12" width="9" height="8.8" rx="2" {...s} />
-        <path d="m16.2 14.7 3 1.7-3 1.7z" {...s} />
-      </>
-    ),
-    film: (
-      <>
-        <rect x="2.5" y="4.5" width="19" height="15" rx="2.6" {...s} />
-        <path d="M7.5 4.5v15M16.5 4.5v15M2.5 12h19" {...s} opacity=".45" />
-        <path d="m10.8 9.4 3.4 2.1-3.4 2.1z" {...s} />
+        <path d="M14.5 3.5h4a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2h-4" {...s} />
+        <path d="M9.5 16 5.5 12l4-4M5.5 12H15" {...s} />
       </>
     ),
   };
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className="sw-ic">
-      {paths[name] || paths.check}
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>
+      {p[name] || p.check}
     </svg>
   );
 }
 
-/* ---------------------------------------------------------------- マスコット */
-
-function RingChara({ tone = "#E0402F", gem = "#FFE3DF", id = "a", delay = "0s", scale = 1 }) {
-  return (
-    <svg
-      viewBox="0 0 128 152"
-      className="sw-ring"
-      style={{ animationDelay: delay, transform: `scale(${scale})` }}
-      aria-hidden="true"
-    >
-      <defs>
-        <linearGradient id={`rg-${id}`} x1="0" y1="0" x2="0.4" y2="1">
-          <stop offset="0%" stopColor={tone} />
-          <stop offset="100%" stopColor={tone} stopOpacity="0.72" />
-        </linearGradient>
-      </defs>
-      {/* 宝石＝AIコア */}
-      <g className="sw-ring__gem">
-        <path d="M64 8 L80 27 L64 46 L48 27 Z" fill={gem} stroke={tone} strokeWidth="3.4" strokeLinejoin="round" />
-        <path d="M48 27 H80 M64 8 L64 46" stroke={tone} strokeWidth="1.8" opacity=".45" />
-      </g>
-      {/* 輪＝人と人をつなぐ */}
-      <circle cx="64" cy="98" r="38" fill="none" stroke={`url(#rg-${id})`} strokeWidth="17" strokeLinecap="round" />
-      {/* 顔 */}
-      <circle cx="64" cy="98" r="29.5" fill="#FFFFFF" opacity=".96" />
-      <circle cx="53" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
-      <circle cx="75" cy="94" r="4.2" fill="#1A2233" className="sw-ring__eye" />
-      <circle cx="45" cy="105" r="4.6" fill={tone} opacity=".28" />
-      <circle cx="83" cy="105" r="4.6" fill={tone} opacity=".28" />
-      <path d="M56 106 q8 8 16 0" stroke="#1A2233" strokeWidth="3.4" fill="none" strokeLinecap="round" />
-      {/* 手 */}
-      <path d="M20 100 q-9 -5 -11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
-      <path d="M108 100 q9 -5 11 -15" stroke={tone} strokeWidth="5.4" fill="none" strokeLinecap="round" />
-    </svg>
-  );
+/* かんたんCSVパーサ（引用符・改行対応） */
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else q = false;
+      } else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") {
+      row.push(cur);
+      cur = "";
+    } else if (c === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+    } else if (c !== "\r") cur += c;
+  }
+  if (cur !== "" || row.length) {
+    row.push(cur);
+    rows.push(row);
+  }
+  if (!rows.length) return [];
+  const head = rows[0].map((h) => h.trim().toLowerCase());
+  return rows.slice(1).filter((r) => r.some((v) => v && v.trim())).map((r) => {
+    const o = {};
+    head.forEach((h, i) => (o[h] = (r[i] || "").trim()));
+    return o;
+  });
 }
 
-/* 3体が輪でつながる＝人と人をつなげる */
-function RingTrio() {
-  return (
-    <div className="sw-trio">
-      <span className="sw-trio__i sw-trio__i--l">
-        <RingChara tone="#2456C8" gem="#DCE6FB" id="b" delay=".5s" scale={0.82} />
-      </span>
-      <span className="sw-trio__i sw-trio__i--c">
-        <RingChara tone="#E0402F" gem="#FFE3DF" id="a" delay="0s" />
-      </span>
-      <span className="sw-trio__i sw-trio__i--r">
-        <RingChara tone="#7C5CD6" gem="#EDE6FC" id="c" delay="1s" scale={0.82} />
-      </span>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- 補助 */
-
-function useReveal() {
-  const ref = useRef(null);
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === "undefined") return setShown(true);
-    const io = new IntersectionObserver(
-      (es) =>
-        es.forEach((e) => {
-          if (e.isIntersecting) {
-            setShown(true);
-            io.disconnect();
-          }
-        }),
-      { threshold: 0.08, rootMargin: "0px 0px -5% 0px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return [ref, shown];
-}
-
-function Reveal({ children, delay = 0, className = "" }) {
-  const [ref, shown] = useReveal();
-  return (
-    <div ref={ref} className={`sw-rv ${shown ? "is-in" : ""} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
-      {children}
-    </div>
-  );
-}
-
-function useCountUp(target, dur = 1400) {
-  const [n, setN] = useState(0);
-  const [ref, shown] = useReveal();
-  useEffect(() => {
-    if (!shown) return;
-    const reduce =
-      typeof window !== "undefined" &&
-      window.matchMedia &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || target === 0) return setN(target);
-    let raf;
-    const t0 = performance.now();
-    const tick = (t) => {
-      const p = Math.min(1, (t - t0) / dur);
-      setN(Math.round(target * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [shown, target, dur]);
-  return [ref, n];
-}
-
-function Counter({ value, unit, label }) {
-  const [ref, n] = useCountUp(value);
-  return (
-    <div className="sw-stat" ref={ref}>
-      <p className="sw-mono sw-stat__v">
-        {n}
-        <span>{unit}</span>
-      </p>
-      <p className="sw-stat__l">{label}</p>
-    </div>
-  );
-}
-
-function Marquee({ items, reverse }) {
-  const row = [...items, ...items];
-  return (
-    <div className="sw-mq" aria-hidden="true">
-      <div className={`sw-mq__t ${reverse ? "is-rev" : ""}`}>
-        {row.map((t, i) => (
-          <span key={i}>
-            {t}
-            <em>◆</em>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Head({ en, jp, note, center }) {
-  return (
-    <Reveal className={`sw-head ${center ? "is-center" : ""}`}>
-      <p className="sw-mono sw-head__en">{en}</p>
-      <h2 className="sw-head__jp">{jp}</h2>
-      {note && <p className="sw-head__note">{note}</p>}
-    </Reveal>
-  );
-}
-
-function PageHero({ en, title, lede }) {
-  return (
-    <section className="sw-phero">
-      <div className="sw-wrap">
-        <p className="sw-mono sw-phero__en">{en}</p>
-        <h1 className="sw-phero__t">{title}</h1>
-        {lede && <p className="sw-phero__l">{lede}</p>}
-      </div>
-    </section>
-  );
-}
-
-function CtaBand({ go }) {
-  return (
-    <section className="sw-cta">
-      <div className="sw-wrap">
-        <Reveal>
-          <h2 className="sw-cta__h">
-            御社にも、24時間はたらく<span className="sw-sig">AI社員</span>を。
-          </h2>
-          <p className="sw-cta__b">
-まずは30分の無料相談から。どの業務をAIに渡せるか、実際に動いている構成をお見せしながらご案内します。
-          </p>
-          <div className="sw-cta__btns">
-            <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("contact")}>
-              無料相談を申し込む
-            </button>
-            <button className="sw-btn sw-btn--wline sw-btn--lg" onClick={() => go("flow")}>
-              導入の流れを見る
-            </button>
-          </div>
-        </Reveal>
-      </div>
-    </section>
-  );
-}
-
-/* ---------------------------------------------------------------- ヘッダー */
-
-function Header({ page, go }) {
-  const [scrolled, setScrolled] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [dd, setDd] = useState(false);
-
-  useEffect(() => {
-    const f = () => setScrolled(window.scrollY > 20);
-    f();
-    window.addEventListener("scroll", f, { passive: true });
-    return () => window.removeEventListener("scroll", f);
-  }, []);
-
-  const nav = (p, slug) => {
-    setOpen(false);
-    setDd(false);
-    go(p, slug);
+/** 「【キー】値」からタグを取り出します */
+/** デモ行を詳細表示できる形に変換します */
+function toJob(t) {
+  return {
+    job_id: t.run_id || "-",
+    受信日時: t.timestamp,
+    種別: t.agent,
+    投稿先アカウント: t.client_name,
+    持ち主: t.client_name,
+    媒体: "-",
+    状態: t.status,
+    指示内容: `【事業】${t.service || "AGENT"}／【内容】${t.summary}`,
+    成果物URL: "",
+    完了日時: t.timestamp,
   };
+}
 
+function pickTag(text, key) {
+  const m = String(text || "").match(new RegExp("【" + key + "】([^／]*)"));
+  return m ? m[1].trim() : "";
+}
+
+/* ================================ 認証ゲート ============================ */
+
+function Gate({ onPass }) {
+  const [v, setV] = useState("");
+  const [err, setErr] = useState(false);
+  const submit = () => {
+    if (v === PASSCODE) onPass();
+    else {
+      setErr(true);
+      setV("");
+    }
+  };
   return (
-    <header className={`sw-hd ${scrolled ? "is-on" : ""}`}>
-      <div className="sw-hd__in">
-        <a
-          className="sw-logo"
-          href="#/"
-          onClick={(e) => {
-            e.preventDefault();
-            nav("home");
+    <div className="dbGate">
+      <div className="dbGate__c">
+        <svg viewBox="0 0 150 170" className="dbGateRing" aria-hidden="true">
+          <defs>
+            <linearGradient id="dbg" x1="0" y1="0" x2="0.35" y2="1">
+              <stop offset="0%" stopColor="#E0402F" />
+              <stop offset="100%" stopColor="#E0402F" stopOpacity="0.78" />
+            </linearGradient>
+            <radialGradient id="dbch" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0%" stopColor="#E0402F" stopOpacity=".38" />
+              <stop offset="100%" stopColor="#E0402F" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <g className="dbGateRing__legs">
+            <ellipse cx="60" cy="150" rx="12" ry="8" fill="#E0402F" />
+            <ellipse cx="90" cy="150" rx="12" ry="8" fill="#E0402F" />
+            <rect x="55" y="132" width="10" height="14" rx="5" fill="#E0402F" />
+            <rect x="85" y="132" width="10" height="14" rx="5" fill="#E0402F" />
+          </g>
+          <g className="dbGateRing__arms">
+            <path d="M32 96 q-14 4 -18 16" stroke="#E0402F" strokeWidth="9" fill="none" strokeLinecap="round" />
+            <path d="M118 96 q14 4 18 16" stroke="#E0402F" strokeWidth="9" fill="none" strokeLinecap="round" />
+            <circle cx="13" cy="115" r="8" fill="#E0402F" />
+            <circle cx="137" cy="115" r="8" fill="#E0402F" />
+          </g>
+          <circle cx="75" cy="88" r="44" fill="url(#dbg)" />
+          <circle cx="75" cy="88" r="34" fill="#FFFFFF" />
+          <circle cx="53" cy="95" r="6.5" fill="url(#dbch)" />
+          <circle cx="97" cy="95" r="6.5" fill="url(#dbch)" />
+          <g className="dbGateRing__eyes">
+            <ellipse cx="63" cy="85" rx="4.6" ry="5.6" fill="#1A2233" />
+            <ellipse cx="87" cy="85" rx="4.6" ry="5.6" fill="#1A2233" />
+            <circle cx="64.8" cy="83" r="1.7" fill="#FFFFFF" />
+            <circle cx="88.8" cy="83" r="1.7" fill="#FFFFFF" />
+          </g>
+          <path d="M67 98 q8 7 16 0" stroke="#1A2233" strokeWidth="3.2" fill="none" strokeLinecap="round" />
+          <path d="M75 8 L88 24 L75 40 L62 24 Z" fill="#FFE3DF" stroke="#E0402F" strokeWidth="3.4" strokeLinejoin="round" />
+          <path d="M62 24 H88 M75 8 L75 40" stroke="#E0402F" strokeWidth="1.6" opacity=".4" />
+          <path d="M75 40 L75 46" stroke="#E0402F" strokeWidth="3.4" strokeLinecap="round" />
+        </svg>
+        <h1>SASHIWA CONTROL</h1>
+        <p>社長専用のコントロールダッシュボードです。</p>
+        <input
+          type="password"
+          value={v}
+          placeholder="パスコード"
+          onChange={(e) => {
+            setV(e.target.value);
+            setErr(false);
           }}
-        >
-          <span className="sw-logo__m" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path d="M5 18 L12 6 L19 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-              <circle cx="12" cy="5.4" r="2.4" fill="currentColor" />
-            </svg>
-          </span>
-          <span className="sw-logo__t">
-            SASHIWA<span>Inc.</span>
-          </span>
-        </a>
-
-        <nav className="sw-nav" aria-label="メインナビゲーション">
-          <div className="sw-nav__pill">
-            <div
-              className={`sw-dd ${dd ? "is-open" : ""}`}
-              onMouseEnter={() => setDd(true)}
-              onMouseLeave={() => setDd(false)}
-            >
-              <button
-                className={`sw-nav__a ${page === "business" ? "is-cur" : ""}`}
-                onClick={() => nav("business")}
-                aria-expanded={dd}
-              >
-                事業内容 <span className="sw-dd__c" aria-hidden="true" />
-              </button>
-              <div className="sw-dd__m">
-                {BUSINESSES.map((b) => (
-                  <button key={b.slug} onClick={() => nav("business", b.slug)}>
-                    <span className="sw-mono">{b.no}</span>
-                    {b.title}
-                  </button>
-                ))}
-                <button className="sw-dd__all" onClick={() => nav("business")}>
-                  事業一覧を見る →
-                </button>
-              </div>
-            </div>
-            <button className={`sw-nav__a ${page === "flow" ? "is-cur" : ""}`} onClick={() => nav("flow")}>
-              導入の流れ
-            </button>
-            <button className={`sw-nav__a ${page === "blog" ? "is-cur" : ""}`} onClick={() => nav("blog")}>
-              記事
-            </button>
-            <button className={`sw-nav__a ${page === "company" ? "is-cur" : ""}`} onClick={() => nav("company")}>
-              会社概要
-            </button>
-          </div>
-        </nav>
-
-        <button className="sw-hd__cta" onClick={() => nav("contact")}>
-          お問い合わせ
-        </button>
-
-        <button
-          className={`sw-burger ${open ? "is-x" : ""}`}
-          aria-label={open ? "メニューを閉じる" : "メニューを開く"}
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span />
-          <span />
-        </button>
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          autoFocus
+        />
+        {err && <p className="dbGate__e">パスコードが違います。</p>}
+        <button onClick={submit}>入室する</button>
+        <a href="#/">← サイトに戻る</a>
       </div>
-
-      <div className={`sw-drawer ${open ? "is-open" : ""}`}>
-        <p className="sw-mono sw-drawer__k">事業内容</p>
-        {BUSINESSES.map((b) => (
-          <button key={b.slug} className="sw-drawer__sub" onClick={() => nav("business", b.slug)}>
-            {b.title}
-          </button>
-        ))}
-        <button className="sw-drawer__a" onClick={() => nav("business")}>
-          事業一覧
-        </button>
-        <button className="sw-drawer__a" onClick={() => nav("flow")}>
-          導入の流れ
-        </button>
-        <button className="sw-drawer__a" onClick={() => nav("blog")}>
-          記事
-        </button>
-        <button className="sw-drawer__a" onClick={() => nav("company")}>
-          会社概要
-        </button>
-        <button className="sw-drawer__cta" onClick={() => nav("contact")}>
-          お問い合わせ
-        </button>
-      </div>
-    </header>
+    </div>
   );
 }
 
-/* ---------------------------------------------------------------- ホーム */
+/* ================================ 本体 ================================== */
 
-function HomePage({ go }) {
+function DashboardInner() {
+  const [authed, setAuthed] = useState(false);
+
+  /* --- マスターデータを State に移管（UIから書き換え可能にするため） --- */
+  const [company, setCompany] = useState(DEPARTMENTS);
+  const [tasks, setTasks] = useState(DEMO_TASKS);
+  const [logs, setLogs] = useState(SEED_LOG);
+  const { settings } = useSettings();
+  const gasUrl = settings.gasUrl;
+  const [live, setLive] = useState(false); // 実データ取得成功フラグ
+  const [loadingData, setLoadingData] = useState(false);
+
+  const [view, setView] = useState("org"); // org | studio | accounts | settings | library
+  const [libFilter, setLibFilter] = useState("all");
+  const [detail, setDetail] = useState(null);
+  const [deptId, setDeptId] = useState(null);
+  const [agentId, setAgentId] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
+
+  const dept = useMemo(() => company.find((d) => d.id === deptId) || null, [company, deptId]);
+  const agent = useMemo(
+    () => (dept ? dept.agents.find((a) => a.id === agentId) || null : null),
+    [dept, agentId]
+  );
+
+  const pushLog = useCallback((line) => {
+    setLogs((l) => [...l.slice(-120), line]);
+  }, []);
+
+  /* --- 実データ取得 --- */
+  const loadData = useCallback(async () => {
+    if (!gasUrl) return;
+    setLoadingData(true);
+    try {
+      const r = await fetch(`${gasUrl}?action=jobs`);
+      const data = await r.json();
+      if (!data || !data.ok || !Array.isArray(data.jobs)) throw new Error("形式が違います");
+      const rows = data.jobs.map((j) => ({
+        service: pickTag(j.指示内容, "事業") || "AGENT",
+        timestamp: j.受信日時,
+        run_id: j.job_id,
+        client_name: j.持ち主,
+        agent: j.種別,
+        status: j.状態,
+        summary: jobTitle(j),
+        raw: j,
+      }));
+      setTasks(rows.slice(0, 60));
+      setLive(true);
+      pushLog(`[${new Date().toLocaleTimeString()}] DATA SYNCED: ${rows.length} records`);
+    } catch (e) {
+      setLive(false);
+      pushLog(`[${new Date().toLocaleTimeString()}] SYNC FAILED — デモデータを表示中`);
+    } finally {
+      setLoadingData(false);
+    }
+  }, [gasUrl, pushLog]);
+
+  useEffect(() => {
+    if (authed) loadData();
+  }, [authed, loadData]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") document.title = "CONTROL｜株式会社SASHIWA";
+  }, []);
+
+  /* --- 指示アサイン --- */
+  const assign = useCallback(
+    async (targetDept, targetAgent, text, priority) => {
+      const started = Date.now();
+      const payload = {
+        client_name: "社長（コントロールダッシュボード）",
+        client_email: "control@sashiwa.local",
+        message: `【指示先】${targetAgent.name}／【優先度】${priority}／【内容】${text}`,
+      };
+
+      let ok = true;
+      if (LIVE_COMMAND) {
+        try {
+          const r = await fetch(WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          ok = r.ok;
+        } catch (e) {
+          ok = false;
+        }
+      }
+
+      // 最低1.2秒はローディングを見せる
+      const wait = Math.max(0, 1200 - (Date.now() - started));
+      await new Promise((res) => setTimeout(res, wait));
+
+      // AI社員のタスクとステータスを書き換え
+      setCompany((prev) =>
+        prev.map((d) =>
+          d.id !== targetDept.id
+            ? d
+            : {
+                ...d,
+                agents: d.agents.map((a) =>
+                  a.id !== targetAgent.id
+                    ? a
+                    : { ...a, currentTask: text, status: priority === "High" ? "高負荷" : "稼働中" }
+                ),
+              }
+        )
+      );
+
+      const t = new Date().toLocaleTimeString();
+      pushLog(`[${t}] COMMAND DEPLOYED: "${text}" (PRIORITY: ${priority})`);
+      pushLog(
+        ok
+          ? `[${t}] → ${targetAgent.name} acknowledged. routing via Make ...`
+          : `[${t}] ! webhook unreachable — ローカル反映のみ`
+      );
+
+      setTasks((prev) => [
+        {
+          service: "AGENT",
+          timestamp: new Date().toLocaleString("ja-JP", { hour12: false }).slice(0, 16),
+          run_id: "manual",
+          client_name: "社長",
+          agent: targetAgent.name,
+          status: ok ? "送信済" : "失敗",
+          summary: text.length > 40 ? text.slice(0, 40) + "…" : text,
+        },
+        ...prev,
+      ]);
+
+      return ok;
+    },
+    [pushLog]
+  );
+
+  /* --- KPI --- */
+  const kpi = useMemo(() => {
+    const all = company.flatMap((d) => d.agents);
+    return {
+      agents: all.length,
+      active: all.filter((a) => a.status !== "待機中").length,
+      high: all.filter((a) => a.status === "高負荷").length,
+      tasks: tasks.length,
+      done: tasks.filter((t) => (t.status || "").includes("完了")).length,
+    };
+  }, [company, tasks]);
+
+  if (!authed) return (
+    <div className="dbRoot">
+      <Style id="CSS_DASHBOARD" css={CSS_DASHBOARD} />
+      <Gate onPass={() => setAuthed(true)} />
+    </div>
+  );
+
+  const goDept = (id) => {
+    setView("org");
+    setDeptId(id);
+    setAgentId(null);
+    setNavOpen(false);
+  };
+  const goAgent = (dId, aId) => {
+    setView("org");
+    setDeptId(dId);
+    setAgentId(aId);
+    setNavOpen(false);
+  };
+
   return (
-    <>
-      {/* ヒーロー：全画面グラデーション＋巨大ロゴタイプ */}
-      <section className="sw-hero">
-        <div className="sw-hero__bg" aria-hidden="true" />
-        <div className="sw-hero__glow" aria-hidden="true" />
-        <div className="sw-hero__in">
-          <p className="sw-mono sw-hero__eb">AI EMPLOYEE COMPANY</p>
-          <h1 className="sw-hero__word" aria-label="SASHIWA">
-            {"SASHIWA".split("").map((c, i) => (
-              <span key={i} style={{ animationDelay: `${0.06 * i + 0.15}s` }}>
-                {c}
+    <div className="dbRoot">
+      <Style id="CSS_DASHBOARD" css={CSS_DASHBOARD} />
+
+      <div className="dbShell">
+        {/* ---------------- サイドバー ---------------- */}
+        <aside className={`dbSide ${navOpen ? "is-open" : ""}`}>
+          <div className="dbSide__hd">
+            <a className="dbBrand" href="#/">
+              <span className="dbBrand__m">
+                <svg viewBox="0 0 24 24" width="17" height="17">
+                  <path d="M5 18 12 6l7 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
+                  <circle cx="12" cy="5.4" r="2.3" fill="currentColor" />
+                </svg>
               </span>
-            ))}
-          </h1>
-          <p className="sw-hero__cap">
-            社員は、全員AI。<span className="sw-hero__slash">／</span>
-            <b>24時間365日</b>、止まらない会社。
-          </p>
-          <p className="sw-hero__note">
-            銀行振込と最終承認以外のすべての業務を、AI社員が処理できる状態を実際につくっています。
-          </p>
-          <div className="sw-hero__cta">
-            <button className="sw-btn sw-btn--white sw-btn--lg" onClick={() => go("contact")}>
-              無料相談を申し込む <em aria-hidden="true">→</em>
-            </button>
-          </div>
-          <RingTrio />
-          <span className="sw-hero__scroll" aria-hidden="true">
-            <em />
-          </span>
-        </div>
-      </section>
-
-      {/* ステートメント */}
-      <section className="sw-state">
-        <div className="sw-wrap">
-          <Reveal>
-            <h2 className="sw-state__h">
-              人がくり返している仕事は、
-              <br />
-              全部<span className="sw-sig">AI社員</span>にやらせる。
-            </h2>
-            <p className="sw-state__b">
-              SNSの毎日投稿も、記事も、資料も、問い合わせの一次対応も。
-              株式会社SASHIWAには人間の従業員が0名で、5体のAIエージェントが受注から制作、検査、原価計算までを処理しています。
-              <b>その運用の仕組みそのものを、御社にご提供します。</b>
-            </p>
-            <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={() => go("business")}>
-              3つの事業を見る <em aria-hidden="true">→</em>
-            </button>
-          </Reveal>
-        </div>
-      </section>
-
-      <Marquee items={MARQUEE} />
-
-      {/* 指標（カウントアップ） */}
-      <section className="sw-nums">
-        <div className="sw-wrap">
-          <Reveal>
-            <p className="sw-mono sw-nums__en">ALWAYS RUNNING</p>
-            <h2 className="sw-nums__h">
-              担当者が寝ている間も、<span className="sw-sig">動き続けています。</span>
-            </h2>
-          </Reveal>
-          <div className="sw-nums__g">
-            {STATS.map((st) => (
-              <Counter key={st.label} value={st.v} unit={st.u} label={st.label} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 3事業 */}
-      <section className="sw-sec">
-        <div className="sw-wrap">
-          <Head
-            center
-            en="BUSINESS"
-            jp="3つの事業"
-            note="仕組みを買うか、成果物を買うか、運用ごと任せるか。目的に合わせてお選びいただけます。"
-          />
-          <div className="sw-bz">
-            {BUSINESSES.map((b, i) => (
-              <Reveal key={b.slug} delay={i * 90}>
-                <article
-                  className="sw-bz__c"
-                  style={{ "--t": b.theme, "--s": b.soft }}
-                  onClick={() => go("business", b.slug)}
-                >
-                  <span className="sw-bz__ic">
-                    <Icon name={b.icon} size={30} />
-                  </span>
-                  <p className="sw-mono sw-bz__no">
-                    {b.no} <span>{b.en}</span>
-                  </p>
-                  <h3>{b.title}</h3>
-                  <p className="sw-bz__sub">{b.sub}</p>
-                  <p className="sw-bz__l">{b.lede}</p>
-                  <p className="sw-bz__price">{b.price}</p>
-                  <span className="sw-bz__link">
-                    詳しく見る <em aria-hidden="true">→</em>
-                  </span>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* SNS 24/365 特集 */}
-      <section className="sw-always">
-        <div className="sw-always__bg" aria-hidden="true" />
-        <div className="sw-wrap sw-always__in">
-          <div className="sw-always__l">
-            <Reveal>
-              <p className="sw-mono sw-always__eb">BUSINESS 03 ｜ 24/365 SOCIAL</p>
-              <h2 className="sw-always__h">
-                <span className="sw-always__big">24時間365日</span>
-                <br />
-                発信が止まらない状態を、
-                <br />
-                つくります。
-              </h2>
-              <p className="sw-always__b">
-                SNS運用が続かない理由は、才能ではなく時間です。ネタを探し、文章を書き、画像を用意し、
-                投稿時間に間に合わせる。この一連の作業をAIエージェントが毎日引き受けます。
-                担当者が休んでも、繁忙期でも、投稿は止まりません。
-              </p>
-              <div className="sw-always__cta">
-                <button className="sw-btn sw-btn--soc sw-btn--lg" onClick={() => go("business", "social")}>
-                  SNS運用代行を見る <em aria-hidden="true">→</em>
-                </button>
-              </div>
-            </Reveal>
-          </div>
-
-          <Reveal delay={120} className="sw-always__r">
-            <div className="sw-tl">
-              <p className="sw-mono sw-tl__k">1日の稼働ログ（例）</p>
-              {[
-                { t: "05:30", d: "業界ニュースを収集し、投稿テーマを抽出" },
-                { t: "07:00", d: "朝の投稿を配信（X／1本目）" },
-                { t: "12:00", d: "昼の投稿を配信（Instagram）" },
-                { t: "18:30", d: "夕方の投稿を配信（X／2本目）" },
-                { t: "22:00", d: "翌日分の下書きを生成し、検査を通過" },
-                { t: "02:14", d: "受信コメントの返信案をまとめる" },
-              ].map((r, i) => (
-                <div className="sw-tl__r" key={r.t} style={{ animationDelay: `${i * 0.12}s` }}>
-                  <span className="sw-mono sw-tl__t">{r.t}</span>
-                  <span className="sw-tl__dot" />
-                  <span className="sw-tl__d">{r.d}</span>
-                </div>
-              ))}
-            </div>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* 任せられる業務 */}
-      <section className="sw-sec">
-        <div className="sw-wrap">
-          <Head
-            center
-            en="WHAT YOU CAN HAND OVER"
-            jp="こんな業務を任せられます"
-            note="手順が言葉で説明できる業務であれば、ほとんどが対象になります。"
-          />
-          <div className="sw-tasks">
-            {TASKS.map((t, i) => (
-              <Reveal key={t.t} delay={i * 55}>
-                <article className="sw-task">
-                  <span className="sw-task__ic">
-                    <Icon name={t.icon} size={26} />
-                  </span>
-                  <h3>{t.t}</h3>
-                  <p>{t.d}</p>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* AI社員とは */}
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap">
-          <Head
-            en="WHAT IS AN AI EMPLOYEE"
-            jp="AI社員とは、何か"
-            note="チャットAIとの違いは、覚えていること・判断できること・止まれることの3つです。"
-          />
-          <div className="sw-what3">
-            {[
-              {
-                n: "01",
-                t: "御社のことを、覚えている",
-                d: "商品知識、価格の判断基準、断るべき条件、過去のやり取り。毎回説明しなくても、前提を持った状態で仕事を始めます。",
-                x: "チャットAIは、毎回ゼロから説明が必要です",
-              },
-              {
-                n: "02",
-                t: "工程をつないで、最後まで進む",
-                d: "受け取る → 分類する → 調べる → 下書きを作る → 検査する。1回の依頼で、決めた範囲の最後まで進みます。",
-                x: "チャットAIは、1往復ごとに指示が要ります",
-              },
-              {
-                n: "03",
-                t: "分からないときは、止まる",
-                d: "情報が足りない、判断が重い、社外に出す。あらかじめ決めた場面では推測せず、人に戻します。",
-                x: "チャットAIは、分からなくても答えを作ります",
-              },
-            ].map((w, i) => (
-              <Reveal key={w.n} delay={i * 80} className="sw-w3">
-                <span className="sw-mono sw-w3__n">{w.n}</span>
-                <h3>{w.t}</h3>
-                <p className="sw-w3__d">{w.d}</p>
-                <p className="sw-w3__x">{w.x}</p>
-              </Reveal>
-            ))}
-          </div>
-
-          <div className="sw-w3__foot">
-            <p>
-              つまりAI社員とは、<b>道具ではなく、担当者です。</b>
-              ツールをお渡しして終わりではなく、実務が回りはじめるところまでを設計・実装します。
-            </p>
-            <a className="sw-btn sw-btn--line" href="#/business/agent">
-              導入の流れを見る
+              <span>
+                SASHIWA<em>CONTROL</em>
+              </span>
             </a>
           </div>
-        </div>
-      </section>
 
-      {/* Before / After */}
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap">
-          <Head center en="BEFORE / AFTER" jp="導入すると、こう変わります" />
-          <div className="sw-ba">
-            <div className="sw-ba__hd">
-              <span>いま</span>
-              <span className="is-after">AI社員を置いたあと</span>
+          <nav className="dbSide__nav">
+            <button
+              className={`dbNavAll ${view === "org" && !deptId ? "is-cur" : ""}`}
+              onClick={() => {
+                setView("org");
+                goDept(null);
+              }}
+            >
+              <Ico name="grid" size={17} />
+              全社ダッシュボード
+            </button>
+            <button
+              className={`dbNavAll dbNavStudio ${view === "accounts" ? "is-cur" : ""}`}
+              onClick={() => { setView("accounts"); setNavOpen(false); }}
+            >
+              <Ico name="bot" size={16} />
+              アカウント管理
+            </button>
+            <button
+              className={`dbNavAll dbNavDesign ${view === "design" ? "is-cur" : ""}`}
+              onClick={() => { setView("design"); setNavOpen(false); }}
+            >
+              <Ico name="bot" size={16} />
+              AI社員の設計
+              <em>主力</em>
+            </button>
+            <button
+              className={`dbNavAll ${view === "library" ? "is-cur" : ""}`}
+              onClick={() => { setView("library"); setLibFilter("all"); setNavOpen(false); }}
+            >
+              <Ico name="check" size={16} />
+              成果物ライブラリ
+            </button>
+            <button
+              className={`dbNavAll ${view === "settings" ? "is-cur" : ""}`}
+              onClick={() => { setView("settings"); setNavOpen(false); }}
+            >
+              <Ico name="refresh" size={16} />
+              接続設定
+            </button>
+            <button
+              className={`dbNavAll ${view === "studio" ? "is-cur" : ""}`}
+              onClick={() => {
+                setView("studio");
+                setNavOpen(false);
+              }}
+            >
+              <Ico name="send" size={16} />
+              制作スタジオ
+            </button>
+
+            <p className="dbSide__k">部署 / DEPARTMENTS</p>
+            {company.map((d) => (
+              <div key={d.id} className="dbNavGroup">
+                <button
+                  className={`dbNavD ${deptId === d.id && !agentId ? "is-cur" : ""}`}
+                  onClick={() => goDept(d.id)}
+                  style={{ "--t": d.theme }}
+                >
+                  <span className="dbNavD__dot" />
+                  <span className="dbNavD__n">{d.name}</span>
+                  <span className="dbNavD__c">{d.agents.length}</span>
+                </button>
+                {deptId === d.id &&
+                  d.agents.map((a) => (
+                    <button
+                      key={a.id}
+                      className={`dbNavA ${agentId === a.id ? "is-cur" : ""}`}
+                      onClick={() => goAgent(d.id, a.id)}
+                      style={{ "--t": d.theme }}
+                    >
+                      <span className={`dbSt dbSt--${a.status}`} />
+                      {a.name}
+                    </button>
+                  ))}
+              </div>
+            ))}
+          </nav>
+
+          <div className="dbSide__ft">
+            <div className={`dbSync ${live ? "is-live" : ""}`}>
+              <span className="dbSync__d" />
+              {live ? "実データ連携中" : "デモデータ表示中"}
             </div>
-            {BEFORE_AFTER.map((r, i) => (
-              <Reveal key={r.before} delay={i * 60} className="sw-ba__r">
-                <p className="sw-ba__b">{r.before}</p>
-                <span className="sw-ba__ar" aria-hidden="true">
-                  →
-                </span>
-                <p className="sw-ba__a">
-                  <Icon name="check" size={17} />
-                  {r.after}
+            <div className="dbSide__links">
+              <a href="#/" className="dbSide__site">
+                <Ico name="grid" size={14} />
+                公開サイトを見る
+              </a>
+              <button className="dbSide__out" onClick={() => setAuthed(false)}>
+                <Ico name="out" size={15} />
+                退室
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <div className="dbMain">
+          {/* ---------------- トップバー ---------------- */}
+          <div className="dbTop">
+            <button className="dbBurger" onClick={() => setNavOpen((v) => !v)} aria-label="メニュー">
+              <span />
+              <span />
+              <span />
+            </button>
+            <div className="dbTop__bc">
+              {view === "studio" ? (
+                <span>制作スタジオ</span>
+              ) : view === "accounts" ? (
+                <span>アカウント管理</span>
+              ) : view === "deals" ? (
+                <span>案件ボード</span>
+              ) : view === "agent" ? (
+                <span>AI社員 設計</span>
+              ) : view === "settings" ? (
+                <span>接続設定</span>
+              ) : view === "design" ? (
+                <span>AI社員の設計</span>
+              ) : view === "library" ? (
+                <span>成果物ライブラリ</span>
+              ) : (
+                <button onClick={() => goDept(null)}>全社</button>
+              )}
+              {view === "org" && dept && (
+                <>
+                  <em>/</em>
+                  <button onClick={() => goDept(dept.id)}>{dept.name}</button>
+                </>
+              )}
+              {view === "org" && agent && (
+                <>
+                  <em>/</em>
+                  <span>{agent.name}</span>
+                </>
+              )}
+            </div>
+            <button className="dbTop__rf" onClick={loadData} disabled={loadingData || !SHEET_CSV_URL}>
+              <span className={loadingData ? "dbSpin" : ""}>
+                <Ico name="refresh" size={15} />
+              </span>
+              {SHEET_CSV_URL ? "再取得" : "デモ"}
+            </button>
+          </div>
+
+          <div className="dbBody">
+            {view === "accounts" && <AccountsView pushLog={pushLog} />}
+            {view === "settings" && <SettingsView pushLog={pushLog} />}
+            {view === "library" && <LibraryView pushLog={pushLog} initialFilter={libFilter} />}
+            {view === "design" && <DesignView pushLog={pushLog} />}
+            {view === "deals" && <DealsView pushLog={pushLog} />}
+            {view === "agent" && <AgentStudio pushLog={pushLog} />}
+            {view === "studio" && <Studio pushLog={pushLog} />}
+            {view === "org" && !dept && (
+              <ViewAll
+                company={company}
+                kpi={kpi}
+                tasks={tasks}
+                logs={logs}
+                goDept={goDept}
+                goAgent={goAgent}
+                openLibrary={(f) => { setLibFilter(f); setView("library"); }}
+                onSelect={setDetail}
+              />
+            )}
+            {view === "org" && dept && !agent && <ViewDept dept={dept} tasks={tasks} goAgent={goAgent} onSelect={setDetail} />}
+            {view === "org" && dept && agent && (
+              <ViewAgent dept={dept} agent={agent} tasks={tasks} logs={logs} assign={assign} onSelect={setDetail} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {detail && <JobDetail job={detail.raw || toJob(detail)} onClose={() => setDetail(null)} />}
+      {navOpen && <div className="dbScrim" onClick={() => setNavOpen(false)} />}
+    </div>
+  );
+}
+
+/* ============================ View A：全社 ============================== */
+
+function ViewAll({ company, kpi, tasks, logs, goDept, goAgent, openLibrary, onSelect }) {
+  return (
+    <>
+      <header className="dbHead">
+        <p className="dbHead__en">EXECUTIVE OVERVIEW</p>
+        <h1>全社ダッシュボード</h1>
+        <p className="dbHead__s">5部署 / {kpi.agents}体のAI社員が稼働しています。</p>
+      </header>
+
+      <div className="dbKpis">
+        <Kpi icon="bot" label="稼働中のAI社員" value={kpi.active} unit={`/ ${kpi.agents}体`} />
+        <Kpi icon="pulse" label="処理レコード" value={kpi.tasks} unit="件" />
+        <Kpi icon="check" label="完了" value={kpi.done} unit="件" />
+        <Kpi icon="clock" label="高負荷" value={kpi.high} unit="体" tone={kpi.high ? "warn" : ""} />
+      </div>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">事業別の稼働</h2>
+        <div className="dbSvcs">
+          {SERVICES.map((sv) => {
+            const rows = tasks.filter((t) => (t.service || "AGENT") === sv.code);
+            const done = rows.filter((t) => (t.status || "").includes("完了")).length;
+            return (
+              <article
+                key={sv.code}
+                className="dbSvc is-click"
+                style={{ "--t": sv.theme, "--s": sv.soft }}
+                onClick={() => openLibrary && openLibrary(sv.code)}
+              >
+                <div className="dbSvc__hd">
+                  <span className="dbSvc__dot" />
+                  <p className="dbSvc__n">{sv.name}</p>
+                  <span className="dbMono dbSvc__c">{sv.code}</span>
+                </div>
+                <p className="dbMono dbSvc__v">
+                  {rows.length}
+                  <span>件</span>
                 </p>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 自社実証 */}
-      <section className="sw-proof">
-        <div className="sw-wrap">
-          <Reveal className="sw-proof__top">
-            <p className="sw-mono sw-proof__en">PROOF OF WORK</p>
-            <h2 className="sw-proof__h">
-              「全部、<span className="sw-sig">AI</span>でやっています。」
-            </h2>
-            <p className="sw-proof__s">このサービスの一番の実例は、SASHIWA自身です。</p>
-          </Reveal>
-
-          <Reveal className="sw-proof__body" delay={60}>
-            <p>
-              SASHIWAには人間の従業員がいません。このWebサイト、記事、投稿、提案資料、問い合わせの一次処理、
-              原価計算まで、すべてをAIエージェントが制作・処理しています。
-            </p>
-            <p>
-              依頼が届くと統括AIが要件を構造化して担当を選定。制作担当と技術担当が並行して作業を進め、
-              品質・倫理担当が成果物を検査し、原価担当が工数を算出します。人が行うのは、方針の決定と最終承認だけです。
-            </p>
-          </Reveal>
-
-          <div className="sw-roster">
-            <p className="sw-mono sw-roster__k">ROSTER — 稼働中のAI社員</p>
-            <div className="sw-roster__g">
-              {AGENTS.map((a, i) => (
-                <Reveal key={a.code} delay={i * 50}>
-                  <article className={`sw-ag ${a.lead ? "is-lead" : ""}`}>
-                    <p className="sw-mono sw-ag__c">{a.code}</p>
-                    <p className="sw-ag__r">{a.role}</p>
-                    <p className="sw-mono sw-ag__n">{a.name}</p>
-                    <p className="sw-ag__m">{a.mission}</p>
-                  </article>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 実際に動いている自動化 */}
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap">
-          <Head
-            en="REAL WORKFLOWS"
-            jp="実際に動いている自動化"
-            note="単発のタスク処理ではなく、止まらずに回り続けるパイプラインです。"
-          />
-          <div className="sw-wf">
-            {WORKFLOWS.map((w, i) => (
-              <Reveal key={w.title} delay={i * 70} className="sw-wf__r">
-                <div className="sw-wf__l">
-                  <span className="sw-mono sw-wf__time">{w.time}</span>
-                  <span className="sw-wf__tag">{w.tag}</span>
+                <p className="dbSvc__l">うち完了 {done} 件</p>
+                <div className="dbSvc__bar">
+                  <span style={{ width: rows.length ? `${(done / rows.length) * 100}%` : "0%" }} />
                 </div>
-                <div className="sw-wf__m">
-                  <h3>{w.title}</h3>
-                  <p>{w.body}</p>
-                  <ol className="sw-wf__st">
-                    {w.steps.map((s, k) => (
-                      <li key={s}>
-                        <span className="sw-mono">{String(k + 1).padStart(2, "0")}</span>
-                        {s}
-                      </li>
-                    ))}
-                  </ol>
+                <p className="dbSvc__more">成果物を見る →</p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">部署の稼働状況</h2>
+        <div className="dbDepts">
+          {company.map((d) => (
+            <article key={d.id} className="dbDept" style={{ "--t": d.theme, "--s": d.soft }} onClick={() => goDept(d.id)}>
+              <div className="dbDept__hd">
+                <span className="dbDept__ic">
+                  <Ico name="bot" size={20} />
+                </span>
+                <div>
+                  <p className="dbDept__n">{d.name}</p>
+                  <p className="dbDept__en">{d.en}</p>
                 </div>
-              </Reveal>
-            ))}
-          </div>
+              </div>
+              <p className="dbDept__d">{d.desc}</p>
+              <div className="dbDept__ags">
+                {d.agents.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goAgent(d.id, a.id);
+                    }}
+                  >
+                    <span className={`dbSt dbSt--${a.status}`} />
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
-      {/* 流れ（要約）→ 詳細ページへ */}
-      <section className="sw-sec">
-        <div className="sw-wrap">
-          <Head en="HOW IT WORKS" jp="導入の流れ" />
-          <div className="sw-flow">
-            {FLOW.map((f, i) => (
-              <Reveal key={f.n} delay={i * 60} className="sw-flow__c">
-                <p className="sw-mono sw-flow__n">STEP {f.n}</p>
-                <h3>{f.title}</h3>
-                <p className="sw-mono sw-flow__s">{f.span}</p>
-                <p className="sw-flow__b">{f.body}</p>
-              </Reveal>
-            ))}
-          </div>
-          <div className="sw-more">
-            <button className="sw-btn sw-btn--line" onClick={() => go("flow")}>
-              導入の流れを詳しく見る
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ 要約 */}
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap sw-narrow">
-          <Head center en="FAQ" jp="よくあるご質問" />
-          <FaqList items={FAQ.slice(0, 4)} />
-          <div className="sw-more">
-            <button className="sw-btn sw-btn--line" onClick={() => go("flow")}>
-              すべての質問を見る
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <CtaBand go={go} />
+      <div className="dbSplit">
+        <section className="dbSec">
+          <h2 className="dbSecT">直近の処理履歴</h2>
+          <TaskTable tasks={tasks.slice(0, 8)} onSelect={onSelect} />
+        </section>
+        <section className="dbSec">
+          <h2 className="dbSecT">システムログ</h2>
+          <ConsoleLog logs={logs} />
+        </section>
+      </div>
     </>
   );
 }
 
-/* ---------------------------------------------------------------- FAQ部品 */
-
-function FaqList({ items }) {
-  const [open, setOpen] = useState(0);
+function Kpi({ icon, label, value, unit, tone }) {
   return (
-    <div className="sw-faq">
-      {items.map((f, n) => (
-        <div key={f.q} className={`sw-faq__i ${open === n ? "is-open" : ""}`}>
-          <button className="sw-faq__q" aria-expanded={open === n} onClick={() => setOpen(open === n ? -1 : n)}>
-            <span className="sw-mono sw-faq__m">Q</span>
-            <span className="sw-faq__qt">{f.q}</span>
-            <span className="sw-faq__ic" aria-hidden="true" />
-          </button>
-          <div className="sw-faq__a">
-            <p>{f.a}</p>
+    <div className={`dbKpi ${tone ? "is-" + tone : ""}`}>
+      <span className="dbKpi__ic">
+        <Ico name={icon} size={18} />
+      </span>
+      <p className="dbKpi__l">{label}</p>
+      <p className="dbKpi__v">
+        {value}
+        <span>{unit}</span>
+      </p>
+    </div>
+  );
+}
+
+/* ============================ View B：部署 ============================== */
+
+function ViewDept({ dept, tasks, goAgent, onSelect }) {
+  const rel = tasks.filter((t) => dept.agents.some((a) => a.name === t.agent));
+  return (
+    <div style={{ "--t": dept.theme, "--s": dept.soft }}>
+      <header className="dbHead">
+        <p className="dbHead__en" style={{ color: dept.theme }}>
+          {dept.en}
+        </p>
+        <h1>{dept.name}</h1>
+        <p className="dbHead__s">{dept.desc}</p>
+      </header>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">所属するAI社員</h2>
+        <div className="dbAgs">
+          {dept.agents.map((a) => (
+            <article key={a.id} className="dbAg" onClick={() => goAgent(dept.id, a.id)}>
+              <div className="dbAg__hd">
+                <span className="dbAg__av">
+                  <Ico name="bot" size={22} />
+                </span>
+                <div>
+                  <p className="dbAg__n">{a.name}</p>
+                  <p className="dbAg__r">{a.role}</p>
+                </div>
+                <span className={`dbBadge dbBadge--${a.status}`}>{a.status}</span>
+              </div>
+              <p className="dbAg__k">現在のタスク</p>
+              <p className="dbAg__t">{a.currentTask}</p>
+              <div className="dbAg__sk">
+                {a.skills.map((s) => (
+                  <span key={s}>{s}</span>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">この部署の処理履歴</h2>
+        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
+      </section>
+    </div>
+  );
+}
+
+/* ============================ View C：個別 ============================== */
+
+function ViewAgent({ dept, agent, tasks, logs, assign, onSelect }) {
+  const rel = tasks.filter((t) => t.agent === agent.name);
+  return (
+    <div style={{ "--t": dept.theme, "--s": dept.soft }}>
+      <header className="dbHead">
+        <p className="dbHead__en" style={{ color: dept.theme }}>
+          {dept.name} / {agent.tier}
+        </p>
+        <h1>{agent.name}</h1>
+        <p className="dbHead__s">{agent.mission}</p>
+      </header>
+
+      <div className="dbProfile">
+        <div className="dbProfile__l">
+          <span className="dbProfile__av">
+            <Ico name="bot" size={30} />
+          </span>
+          <div>
+            <p className="dbProfile__r">{agent.role}</p>
+            <span className={`dbBadge dbBadge--${agent.status}`}>{agent.status}</span>
           </div>
+        </div>
+        <dl className="dbProfile__m">
+          <div>
+            <dt>Difyアプリ</dt>
+            <dd className="dbMono">{agent.difyApp}</dd>
+          </div>
+          <div>
+            <dt>推論クラス</dt>
+            <dd>{agent.tier}</dd>
+          </div>
+          <div>
+            <dt>処理件数</dt>
+            <dd>{rel.length} 件</dd>
+          </div>
+        </dl>
+      </div>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">現在のタスク</h2>
+        <div className="dbCurrent">
+          <span className="dbCurrent__d" />
+          {agent.currentTask}
+        </div>
+      </section>
+
+      <div className="dbSplit dbSplit--console">
+        <AssignConsole dept={dept} agent={agent} assign={assign} />
+        <section className="dbSec">
+          <h2 className="dbSecT">Live Console Log</h2>
+          <ConsoleLog logs={logs} tall />
+        </section>
+      </div>
+
+      <section className="dbSec">
+        <h2 className="dbSecT">このAI社員の処理履歴</h2>
+        {rel.length ? <TaskTable tasks={rel.slice(0, 10)} onSelect={onSelect} /> : <p className="dbEmpty">まだ記録がありません。</p>}
+      </section>
+    </div>
+  );
+}
+
+/* ---------------------- タスクアサイン・コンソール ---------------------- */
+
+function AssignConsole({ dept, agent, assign }) {
+  const [text, setText] = useState("");
+  const [priority, setPriority] = useState("Medium");
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState("");
+
+  const submit = async () => {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    setFlash("");
+    const ok = await assign(dept, agent, text.trim(), priority);
+    setSending(false);
+    setText("");
+    setFlash(ok ? "アサインしました。" : "送信に失敗しました（画面上のみ反映）。");
+    setTimeout(() => setFlash(""), 4000);
+  };
+
+  return (
+    <section className="dbAssign">
+      <h2 className="dbSecT">タスクをアサイン</h2>
+      <div className="dbAssign__c">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="AI社員への新たなプロンプト、または実行命令を入力..."
+          rows={5}
+          disabled={sending}
+        />
+
+        <div className="dbAssign__row">
+          <span className="dbAssign__k">優先度</span>
+          <div className="dbSeg">
+            {["Low", "Medium", "High"].map((p) => (
+              <button
+                key={p}
+                className={priority === p ? "is-on" : ""}
+                onClick={() => setPriority(p)}
+                disabled={sending}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dbAssign__ft">
+          <p className="dbAssign__n">
+            送信すると {agent.name} の現在タスクを書き換え、Make 経由で実行を依頼します。
+          </p>
+          <button className="dbSend" onClick={submit} disabled={sending || !text.trim()}>
+            <span className={sending ? "dbSpin" : ""}>
+              <Ico name={sending ? "loader" : "send"} size={16} />
+            </span>
+            {sending ? "アサイン中..." : "アサインする"}
+          </button>
+        </div>
+
+        {flash && <p className="dbFlash">{flash}</p>}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------- 共通パーツ ------------------------------- */
+
+function TaskTable({ tasks, onSelect }) {
+  return (
+    <div className="dbTable">
+      <div className="dbTable__h">
+        <span>日時</span>
+        <span>事業</span>
+        <span>担当</span>
+        <span>内容</span>
+        <span>状態</span>
+      </div>
+      {tasks.map((t, i) => (
+        <div
+          className={`dbTable__r ${onSelect ? "is-click" : ""}`}
+          key={`${t.run_id}-${t.agent}-${i}`}
+          onClick={() => onSelect && onSelect(t)}
+          role={onSelect ? "button" : undefined}
+          tabIndex={onSelect ? 0 : undefined}
+          onKeyDown={(e) => { if (onSelect && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onSelect(t); } }}
+        >
+          <span className="dbMono dbTable__t">{t.timestamp}</span>
+          <span>
+            <em
+              className="dbSvcTag"
+              style={{
+                "--t":
+                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).theme,
+                "--s":
+                  (SERVICES.find((v) => v.code === (t.service || "AGENT")) || SERVICES[0]).soft,
+              }}
+            >
+              {t.service || "AGENT"}
+            </em>
+          </span>
+          <span className="dbTable__a">{t.agent}</span>
+          <span className="dbTable__s">{t.summary}</span>
+          <span>
+            <em className={`dbTag dbTag--${(t.status || "").includes("失敗") || (t.status || "").includes("エラー") ? "ng" : "ok"}`}>{t.status}</em>
+            {onSelect && <em className="dbTable__go">›</em>}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-/* ---------------------------------------------------------------- 事業一覧 */
-
-function BusinessIndexPage({ go }) {
+function ConsoleLog({ logs, tall }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
   return (
-    <>
-      <PageHero
-        en="BUSINESS"
-        title="事業内容"
-        lede="仕組みを買うか、成果物を買うか。目的に合わせてお選びいただけます。"
-      />
-      <section className="sw-sec">
-        <div className="sw-wrap">
-          <div className="sw-bz sw-bz--lg">
-            {BUSINESSES.map((b, i) => (
-              <Reveal key={b.slug} delay={i * 70}>
-                <article
-                  className="sw-bz__c"
-                  style={{ "--t": b.theme, "--s": b.soft }}
-                  onClick={() => go("business", b.slug)}
-                >
-                  <span className="sw-bz__ic">
-                    <Icon name={b.icon} size={30} />
-                  </span>
-                  <p className="sw-mono sw-bz__no">
-                    {b.no} <span>{b.en}</span>
-                  </p>
-                  <h3>{b.title}</h3>
-                  <p className="sw-bz__sub">{b.sub}</p>
-                  <p className="sw-bz__l">{b.lede}</p>
-                  <p className="sw-bz__price">{b.price}</p>
-                  <ul className="sw-bz__ul">
-                    {b.detail.deliver.slice(0, 3).map((d) => (
-                      <li key={d}>{d}</li>
-                    ))}
-                  </ul>
-                  <span className="sw-bz__link">
-                    詳しく見る <em aria-hidden="true">→</em>
-                  </span>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-      <CtaBand go={go} />
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- 事業詳細 */
-
-function BusinessDetailPage({ slug, go }) {
-  const idx = Math.max(0, BUSINESSES.findIndex((b) => b.slug === slug));
-  const b = BUSINESSES[idx];
-  const prev = BUSINESSES[(idx - 1 + BUSINESSES.length) % BUSINESSES.length];
-  const next = BUSINESSES[(idx + 1) % BUSINESSES.length];
-
-  return (
-    <>
-      <section className="sw-phero sw-phero--bz" style={{ "--t": b.theme, "--s": b.soft }}>
-        <div className="sw-wrap">
-          <button className="sw-crumb" onClick={() => go("business")}>
-            ← 事業一覧
-          </button>
-          <p className="sw-mono sw-phero__en" style={{ color: b.theme }}>
-            {b.no} <span className="sw-phero__sep">｜</span> {b.en}
-          </p>
-          <h1 className="sw-phero__t">{b.title}</h1>
-          <p className="sw-phero__sub">{b.sub}</p>
-          <p className="sw-phero__l">{b.lede}</p>
-          <button className="sw-btn sw-btn--sig" onClick={() => go("contact")}>
-            この事業について相談する
-          </button>
-        </div>
-      </section>
-
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap sw-narrow">
-          <Head en="WHAT IT IS" jp={`${b.title}とは`} />
-          <Reveal className="sw-prose">
-            <p>{b.detail.what}</p>
-          </Reveal>
-          <div className="sw-pts">
-            {b.detail.points.map((p, i) => (
-              <Reveal key={p.t} delay={i * 60} className="sw-pt">
-                <span className="sw-mono sw-pt__n">{String(i + 1).padStart(2, "0")}</span>
-                <div>
-                  <h3>{p.t}</h3>
-                  <p>{p.d}</p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {b.detail.steps && (
-        <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
-          <div className="sw-wrap sw-narrow">
-            <Head
-              en={b.code === "AGENT" ? "HOW TO START" : "OPERATION"}
-              jp={b.code === "AGENT" ? "導入の流れ" : "運用の流れ"}
-              note={
-                b.code === "AGENT"
-                  ? "専門知識は要りません。「今どうやっているか」を話していただくところから始まります。"
-                  : "最初の設計から、毎日の配信、月次の改善まで一貫してお引き受けします。"
-              }
-            />
-            <div className="sw-ops">
-              {b.detail.steps.map((st, i) => (
-                <Reveal key={st.n} delay={i * 70} className="sw-op">
-                  <div className="sw-op__l">
-                    <span className="sw-mono sw-op__n">{st.n}</span>
-                    <span className="sw-op__line" />
-                  </div>
-                  <div className="sw-op__m">
-                    <h3>{st.t}</h3>
-                    <p className="sw-mono sw-op__s">{st.s}</p>
-                    <p className="sw-op__d">{st.d}</p>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {b.detail.canDo && (
-        <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
-          <div className="sw-wrap">
-            <Head
-              en="WHAT CHANGES"
-              jp="導入すると、こうなります"
-              note="実際にお引き受けすることの多い業務です。どれも「人がゼロになる」のではなく、人の仕事が確認だけになります。"
-            />
-            <div className="sw-cando">
-              {b.detail.canDo.map((c, i) => (
-                <Reveal key={c.t} delay={i * 70} className="sw-cd">
-                  <h3>{c.t}</h3>
-                  <p className="sw-cd__d">{c.d}</p>
-                  <div className="sw-cd__ba">
-                    <div className="sw-cd__b">
-                      <span>これまで</span>
-                      {c.before}
-                    </div>
-                    <span className="sw-cd__ar">→</span>
-                    <div className="sw-cd__a">
-                      <span>導入後</span>
-                      {c.after}
-                    </div>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {b.detail.faq && (
-        <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
-          <div className="sw-wrap sw-narrow">
-            <Head en="QUESTIONS" jp="よくいただくご質問" note="" />
-            <div className="sw-bfaq">
-              {b.detail.faq.map((f, i) => (
-                <Reveal key={f.q} delay={i * 50} className="sw-bfaq__i">
-                  <p className="sw-bfaq__q">{f.q}</p>
-                  <p className="sw-bfaq__a">{f.a}</p>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {b.detail.menus && (
-        <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
-          <div className="sw-wrap sw-narrow">
-            <Head en="MENU" jp="制作メニュー" note="単発でのご依頼も承っています。" />
-            {b.detail.menus.map((m) => (
-              <Reveal key={m.label} className="sw-menu">
-                <div className="sw-menu__hd">
-                  <span className="sw-menu__ic">
-                    <Icon name={m.icon} size={22} />
-                  </span>
-                  <h3>{m.label}</h3>
-                  <span className="sw-mono sw-menu__en">{m.en}</span>
-                </div>
-                <div className="sw-menu__l">
-                  {m.items.map((it) => (
-                    <div className="sw-menu__i" key={it.n}>
-                      <div>
-                        <p className="sw-menu__n">
-                          {it.n}
-                          {it.prep && <em className="sw-bz__prep">準備中</em>}
-                        </p>
-                        <p className="sw-menu__d">{it.d}</p>
-                      </div>
-                      <p className="sw-mono sw-menu__p">{it.p}</p>
-                    </div>
-                  ))}
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="sw-sec" style={{ "--t": b.theme, "--s": b.soft }}>
-        <div className="sw-wrap sw-narrow">
-          <Head en="PLANS" jp={b.detail.menus ? "継続プラン" : "料金プラン"} />
-          <div className="sw-plans">
-            {b.detail.plans.map((pl, i) => (
-              <Reveal key={pl.n} delay={i * 60}>
-                <article className="sw-plan">
-                  <p className="sw-plan__n">{pl.n}</p>
-                  <p className="sw-plan__d">{pl.d}</p>
-                  <p className="sw-plan__p">{pl.p}</p>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-          <p className="sw-plans__n">
-            ※ 表示価格は税別・目安です。業務量や範囲により変動しますので、無料相談で確定のお見積りをお出しします。
-          </p>
-        </div>
-      </section>
-
-      <section className="sw-sec sw-sec--white" style={{ "--t": b.theme, "--s": b.soft }}>
-        <div className="sw-wrap sw-narrow">
-          <Head en="DELIVERABLES" jp="お渡しするもの" />
-          <div className="sw-dl">
-            {b.detail.deliver.map((d, i) => (
-              <Reveal key={d} delay={i * 50}>
-                <div className="sw-dl__i">
-                  <Icon name="check" size={20} />
-                  {d}
-                </div>
-              </Reveal>
-            ))}
-          </div>
-          <Reveal className="sw-span">
-            <span className="sw-mono">期間の目安</span>
-            {b.detail.span}
-          </Reveal>
-          {b.detail.note && (
-            <Reveal className="sw-note">
-              <Icon name="check" size={18} />
-              <p>{b.detail.note}</p>
-            </Reveal>
-          )}
-        </div>
-      </section>
-
-      <section className="sw-pager">
-        <div className="sw-wrap sw-pager__in">
-          <button onClick={() => go("business", prev.slug)}>
-            <span className="sw-mono">← {prev.no}</span>
-            {prev.title}
-          </button>
-          <button className="sw-pager__c" onClick={() => go("business")}>
-            事業一覧へ
-          </button>
-          <button className="sw-pager__r" onClick={() => go("business", next.slug)}>
-            <span className="sw-mono">{next.no} →</span>
-            {next.title}
-          </button>
-        </div>
-      </section>
-
-      <CtaBand go={go} />
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- 導入の流れ */
-
-function FlowPage({ go }) {
-  return (
-    <>
-      <PageHero
-        en="HOW IT WORKS"
-        title="導入の流れ"
-        lede="無料相談から稼働開始まで、おおよそ1〜2ヶ月です。範囲を絞れば、より短く始めることもできます。"
-      />
-      <section className="sw-sec">
-        <div className="sw-wrap sw-narrow">
-          <div className="sw-steps">
-            {FLOW.map((f, i) => (
-              <Reveal key={f.n} delay={i * 70} className="sw-step">
-                <div className="sw-step__l">
-                  <span className="sw-mono">STEP {f.n}</span>
-                  <span className="sw-step__dot" aria-hidden="true" />
-                </div>
-                <div className="sw-step__m">
-                  <h3>{f.title}</h3>
-                  <p className="sw-mono sw-step__s">{f.span}</p>
-                  <p className="sw-step__b">{f.body}</p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap sw-narrow">
-          <Head center en="FAQ" jp="よくあるご質問" />
-          <FaqList items={FAQ} />
-        </div>
-      </section>
-
-      <CtaBand go={go} />
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- 記事 */
-
-function BlogPage({ go }) {
-  return (
-    <>
-      <PageHero en="ARTICLES" title="記事" lede="AI社員の設計や自動化の実務について書いています。" />
-      <section className="sw-sec">
-        <div className="sw-wrap sw-narrow">
-          {POSTS.length === 0 ? (
-            <Reveal className="sw-empty">
-              <span className="sw-empty__ic">
-                <Icon name="doc" size={30} />
-              </span>
-              <h2>記事は準備中です</h2>
-              <p>
-                現在、AI社員の設計方法や自動化の実例をまとめています。公開までは、
-                実際の構成を無料相談で直接お見せしています。
-              </p>
-              <button className="sw-btn sw-btn--sig" onClick={() => go("contact")}>
-                無料相談で構成を見る
-              </button>
-            </Reveal>
-          ) : (
-            <div className="sw-posts">
-              {POSTS.map((p, i) => (
-                <Reveal key={p.id} delay={i * 50}>
-                  <a className="sw-post" href={p.url} target="_blank" rel="noopener noreferrer">
-                    <div className="sw-post__meta">
-                      <span className="sw-mono">{p.date}</span>
-                      <span className="sw-post__cat">{p.category}</span>
-                    </div>
-                    <h3>{p.title}</h3>
-                    <p>{p.excerpt}</p>
-                  </a>
-                </Reveal>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-      <CtaBand go={go} />
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- 会社概要 */
-
-function CompanyPage({ go }) {
-  return (
-    <>
-      <PageHero en="COMPANY" title="会社概要" lede="社員は全員AI。人間の従業員がいない会社です。" />
-      <section className="sw-sec">
-        <div className="sw-wrap sw-narrow">
-          <Reveal className="sw-tb">
-            {COMPANY.map((r) => (
-              <div className="sw-tb__r" key={r.k}>
-                <div className="sw-tb__k">{r.k}</div>
-                <div className="sw-tb__v">{r.ready ? r.v : <span className="sw-mono sw-badge">{r.v}</span>}</div>
-              </div>
-            ))}
-          </Reveal>
-        </div>
-      </section>
-
-      <section className="sw-sec sw-sec--white">
-        <div className="sw-wrap">
-          <Head en="ROSTER" jp="AI社員のご紹介" note="5体がそれぞれ独立した役割を持ち、互いの成果物を検査し合います。" />
-          <div className="sw-roster__g sw-roster__g--light">
-            {AGENTS.map((a, i) => (
-              <Reveal key={a.code} delay={i * 50}>
-                <article className={`sw-ag ${a.lead ? "is-lead" : ""}`}>
-                  <p className="sw-mono sw-ag__c">{a.code}</p>
-                  <p className="sw-ag__r">{a.role}</p>
-                  <p className="sw-mono sw-ag__n">{a.name}</p>
-                  <p className="sw-ag__m">{a.mission}</p>
-                </article>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <CtaBand go={go} />
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- お問い合わせ
-   ★ WEBHOOK_URL / payload のキー名は Make 側の規格。変更禁止。
-   ------------------------------------------------------------------------- */
-
-function ContactPage() {
-  const [service, setService] = useState("AGENT");
-  const [form, setForm] = useState({ name: "", company: "", email: "", subject: "", message: "" });
-  const [sending, setSending] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState("");
-
-  const up = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const handleSubmit = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (sending) return;
-
-    if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
-      setError("お名前・メールアドレス・ご相談内容を入力してください。");
-      return;
-    }
-
-    setError("");
-    setSending(true);
-
-    // ---- Make が受け取る規格（3キー固定）。変更しないこと ----
-    const payload = {
-      client_name: form.name,
-      client_email: form.email,
-      message: `【事業】${service}／【貴社名】${form.company}／【件名】${form.subject}／【内容】${form.message}`,
-    };
-
-    try {
-      const res = await fetch(WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      setSubmitted(true);
-    } catch (err) {
-      setError("送信できませんでした。通信環境をご確認のうえ、もう一度お試しください。");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <>
-      <PageHero
-        en="CONTACT"
-        title="お問い合わせ"
-        lede="30分の無料相談を承っています。送信された時点で、統括AIが内容の解析を開始します。"
-      />
-      <section className="sw-sec">
-        <div className="sw-wrap sw-narrow">
-          {submitted ? (
-            <Reveal className="sw-done">
-              <span className="sw-done__ic">
-                <Icon name="check" size={34} />
-              </span>
-              <h2>受け付けました。</h2>
-              <p>
-                内容の解析を開始しました。担当エージェントの割り当てと、確認のご連絡を
-                ご記入のメールアドレス宛にお送りします。
-              </p>
-              <button
-                className="sw-btn sw-btn--line"
-                onClick={() => {
-                  setSubmitted(false);
-                  setService("AGENT");
-                  setForm({ name: "", company: "", email: "", subject: "", message: "" });
-                }}
-              >
-                続けて別の相談を送る
-              </button>
-            </Reveal>
-          ) : (
-            <Reveal className="sw-form">
-              <p className="sw-fd__l sw-svcpick__k">ご相談の内容</p>
-              <div className="sw-svcpick">
-                {BUSINESSES.map((b) => (
-                  <button
-                    key={b.code}
-                    type="button"
-                    className={`sw-svcpick__b ${service === b.code ? "is-on" : ""}`}
-                    style={{ "--t": b.theme, "--s": b.soft }}
-                    onClick={() => setService(b.code)}
-                  >
-                    <span className="sw-svcpick__ic">
-                      <Icon name={b.icon} size={20} />
-                    </span>
-                    <span>
-                      <b>{b.title}</b>
-                      <em>{b.price}</em>
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className={`sw-svcpick__b ${service === "OTHER" ? "is-on" : ""}`}
-                  style={{ "--t": "#5B6373", "--s": "#EDEFF3" }}
-                  onClick={() => setService("OTHER")}
-                >
-                  <span className="sw-svcpick__ic">
-                    <Icon name="search" size={20} />
-                  </span>
-                  <span>
-                    <b>まだ決まっていない</b>
-                    <em>相談しながら決めたい</em>
-                  </span>
-                </button>
-              </div>
-
-              <div className="sw-form__g">
-                <label className="sw-fd">
-                  <span className="sw-fd__l">
-                    お名前 <em>必須</em>
-                  </span>
-                  <input type="text" value={form.name} onChange={up("name")} placeholder="指輪 直人" autoComplete="name" />
-                </label>
-                <label className="sw-fd">
-                  <span className="sw-fd__l">貴社名</span>
-                  <input
-                    type="text"
-                    value={form.company}
-                    onChange={up("company")}
-                    placeholder="株式会社◯◯"
-                    autoComplete="organization"
-                  />
-                </label>
-                <label className="sw-fd">
-                  <span className="sw-fd__l">
-                    メールアドレス <em>必須</em>
-                  </span>
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={up("email")}
-                    placeholder="you@example.com"
-                    autoComplete="email"
-                  />
-                </label>
-                <label className="sw-fd">
-                  <span className="sw-fd__l">件名</span>
-                  <input
-                    type="text"
-                    value={form.subject}
-                    onChange={up("subject")}
-                    placeholder="問い合わせ対応の自動化について"
-                  />
-                </label>
-                <label className="sw-fd sw-fd--w">
-                  <span className="sw-fd__l">
-                    ご相談内容 <em>必須</em>
-                  </span>
-                  <textarea
-                    rows={7}
-                    value={form.message}
-                    onChange={up("message")}
-                    placeholder="いま手作業でやっていることと、困っている点をそのままお書きください。整った文章でなくて構いません。"
-                  />
-                </label>
-              </div>
-
-              {error && (
-                <p className="sw-form__err" role="alert">
-                  {error}
-                </p>
-              )}
-
-              <div className="sw-form__f">
-                <p className="sw-form__note">
-                  いただいた内容は案件の対応にのみ使用し、学習用途への転用や第三者への提供は行いません。
-                </p>
-                <button className="sw-btn sw-btn--sig sw-btn--lg" onClick={handleSubmit} disabled={sending}>
-                  {sending ? "送信中..." : "この内容で送信する"}
-                </button>
-              </div>
-            </Reveal>
-          )}
-        </div>
-      </section>
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------- フッター */
-
-function Footer({ go }) {
-  return (
-    <footer className="sw-ft">
-      <div className="sw-wrap">
-        <div className="sw-ft__top">
-          <div className="sw-ft__brand">
-            <p className="sw-ft__logo">
-              SASHIWA<span>Inc.</span>
-            </p>
-            <p className="sw-ft__tag">社員は、全員AI。</p>
-            <p className="sw-ft__sub">株式会社SASHIWA｜オンライン相談 全国対応</p>
-          </div>
-          <div className="sw-ft__cols">
-            <div>
-              <p className="sw-mono sw-ft__k">BUSINESS</p>
-              {BUSINESSES.map((b) => (
-                <button key={b.slug} onClick={() => go("business", b.slug)}>
-                  {b.title}
-                </button>
-              ))}
-            </div>
-            <div>
-              <p className="sw-mono sw-ft__k">COMPANY</p>
-              <button onClick={() => go("home")}>ホーム</button>
-              <button onClick={() => go("flow")}>導入の流れ</button>
-              <button onClick={() => go("blog")}>記事</button>
-              <button onClick={() => go("company")}>会社概要</button>
-              <button onClick={() => go("contact")}>お問い合わせ</button>
-            </div>
-          </div>
-        </div>
-        <p className="sw-ft__note">
-          ※当サイトに記載の成果・稼働に関する記述は自社運用の実績であり、同様の成果を保証するものではありません。
+    <div className={`dbCon ${tall ? "is-tall" : ""}`} ref={ref}>
+      {logs.map((l, i) => (
+        <p key={i} className={l.includes("COMMAND DEPLOYED") ? "is-cmd" : l.startsWith("[") && l.includes("!") ? "is-err" : ""}>
+          <span className="dbCon__p">›</span>
+          {l}
         </p>
-        <p className="sw-mono sw-ft__cp">© {new Date().getFullYear()} SASHIWA Inc. ALL RIGHTS RESERVED.</p>
-      </div>
-    </footer>
-  );
-}
-
-/* ---------------------------------------------------------------- ルート */
-
-export default function App() {
-  const [route, setRoute] = useState(() => parseHash());
-
-  useEffect(() => {
-    const onHash = () => {
-      setRoute(parseHash());
-      window.scrollTo({ top: 0, behavior: "auto" });
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  useEffect(() => {
-    const meta = ROUTES[route.page];
-    if (meta && typeof document !== "undefined") document.title = meta.title;
-  }, [route]);
-
-  const go = useCallback((page, slug) => {
-    const hash = page === "home" ? "#/" : slug ? `#/${page}/${slug}` : `#/${page}`;
-    if (window.location.hash === hash) {
-      setRoute(parseHash());
-      window.scrollTo({ top: 0, behavior: "auto" });
-    } else {
-      window.location.hash = hash;
-    }
-  }, []);
-
-  // ダッシュボードはヘッダー・フッターなしの独立画面（公開ナビには出しません）
-  if (route.page === "dashboard") return <Dashboard />;
-
-  let body = null;
-  if (route.page === "business" && route.slug) body = <BusinessDetailPage slug={route.slug} go={go} />;
-  else if (route.page === "business") body = <BusinessIndexPage go={go} />;
-  else if (route.page === "flow") body = <FlowPage go={go} />;
-  else if (route.page === "blog") body = <BlogPage go={go} />;
-  else if (route.page === "company") body = <CompanyPage go={go} />;
-  else if (route.page === "contact") body = <ContactPage />;
-  else body = <HomePage go={go} />;
-
-  return (
-    <div className="sw-root">
-      <style>{CSS}</style>
-      <Header page={route.page} go={go} />
-      <main>{body}</main>
-      <Footer go={go} />
+      ))}
+      <p className="dbCon__cur">
+        <span className="dbCon__p">›</span>
+        <span className="dbCaret" />
+      </p>
     </div>
   );
 }
 
-/* ================================================================== CSS */
+/* ================================ CSS_DASHBOARD ================================== */
 
-const CSS = `
+const CSS_DASHBOARD = `
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700;900&display=swap');
 
-.sw-root{
-  --bg:#F4F6F9;
-  --white:#FFFFFF;
-  --ink:#1A2233;
-  --ink2:#121A29;
-  --muted:#616B7D;
-  --line:#E2E6EC;
-  --sig:#E0402F;
-  --sig-d:#C4342A;
-  --sig-s:#FDEDEB;
-  --navy:#1F3358;
-  --r:18px;
-
+.dbRoot{
+  --bg:#F4F6F9; --white:#fff; --ink:#1A2233; --muted:#616B7D; --line:#E2E6EC;
+  --sig:#E0402F; --t:#E0402F; --s:#FDECEA;
   --sans:'Noto Sans JP',"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
   background:var(--bg);color:var(--ink);font-family:var(--sans);
-  font-size:16px;line-height:1.9;min-height:100vh;overflow-x:hidden;
-  -webkit-font-smoothing:antialiased;
+  font-size:15px;line-height:1.8;min-height:100vh;-webkit-font-smoothing:antialiased;
 }
-.sw-root *,.sw-root *::before,.sw-root *::after{box-sizing:border-box;}
-.sw-root h1,.sw-root h2,.sw-root h3,.sw-root p,.sw-root ul,.sw-root ol,.sw-root li{margin:0;padding:0;}
-.sw-root ul,.sw-root ol{list-style:none;}
-.sw-root a{color:inherit;text-decoration:none;}
-.sw-root button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
-.sw-root :focus-visible{outline:2px solid var(--sig);outline-offset:3px;}
-.sw-mono{font-family:var(--mono);font-feature-settings:"tnum";}
-.sw-wrap{width:100%;max-width:1120px;margin:0 auto;padding:0 24px;}
-.sw-narrow{max-width:820px;}
-.sw-sig{color:var(--sig);}
-.sw-ic{display:block;}
+.dbRoot *,.dbRoot *::before,.dbRoot *::after{box-sizing:border-box;}
+.dbRoot h1,.dbRoot h2,.dbRoot p,.dbRoot dl,.dbRoot dd,.dbRoot dt{margin:0;padding:0;}
+.dbRoot a{color:inherit;text-decoration:none;}
+.dbRoot button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;text-align:left;}
+.dbRoot :focus-visible{outline:2px solid var(--t);outline-offset:2px;}
+.dbMono{font-family:var(--mono);font-feature-settings:"tnum";}
+.dbSpin{display:inline-flex;animation:dbSpin 1s linear infinite;}
+@keyframes dbSpin{to{transform:rotate(360deg);}}
 
-.sw-rv{opacity:0;transform:translateY(14px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1);}
-.sw-rv.is-in{opacity:1;transform:none;}
-.sw-tasks > .sw-rv,.sw-bz > .sw-rv,.sw-roster__g > .sw-rv,.sw-dl > .sw-rv,.sw-posts > .sw-rv{height:100%;display:block;}
-@media (prefers-reduced-motion:reduce){.sw-rv{opacity:1;transform:none;transition:none;}.sw-root *{animation:none !important;}}
+/* gate */
+.dbGate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:radial-gradient(60% 50% at 50% 0%,rgba(224,64,47,.12),transparent 70%),var(--bg);}
+.dbGate__c{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:44px 36px;width:100%;max-width:400px;text-align:center;box-shadow:0 30px 60px -40px rgba(26,34,51,.5);}
+.dbGateRing{width:104px;height:auto;display:block;margin:0 auto 14px;animation:dbFloat 4.6s ease-in-out infinite;}
+@keyframes dbFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
+.dbGate__ic{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:19px;background:var(--s);color:var(--sig);margin-bottom:18px;}
+.dbGate__c h1{font-size:19px;font-weight:900;letter-spacing:.1em;margin-bottom:8px;}
+.dbGate__c > p{font-size:13px;color:var(--muted);margin-bottom:24px;}
+.dbGate__c input{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;padding:14px 16px;font:inherit;font-family:var(--mono);text-align:center;letter-spacing:.15em;transition:border-color .2s,background .2s;}
+.dbGate__c input:focus{outline:none;border-color:var(--sig);background:var(--white);}
+.dbGate__e{font-size:12.5px;color:var(--sig);margin-top:10px !important;}
+.dbGate__c button{display:block;width:100%;margin-top:16px;background:var(--sig);color:#fff;font-weight:700;font-size:14px;padding:14px;border-radius:999px;text-align:center;transition:background .2s;}
+.dbGate__c button:hover{background:#C4342A;}
+.dbGate__c a{display:inline-block;margin-top:18px;font-size:12.5px;color:var(--muted);}
 
-/* buttons */
-.sw-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 28px;font-size:14px;font-weight:700;border-radius:999px;border:1.5px solid transparent;transition:background .22s,color .22s,border-color .22s,transform .2s,box-shadow .22s;}
-.sw-btn--sig{background:var(--sig);color:#fff;box-shadow:0 10px 22px -12px rgba(224,64,47,.7);}
-.sw-btn--sig:hover{background:var(--sig-d);transform:translateY(-2px);}
-.sw-btn--sig:disabled{opacity:.45;cursor:not-allowed;transform:none;}
-.sw-btn--line{border-color:var(--line);background:var(--white);color:var(--ink);}
-.sw-btn--line:hover{border-color:var(--ink);transform:translateY(-2px);}
-.sw-btn--wline{border-color:rgba(255,255,255,.35);color:#fff;}
-.sw-btn--wline:hover{background:#fff;color:var(--ink);border-color:#fff;}
-.sw-btn--lg{padding:16px 36px;font-size:15px;}
+/* shell */
+.dbShell{display:grid;grid-template-columns:264px 1fr;min-height:100vh;}
+.dbSide{background:#0E1626;color:#96A1B2;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
+.dbSide__hd{padding:22px 20px 14px;border-bottom:1px solid #1E2739;}
+.dbBrand{display:flex;align-items:center;gap:9px;font-weight:900;color:#fff;font-size:14px;letter-spacing:.1em;}
+.dbBrand__m{color:var(--sig);display:flex;}
+.dbBrand em{display:block;font-family:var(--mono);font-style:normal;font-weight:400;font-size:9px;color:#6F7B8B;letter-spacing:.2em;}
+.dbSide__nav{flex:1;overflow-y:auto;padding:14px 12px;}
+.dbNavAll{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border-radius:11px;font-size:13.5px;font-weight:500;color:#B6C0CE;transition:background .2s,color .2s;}
+.dbNavAll:hover{background:#182133;color:#fff;}
+.dbNavAll.is-cur{background:#1D283C;color:#fff;}
+.dbNavStudio{margin-top:6px;}
+.dbNavDesign em{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:#fff;background:#E0402F;border-radius:999px;padding:2px 7px;margin-left:auto;}
+.dbNavStudio em{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:#fff;background:var(--sig);border-radius:999px;padding:2px 7px;margin-left:auto;}
+.dbSide__k{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:#5D6779;padding:20px 14px 8px;}
+.dbNavGroup{margin-bottom:2px;}
+.dbNavD{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;border-radius:11px;font-size:13.5px;transition:background .2s,color .2s;}
+.dbNavD:hover{background:#182133;color:#fff;}
+.dbNavD.is-cur{background:#1D283C;color:#fff;}
+.dbNavD__dot{width:7px;height:7px;border-radius:50%;background:var(--t);flex-shrink:0;}
+.dbNavD__n{flex:1;}
+.dbNavD__c{font-family:var(--mono);font-size:10px;color:#5D6779;}
+.dbNavA{display:flex;align-items:center;gap:9px;width:100%;padding:8px 14px 8px 32px;border-radius:10px;font-family:var(--mono);font-size:11px;color:#7C8797;transition:background .2s,color .2s;}
+.dbNavA:hover{background:#182133;color:#fff;}
+.dbNavA.is-cur{color:var(--t);background:#182133;}
+.dbSt{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:#4C5768;}
+.dbSt--稼働中{background:#3CCB8E;box-shadow:0 0 0 3px rgba(60,203,142,.18);}
+.dbSt--高負荷{background:#E0402F;box-shadow:0 0 0 3px rgba(224,64,47,.2);animation:dbBlink 1.6s ease-in-out infinite;}
+.dbSt--待機中{background:#6E7A8C;}
+@keyframes dbBlink{50%{opacity:.35;}}
+.dbSide__ft{padding:14px;border-top:1px solid #1E2739;display:flex;flex-direction:column;gap:10px;}
+.dbSync{display:flex;align-items:center;gap:8px;font-size:11px;color:#7C8797;}
+.dbSync__d{width:6px;height:6px;border-radius:50%;background:#6E7A8C;}
+.dbSync.is-live .dbSync__d{background:#3CCB8E;box-shadow:0 0 0 3px rgba(60,203,142,.18);}
+.dbSide__links{display:flex;flex-direction:column;gap:4px;}
+.dbSide__site{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C8797;padding:8px 6px;border-radius:9px;transition:color .2s;}
+.dbSide__site:hover{color:#fff;}
+.dbSide__out{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C8797;padding:8px 6px;border-radius:9px;transition:color .2s;}
+.dbSide__out:hover{color:#fff;}
 
-/* header */
-.sw-hd{position:fixed;top:0;left:0;right:0;z-index:90;transition:background .3s,box-shadow .3s;}
-.sw-hd.is-on{background:rgba(244,246,249,.92);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line);}
-.sw-hd__in{max-width:1220px;margin:0 auto;padding:0 24px;height:76px;display:flex;align-items:center;gap:18px;}
-.sw-logo{display:flex;align-items:center;gap:9px;flex-shrink:0;}
-.sw-logo__m{color:var(--sig);display:flex;}
-.sw-logo__t{font-weight:900;letter-spacing:.12em;font-size:17px;}
-.sw-logo__t span{font-family:var(--mono);font-weight:400;font-size:10px;letter-spacing:.1em;color:var(--muted);margin-left:5px;}
-.sw-nav{margin-left:auto;}
-.sw-nav__pill{display:flex;align-items:center;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:999px;padding:5px 8px;box-shadow:0 6px 18px -14px rgba(26,34,51,.5);}
-.sw-nav__a{font-size:13.5px;font-weight:500;padding:8px 15px;border-radius:999px;transition:background .2s,color .2s;white-space:nowrap;display:flex;align-items:center;gap:6px;}
-.sw-nav__a:hover{background:var(--bg);}
-.sw-nav__a.is-cur{color:var(--sig);}
-.sw-dd{position:relative;}
-.sw-dd__c{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.55;transition:transform .25s;}
-.sw-dd.is-open .sw-dd__c{transform:rotate(180deg);}
-.sw-dd__m{position:absolute;top:calc(100% + 10px);left:-6px;min-width:260px;background:var(--white);border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 22px 44px -22px rgba(26,34,51,.4);opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .22s,transform .22s,visibility .22s;}
-.sw-dd.is-open .sw-dd__m{opacity:1;visibility:visible;transform:none;}
-.sw-dd__m button{display:block;width:100%;padding:10px 14px;border-radius:9px;font-size:13.5px;font-weight:500;transition:background .18s;}
-.sw-dd__m button:hover{background:var(--bg);}
-.sw-dd__m button span{display:block;font-size:9.5px;letter-spacing:.14em;color:var(--sig);margin-bottom:2px;}
-.sw-dd__all{border-top:1px solid var(--line);margin-top:6px;padding-top:12px !important;border-radius:0 !important;font-size:12.5px !important;color:var(--muted);}
-.sw-hd__cta{font-size:13px;font-weight:700;background:var(--sig);color:#fff;padding:11px 22px;border-radius:999px;transition:background .2s,transform .2s;box-shadow:0 10px 22px -12px rgba(224,64,47,.7);}
-.sw-hd__cta:hover{background:var(--sig-d);transform:translateY(-2px);}
-.sw-burger{display:none;flex-direction:column;gap:5px;width:26px;padding:8px 0;margin-left:auto;}
-.sw-burger span{display:block;height:2px;background:var(--ink);width:100%;border-radius:2px;transition:transform .3s;}
-.sw-burger.is-x span:first-child{transform:translateY(3.5px) rotate(45deg);}
-.sw-burger.is-x span:last-child{transform:translateY(-3.5px) rotate(-45deg);}
-.sw-drawer{display:none;}
-@media (max-width:1020px){
-  .sw-nav,.sw-hd__cta{display:none;}
-  .sw-burger{display:flex;}
-  .sw-hd{background:rgba(244,246,249,.94);backdrop-filter:blur(14px);}
-  .sw-drawer{display:block;max-height:0;overflow:hidden;background:var(--white);transition:max-height .42s cubic-bezier(.22,1,.36,1);border-top:1px solid var(--line);}
-  .sw-drawer.is-open{max-height:620px;}
-  .sw-drawer__k{font-size:10px;letter-spacing:.18em;color:var(--muted);padding:18px 24px 6px;}
-  .sw-drawer__sub{display:block;width:100%;padding:11px 24px 11px 38px;font-size:14px;color:var(--muted);}
-  .sw-drawer__a{display:block;width:100%;padding:15px 24px;border-top:1px solid var(--line);font-size:15px;font-weight:500;}
-  .sw-drawer__cta{display:block;width:calc(100% - 48px);margin:18px 24px 24px;background:var(--sig);color:#fff;padding:15px;border-radius:999px;text-align:center;font-weight:700;}
-}
-
-/* hero */
-.sw-hero{position:relative;padding:150px 0 80px;overflow:hidden;}
-.sw-hero__bg{position:absolute;inset:0;background:
-  radial-gradient(46% 46% at 82% 22%,rgba(224,64,47,.12),transparent 68%),
-  radial-gradient(44% 44% at 12% 82%,rgba(31,51,88,.10),transparent 70%);}
-.sw-hero__in{position:relative;display:grid;grid-template-columns:1.08fr .92fr;gap:40px;align-items:center;}
-.sw-hero__eb{display:flex;align-items:center;gap:12px;font-size:11px;letter-spacing:.18em;color:var(--muted);margin-bottom:24px;}
-.sw-hero__bar{width:24px;height:1px;background:var(--sig);}
-.sw-hero__h1{font-weight:900;font-size:clamp(34px,5.6vw,60px);line-height:1.28;letter-spacing:.01em;margin-bottom:26px;}
-.sw-hero__em{color:var(--sig);}
-.sw-hero__lede{font-size:15.5px;line-height:2.15;color:var(--muted);max-width:32em;margin-bottom:32px;}
-.sw-hero__lede b{color:var(--ink);font-weight:700;}
-.sw-hero__cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;}
-.sw-hero__r{display:flex;justify-content:center;}
-.sw-mascot{width:100%;max-width:400px;height:auto;}
-.sw-mascot__big{animation:swFloat 5s ease-in-out infinite;transform-origin:center;}
-.sw-mascot__bot{animation:swFloat 3.4s ease-in-out infinite;}
-@keyframes swFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-7px);}}
-@media (max-width:940px){
-  .sw-hero{padding:118px 0 56px;}
-  .sw-hero__in{grid-template-columns:1fr;gap:24px;}
-  .sw-hero__r{order:-1;}
-  .sw-mascot{max-width:280px;}
+/* main */
+.dbMain{min-width:0;}
+.dbTop{position:sticky;top:0;z-index:20;background:rgba(244,246,249,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);height:62px;display:flex;align-items:center;gap:14px;padding:0 28px;}
+.dbTop__bc{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);flex:1;min-width:0;}
+.dbTop__bc button:hover{color:var(--ink);}
+.dbTop__bc span{color:var(--ink);font-weight:700;}
+.dbTop__bc em{font-style:normal;color:#B9C0CB;}
+.dbTop__rf{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);border:1px solid var(--line);background:var(--white);border-radius:999px;padding:8px 15px;transition:border-color .2s;}
+.dbTop__rf:hover:not(:disabled){border-color:var(--ink);}
+.dbTop__rf:disabled{opacity:.55;cursor:default;}
+.dbBurger{display:none;flex-direction:column;gap:4px;width:22px;}
+.dbBurger span{height:2px;background:var(--ink);border-radius:2px;}
+.dbBody{padding:32px 28px 64px;}
+.dbScrim{display:none;}
+@media (max-width:1000px){
+  .dbShell{grid-template-columns:1fr;}
+  .dbSide{position:fixed;left:0;top:0;bottom:0;width:264px;z-index:60;transform:translateX(-100%);transition:transform .3s cubic-bezier(.22,1,.36,1);}
+  .dbSide.is-open{transform:none;}
+  .dbBurger{display:flex;}
+  .dbBody{padding:24px 18px 56px;}
+  .dbTop{padding:0 18px;}
+  .dbScrim{display:block;position:fixed;inset:0;background:rgba(10,14,22,.45);z-index:50;}
 }
 
-/* oneline */
+/* head */
+.dbHead{margin-bottom:28px;}
+.dbHead__en{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--sig);font-weight:700;margin-bottom:8px;}
+.dbHead h1{font-size:clamp(23px,3vw,31px);font-weight:900;line-height:1.35;}
+.dbHead__s{font-size:13.5px;color:var(--muted);margin-top:8px;}
 
-/* section shells */
-.sw-sec{padding:86px 0;}
-.sw-sec--white{background:var(--white);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
-@media (max-width:760px){.sw-sec{padding:62px 0;}}
-.sw-head{margin-bottom:44px;}
-.sw-head.is-center{text-align:center;}
-.sw-head.is-center .sw-head__note{margin-left:auto;margin-right:auto;}
-.sw-head__en{font-size:10.5px;letter-spacing:.24em;color:var(--sig);margin-bottom:12px;font-weight:700;}
-.sw-head__jp{font-weight:900;font-size:clamp(25px,3.4vw,36px);line-height:1.45;letter-spacing:.01em;}
-.sw-head__note{font-size:14px;line-height:2.05;color:var(--muted);margin-top:14px;max-width:44em;}
-.sw-more{margin-top:36px;text-align:center;}
+/* kpi */
+.dbKpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:34px;}
+.dbKpi{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px 22px 20px;}
+.dbKpi__ic{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:var(--bg);color:var(--muted);margin-bottom:14px;}
+.dbKpi.is-warn .dbKpi__ic{background:var(--s);color:var(--sig);}
+.dbKpi__l{font-size:12px;color:var(--muted);margin-bottom:4px;}
+.dbKpi__v{font-family:var(--mono);font-size:30px;font-weight:500;line-height:1.2;}
+.dbKpi__v span{font-family:var(--sans);font-size:12px;color:var(--muted);margin-left:6px;font-weight:400;}
+@media (max-width:820px){.dbKpis{grid-template-columns:repeat(2,1fr);}}
 
-/* page hero */
-.sw-phero{padding:138px 0 54px;background:linear-gradient(180deg,rgba(224,64,47,.07),transparent 82%);}
-.sw-phero__en{font-size:11px;letter-spacing:.22em;color:var(--sig);font-weight:700;margin-bottom:14px;}
-.sw-phero__sep{color:var(--muted);}
-.sw-phero__t{font-weight:900;font-size:clamp(30px,4.6vw,48px);line-height:1.3;margin-bottom:16px;}
-.sw-phero__l{font-size:15px;line-height:2.1;color:var(--muted);max-width:40em;}
-.sw-phero--bz .sw-btn{margin-top:26px;}
-.sw-crumb{font-size:12.5px;color:var(--muted);margin-bottom:18px;padding:6px 14px;border:1px solid var(--line);border-radius:999px;background:var(--white);transition:border-color .2s;}
-.sw-crumb:hover{border-color:var(--ink);}
-@media (max-width:760px){.sw-phero{padding:112px 0 42px;}}
+/* sections */
+.dbSec{margin-bottom:32px;min-width:0;}
+.dbSecT{font-size:14px;font-weight:700;margin-bottom:14px;}
+.dbSplit{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
+.dbSplit--console{grid-template-columns:1fr 1fr;}
+@media (max-width:1100px){.dbSplit{grid-template-columns:1fr;}}
+.dbEmpty{background:var(--white);border:1px dashed var(--line);border-radius:16px;padding:26px;font-size:13px;color:var(--muted);text-align:center;}
 
-/* tasks */
-.sw-tasks{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
-.sw-task{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:28px 26px;height:100%;transition:transform .28s,box-shadow .28s,border-color .28s;}
-.sw-task:hover{transform:translateY(-4px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);border-color:transparent;}
-.sw-task__ic{display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:15px;background:var(--sig-s);color:var(--sig);margin-bottom:18px;}
-.sw-task h3{font-size:17px;font-weight:700;margin-bottom:8px;}
-.sw-task p{font-size:13.5px;line-height:1.95;color:var(--muted);}
-@media (max-width:900px){.sw-tasks{grid-template-columns:repeat(2,1fr);}}
-@media (max-width:600px){.sw-tasks{grid-template-columns:1fr;}}
+/* dept cards */
+.dbDepts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.dbDept{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.dbDept:hover{transform:translateY(-3px);box-shadow:0 24px 44px -32px rgba(26,34,51,.5);border-color:var(--t);}
+.dbDept__hd{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.dbDept__ic{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:13px;background:var(--s);color:var(--t);}
+.dbDept__n{font-size:15px;font-weight:700;line-height:1.4;}
+.dbDept__en{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);}
+.dbDept__d{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:14px;}
+.dbDept__ags{display:flex;flex-wrap:wrap;gap:6px;}
+.dbDept__ags button{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:var(--bg);border-radius:999px;padding:5px 11px;transition:background .2s,color .2s;}
+.dbDept__ags button:hover{background:var(--s);color:var(--t);}
+@media (max-width:1100px){.dbDepts{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:640px){.dbDepts{grid-template-columns:1fr;}}
 
-/* before after */
-.sw-ba{max-width:880px;margin:0 auto;}
-.sw-ba__hd{display:grid;grid-template-columns:1fr 44px 1fr;gap:12px;margin-bottom:12px;}
-.sw-ba__hd span{font-size:11.5px;font-weight:700;letter-spacing:.1em;color:var(--muted);text-align:center;}
-.sw-ba__hd span:first-child{grid-column:1;}
-.sw-ba__hd span.is-after{grid-column:3;color:var(--sig);}
-.sw-ba__r{display:grid;grid-template-columns:1fr 44px 1fr;gap:12px;align-items:stretch;margin-bottom:12px;}
-.sw-ba__b,.sw-ba__a{display:flex;align-items:center;gap:9px;font-size:14px;line-height:1.7;padding:18px 22px;border-radius:14px;}
-.sw-ba__b{background:#EAECF0;color:var(--muted);}
-.sw-ba__a{background:var(--white);border:1.5px solid var(--sig);color:var(--ink);font-weight:700;}
-.sw-ba__a svg{color:var(--sig);flex-shrink:0;}
-.sw-ba__ar{display:flex;align-items:center;justify-content:center;color:var(--sig);font-size:18px;}
-@media (max-width:700px){
-  .sw-ba__hd{display:none;}
-  .sw-ba__r{grid-template-columns:1fr;gap:6px;margin-bottom:20px;}
-  .sw-ba__ar{transform:rotate(90deg);}
+/* agent cards */
+.dbAgs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.dbAg{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:22px;cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.dbAg:hover{transform:translateY(-3px);box-shadow:0 24px 44px -32px rgba(26,34,51,.5);border-color:var(--t);}
+.dbAg__hd{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.dbAg__av{display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:14px;background:var(--s);color:var(--t);}
+.dbAg__n{font-family:var(--mono);font-size:13px;font-weight:700;}
+.dbAg__r{font-size:12px;color:var(--muted);}
+.dbAg__hd > span:last-child{margin-left:auto;}
+.dbAg__k{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);margin-bottom:5px;}
+.dbAg__t{font-size:13px;line-height:1.85;margin-bottom:14px;}
+.dbAg__sk{display:flex;flex-wrap:wrap;gap:6px;}
+.dbAg__sk span{font-size:11px;color:var(--muted);background:var(--bg);border-radius:999px;padding:4px 11px;}
+@media (max-width:820px){.dbAgs{grid-template-columns:1fr;}}
+
+.dbBadge{font-size:11px;font-weight:700;border-radius:999px;padding:4px 12px;white-space:nowrap;}
+.dbBadge--稼働中{background:#E6F7F0;color:#0E9F73;}
+.dbBadge--高負荷{background:#FDECEA;color:#E0402F;}
+.dbBadge--待機中{background:#EEF0F4;color:#616B7D;}
+
+/* profile */
+.dbProfile{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:24px;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:30px;}
+.dbProfile__l{display:flex;align-items:center;gap:16px;}
+.dbProfile__av{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:19px;background:var(--s);color:var(--t);}
+.dbProfile__r{font-size:15px;font-weight:700;margin-bottom:6px;}
+.dbProfile__m{display:flex;gap:34px;flex-wrap:wrap;}
+.dbProfile__m dt{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted);margin-bottom:4px;}
+.dbProfile__m dd{font-size:13.5px;font-weight:500;}
+
+.dbCurrent{display:flex;align-items:flex-start;gap:12px;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--t);border-radius:14px;padding:18px 22px;font-size:14px;line-height:1.85;}
+.dbCurrent__d{width:8px;height:8px;border-radius:50%;background:var(--t);margin-top:9px;flex-shrink:0;animation:dbBlink 2s ease-in-out infinite;}
+
+/* assign console */
+.dbAssign{min-width:0;}
+.dbAssign__c{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 1px 2px rgba(26,34,51,.04);}
+.dbAssign__c textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:14px;padding:15px 16px;font-family:var(--sans);font-size:14px;line-height:1.85;color:var(--ink);resize:vertical;transition:border-color .2s,box-shadow .2s,background .2s;}
+.dbAssign__c textarea::placeholder{color:#9BA3B1;}
+.dbAssign__c textarea:focus{outline:none;background:var(--white);border-color:var(--t);box-shadow:0 0 0 4px var(--s);}
+.dbAssign__row{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap;}
+.dbAssign__k{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--muted);}
+.dbSeg{display:flex;gap:6px;}
+.dbSeg button{font-family:var(--mono);font-size:11.5px;font-weight:500;border:1px solid var(--line);border-radius:999px;padding:6px 16px;color:var(--muted);transition:background .2s,color .2s,border-color .2s;}
+.dbSeg button:hover:not(.is-on){border-color:var(--t);color:var(--t);}
+.dbSeg button.is-on{background:var(--t);border-color:var(--t);color:#fff;}
+.dbAssign__ft{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);flex-wrap:wrap;}
+.dbAssign__n{font-size:11.5px;line-height:1.8;color:var(--muted);max-width:24em;}
+.dbSend{display:inline-flex;align-items:center;gap:9px;background:var(--t);color:#fff;font-size:13.5px;font-weight:700;border-radius:999px;padding:12px 24px;transition:opacity .2s,transform .2s,filter .2s;}
+.dbSend:hover:not(:disabled){filter:brightness(.92);transform:translateY(-1px);}
+.dbSend:disabled{opacity:.45;cursor:not-allowed;transform:none;}
+.dbFlash{margin-top:14px;font-size:12.5px;color:var(--t);background:var(--s);border-radius:10px;padding:10px 14px;}
+
+/* console */
+.dbCon{background:#0B121D;border:1px solid #1B2536;border-radius:18px;padding:18px 20px;font-family:var(--mono);font-size:11.5px;line-height:1.95;color:#7EE6B5;max-height:280px;overflow-y:auto;}
+.dbCon.is-tall{max-height:342px;}
+.dbCon p{display:flex;gap:8px;word-break:break-word;}
+.dbCon__p{color:#3C5468;flex-shrink:0;}
+.dbCon p.is-cmd{color:#FFD48A;}
+.dbCon p.is-err{color:#FF8B7E;}
+.dbCaret{display:inline-block;width:7px;height:14px;background:#7EE6B5;animation:dbBlink 1.1s steps(2) infinite;}
+.dbCon::-webkit-scrollbar{width:6px;}
+.dbCon::-webkit-scrollbar-thumb{background:#243247;border-radius:6px;}
+
+/* table */
+.dbTable{background:var(--white);border:1px solid var(--line);border-radius:18px;overflow:hidden;}
+.dbTable__h,.dbTable__r{display:grid;grid-template-columns:112px 74px 148px 1fr 78px;gap:14px;padding:12px 20px;align-items:center;}
+.dbTable__h{font-size:10.5px;letter-spacing:.1em;color:var(--muted);background:var(--bg);}
+.dbTable__r{border-top:1px solid var(--line);font-size:12.5px;}
+.dbTable__t{font-size:10.5px;color:var(--muted);}
+.dbTable__a{font-family:var(--mono);font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dbTable__s{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dbTag{font-style:normal;font-size:10.5px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;}
+.dbTag--ok{background:#E6F7F0;color:#0E9F73;}
+.dbTag--ng{background:#FDECEA;color:#E0402F;}
+@media (max-width:820px){
+  .dbTable__h{display:none;}
+  .dbTable__r{grid-template-columns:1fr auto;gap:6px;padding:14px 16px;}
+  .dbTable__t{grid-column:1;}
+  .dbTable__a{grid-column:1;}
+  .dbTable__s{grid-column:1/-1;white-space:normal;}
 }
 
-/* business cards */
-.sw-bz{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
-.sw-bz__c{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:32px 28px;height:100%;display:flex;flex-direction:column;cursor:pointer;transition:transform .28s,box-shadow .28s,border-color .28s;}
-.sw-bz__c:hover{transform:translateY(-4px);box-shadow:0 26px 48px -30px rgba(26,34,51,.5);border-color:var(--sig);}
-.sw-bz__ic{display:inline-flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:17px;background:var(--navy);color:#fff;margin-bottom:20px;}
-.sw-bz__no{font-size:10px;letter-spacing:.14em;color:var(--sig);font-weight:700;margin-bottom:10px;}
-.sw-bz__no span{color:var(--muted);font-weight:400;margin-left:6px;}
-.sw-bz__c h3{font-size:21px;font-weight:900;line-height:1.5;margin-bottom:12px;}
-.sw-bz__l{font-size:13.5px;line-height:2;color:var(--muted);margin-bottom:20px;}
-.sw-bz__ul{margin-bottom:20px;display:grid;gap:5px;}
-.sw-bz__ul li{font-size:12.5px;color:var(--muted);padding-left:15px;position:relative;}
-.sw-bz__ul li::before{content:"";position:absolute;left:0;top:.85em;width:8px;height:1.5px;background:var(--sig);}
-.sw-bz__link{margin-top:auto;font-size:13px;font-weight:700;color:var(--sig);display:inline-flex;align-items:center;gap:7px;}
-.sw-bz__link em{font-style:normal;transition:transform .25s;display:inline-block;}
-.sw-bz__c:hover .sw-bz__link em{transform:translateX(5px);}
-@media (max-width:900px){.sw-bz{grid-template-columns:1fr;}}
+/* 事業別 */
+.dbSvcs{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.dbSvc{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:18px;padding:20px 22px;}
+.dbSvc__hd{display:flex;align-items:center;gap:9px;margin-bottom:14px;}
+.dbSvc__dot{width:8px;height:8px;border-radius:50%;background:var(--t);}
+.dbSvc__n{font-size:14px;font-weight:700;flex:1;}
+.dbSvc__c{font-size:9.5px;letter-spacing:.14em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;}
+.dbSvc__v{font-size:30px;font-weight:500;line-height:1.1;}
+.dbSvc__v span{font-family:var(--sans);font-size:12px;color:var(--muted);margin-left:5px;}
+.dbSvc__l{font-size:12px;color:var(--muted);margin-bottom:12px;}
+.dbSvc__bar{height:5px;border-radius:999px;background:var(--bg);overflow:hidden;}
+.dbSvc__bar span{display:block;height:100%;background:var(--t);border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1);}
+@media (max-width:900px){.dbSvcs{grid-template-columns:1fr;}}
+.dbSvcTag{font-style:normal;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--t);background:var(--s);border-radius:999px;padding:3px 9px;white-space:nowrap;}
 
-/* proof (dark) */
-.sw-proof{background:var(--ink2);color:#D7DCE4;padding:86px 0;}
-.sw-proof__top{margin-bottom:30px;}
-.sw-proof__en{font-size:10.5px;letter-spacing:.24em;color:var(--sig);font-weight:700;margin-bottom:14px;}
-.sw-proof__h{font-weight:900;font-size:clamp(26px,4.6vw,48px);line-height:1.4;color:#fff;}
-.sw-proof__s{font-size:14px;color:#8B96A6;margin-top:14px;}
-.sw-proof__body{display:grid;grid-template-columns:repeat(2,1fr);gap:30px;padding-bottom:44px;border-bottom:1px solid #232C3C;}
-.sw-proof__body p{font-size:14.5px;line-height:2.15;color:#9EA9B8;}
-@media (max-width:820px){.sw-proof__body{grid-template-columns:1fr;gap:18px;}}
-.sw-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:44px 0;}
-.sw-stat{background:#1A2233;border:1px solid #262F41;border-radius:var(--r);padding:26px 22px;}
-.sw-stat__v{font-size:42px;font-weight:500;line-height:1;color:#fff;letter-spacing:-.02em;margin-bottom:10px;}
-.sw-stat__v span{font-size:14px;color:var(--sig);margin-left:3px;letter-spacing:0;}
-.sw-stat__l{font-size:12.5px;color:#8B96A6;}
-@media (max-width:760px){.sw-stats{grid-template-columns:repeat(2,1fr);}.sw-stat__v{font-size:34px;}}
-.sw-roster__k{font-size:10px;letter-spacing:.2em;color:#6F7B8B;margin-bottom:16px;}
-.sw-roster__g{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
-.sw-ag{background:#1A2233;border:1px solid #262F41;border-radius:14px;padding:20px 18px;height:100%;transition:transform .28s,border-color .28s;}
-.sw-ag:hover{transform:translateY(-3px);border-color:#3B4658;}
-.sw-ag.is-lead{border-color:rgba(224,64,47,.5);}
-.sw-ag__c{font-size:9.5px;letter-spacing:.14em;color:#6F7B8B;margin-bottom:9px;}
-.sw-ag__r{font-size:13px;font-weight:700;color:#fff;margin-bottom:5px;}
-.sw-ag__n{font-size:10px;color:var(--sig);word-break:break-all;margin-bottom:11px;}
-.sw-ag__m{font-size:11.5px;line-height:1.8;color:#828D9C;}
-.sw-roster__g--light .sw-ag{background:var(--bg);border-color:var(--line);}
-.sw-roster__g--light .sw-ag__r{color:var(--ink);}
-.sw-roster__g--light .sw-ag__c{color:var(--muted);}
-.sw-roster__g--light .sw-ag__m{color:var(--muted);}
-@media (max-width:940px){.sw-roster__g{grid-template-columns:repeat(2,1fr);}}
-@media (max-width:520px){.sw-roster__g{grid-template-columns:1fr;}}
+.dbSvc.is-click{cursor:pointer;transition:transform .25s,box-shadow .25s,border-color .25s;}
+.dbSvc.is-click:hover{transform:translateY(-3px);box-shadow:0 24px 44px -30px rgba(26,34,51,.5);border-color:var(--t);}
+.dbSvc__more{font-size:11.5px;font-weight:700;color:var(--t);margin-top:11px;}
+.dbTable__r.is-click{cursor:pointer;transition:background .18s;}
+.dbTable__r.is-click:hover{background:var(--bg);}
+.dbTable__go{font-style:normal;color:#B9C0CB;margin-left:7px;font-weight:700;}
 
-/* workflows */
-.sw-wf{display:grid;gap:16px;}
-.sw-wf__r{display:grid;grid-template-columns:180px 1fr;gap:28px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:30px 32px;}
-.sw-wf__l{display:flex;flex-direction:column;gap:10px;align-items:flex-start;}
-.sw-wf__time{font-size:15px;font-weight:700;color:var(--sig);}
-.sw-wf__tag{font-size:11.5px;color:var(--muted);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:4px 12px;}
-.sw-wf__m h3{font-size:clamp(18px,2.4vw,23px);font-weight:900;line-height:1.55;margin-bottom:12px;}
-.sw-wf__m > p{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:18px;}
-.sw-wf__st{display:flex;gap:8px;flex-wrap:wrap;}
-.sw-wf__st li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);background:var(--white);border:1px solid var(--line);border-radius:999px;padding:6px 13px;}
-.sw-wf__st li span{font-size:9.5px;color:var(--sig);}
-@media (max-width:820px){.sw-wf__r{grid-template-columns:1fr;gap:14px;padding:24px 20px;}.sw-wf__l{flex-direction:row;align-items:center;}}
+.stNoteInline{font-style:normal;font-size:11px;color:var(--muted);border:1px dashed var(--line);border-radius:999px;padding:4px 11px;}
 
-/* flow cards */
-.sw-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
-.sw-flow__c{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 22px 30px;}
-.sw-flow__n{font-size:10.5px;letter-spacing:.16em;color:var(--sig);font-weight:700;margin-bottom:14px;}
-.sw-flow__c h3{font-size:18px;font-weight:900;margin-bottom:6px;line-height:1.5;}
-.sw-flow__s{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
-.sw-flow__b{font-size:13px;line-height:1.95;color:var(--muted);}
-@media (max-width:940px){.sw-flow{grid-template-columns:repeat(2,1fr);}}
-@media (max-width:560px){.sw-flow{grid-template-columns:1fr;}}
+.stIdeaBar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+.stIdeaBtn{display:inline-flex;align-items:center;gap:8px;background:var(--ai);color:#fff;font-size:12.5px;font-weight:700;border-radius:999px;padding:10px 20px;transition:all .2s;box-shadow:0 10px 20px -12px rgba(124,92,214,.9);}
+.stIdeaBtn:hover{filter:brightness(.93);transform:translateY(-1px);}
+.stIdeaBar__n{font-size:11.5px;color:var(--muted);line-height:1.75;flex:1;min-width:180px;}
+.stIdeas{display:grid;gap:9px;margin-bottom:16px;}
+.stIdea{display:block;width:100%;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;transition:all .2s;}
+.stIdea:hover{border-color:var(--ai);}
+.stIdea.is-on{border-color:var(--ai);background:#F7F4FE;}
+.stIdea__h{display:flex;align-items:baseline;gap:9px;margin-bottom:6px;flex-wrap:wrap;}
+.stIdea__h b{font-size:13px;font-weight:700;}
+.stIdea__h em{font-style:normal;font-size:11px;color:var(--muted);}
+.stIdea__t{display:block;font-size:12.5px;line-height:1.9;color:var(--muted);}
+.stIdea.is-on .stIdea__t{color:var(--ink);}
 
-/* steps (flow page) */
-.sw-steps{display:grid;gap:0;}
-.sw-step{display:grid;grid-template-columns:120px 1fr;gap:28px;padding-bottom:34px;}
-.sw-step__l{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:12px;}
-.sw-step__l span:first-child{font-size:11px;letter-spacing:.16em;color:var(--sig);font-weight:700;}
-.sw-step__dot{position:absolute;left:0;top:34px;bottom:-34px;width:1px;background:var(--line);}
-.sw-step:last-child .sw-step__dot{display:none;}
-.sw-step__m{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 28px;}
-.sw-step__m h3{font-size:20px;font-weight:900;margin-bottom:6px;}
-.sw-step__s{font-size:12px;color:var(--sig);margin-bottom:12px;}
-.sw-step__b{font-size:14px;line-height:2.05;color:var(--muted);}
-@media (max-width:700px){.sw-step{grid-template-columns:1fr;gap:10px;padding-bottom:20px;}.sw-step__dot{display:none;}}
+.stRef{background:#F7F4FE;border:1px solid #DCD0F7;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stRef__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:13px;}
+.stRef__k em{font-style:normal;font-size:10px;font-weight:700;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.stRef .stWarn{margin-bottom:0;}
+.stRef .stF:last-of-type{margin-bottom:14px;}
 
-/* prose / points / deliverables */
-.sw-prose p{font-size:15px;line-height:2.2;color:var(--muted);}
-.sw-pts{margin-top:34px;display:grid;gap:12px;}
-.sw-pt{display:grid;grid-template-columns:56px 1fr;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:22px 24px;}
-.sw-pt__n{font-size:12px;letter-spacing:.12em;color:var(--sig);font-weight:700;padding-top:4px;}
-.sw-pt h3{font-size:16.5px;font-weight:700;margin-bottom:5px;}
-.sw-pt p{font-size:13.5px;line-height:1.95;color:var(--muted);}
-.sw-dl{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
-.sw-dl__i{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:14px;padding:18px 22px;font-size:14.5px;font-weight:500;height:100%;}
-.sw-dl__i svg{color:var(--sig);flex-shrink:0;}
-.sw-span{margin-top:22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:14px;color:var(--muted);border-top:1px solid var(--line);padding-top:22px;}
-.sw-span span{font-size:10px;letter-spacing:.14em;color:var(--sig);border:1px solid var(--line);border-radius:999px;padding:5px 12px;}
-@media (max-width:600px){.sw-dl{grid-template-columns:1fr;}}
+/* お手本分析ステップ */
+.stSam{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.stSam__k{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;margin-bottom:12px;}
+.stSam__k em{font-style:normal;font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;}
+.stSam__k em.is-ok{color:#0E9F73;background:#E6F7F0;}
+.stSam__k em.is-ng{color:var(--sig);background:#FDECEA;}
+.stSam__i{display:grid;grid-template-columns:26px 1fr auto;gap:9px;align-items:start;margin-bottom:9px;}
+.stSam__n{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--white);border:1px solid var(--line);font-family:var(--mono);font-size:11px;font-weight:700;color:var(--muted);margin-top:8px;}
+.stSam__i textarea{background:var(--white);}
+.stSam__x{color:#B9C0CB;padding:8px;border-radius:8px;margin-top:6px;transition:all .2s;}
+.stSam__x:hover{color:var(--sig);background:#FDECEA;}
+.stSam__add{font-size:12.5px;font-weight:700;color:var(--ai);border:1.5px dashed #DCD0F7;border-radius:11px;padding:11px;width:100%;text-align:center;transition:all .2s;}
+.stSam__add:hover{background:#F7F4FE;border-style:solid;}
 
-/* pager */
-.sw-pager{border-top:1px solid var(--line);background:var(--white);}
-.sw-pager__in{display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center;padding-top:26px;padding-bottom:26px;}
-.sw-pager__in button{font-size:14px;font-weight:700;transition:color .2s;}
-.sw-pager__in button:hover{color:var(--sig);}
-.sw-pager__in button span{display:block;font-size:10px;letter-spacing:.12em;color:var(--muted);font-weight:400;margin-bottom:3px;}
-.sw-pager__c{font-size:12.5px !important;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:9px 18px;white-space:nowrap;}
-.sw-pager__r{text-align:right;}
-@media (max-width:700px){.sw-pager__in{grid-template-columns:1fr;gap:12px;}.sw-pager__r{text-align:left;}.sw-pager__c{justify-self:start;}}
+.stAn{background:var(--white);border:1.5px solid var(--ai);border-radius:16px;padding:18px;margin-bottom:18px;}
+.stAn__h{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
+.stAn__t{font-size:13px;font-weight:700;}
+.stAn__lv{display:flex;align-items:center;gap:7px;margin-left:auto;font-size:11.5px;font-weight:700;color:var(--ai);}
+.stAn__lv em{font-style:normal;font-family:var(--mono);font-size:10px;background:#F1EDFC;border-radius:999px;padding:2px 8px;}
+.stAn__lv.lv-22{color:var(--sig);}
+.stAn__lv.lv-100{color:#0E9F73;}
+.stAn__bar{height:6px;border-radius:999px;background:var(--bg);overflow:hidden;margin-bottom:8px;}
+.stAn__bar span{display:block;height:100%;background:var(--ai);border-radius:999px;transition:width .5s cubic-bezier(.22,1,.36,1);}
+.stAn__note{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
+.stAn__g{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.stAn__g > div{background:var(--white);padding:10px 12px;}
+.stAn__g dt{font-size:10px;color:var(--muted);margin-bottom:3px;}
+.stAn__g dd{font-size:12.5px;font-weight:700;}
+@media (max-width:760px){.stAn__g{grid-template-columns:repeat(2,1fr);}}
+.stEmptyBox{font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:12px;padding:18px;text-align:center;margin-bottom:18px;}
 
-/* faq */
-.sw-faq{background:var(--white);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
-.sw-sec--white .sw-faq{background:var(--bg);}
-.sw-faq__i + .sw-faq__i{border-top:1px solid var(--line);}
-.sw-faq__q{width:100%;display:grid;grid-template-columns:32px 1fr 22px;gap:12px;align-items:start;padding:22px 26px;}
-.sw-faq__m{font-size:13px;color:var(--sig);font-weight:700;padding-top:2px;}
-.sw-faq__qt{font-size:15.5px;font-weight:700;line-height:1.75;}
-.sw-faq__ic{position:relative;width:14px;height:14px;margin-top:7px;justify-self:end;}
-.sw-faq__ic::before,.sw-faq__ic::after{content:"";position:absolute;background:var(--sig);transition:transform .3s;}
-.sw-faq__ic::before{left:0;top:6.3px;width:14px;height:1.6px;}
-.sw-faq__ic::after{left:6.3px;top:0;width:1.6px;height:14px;}
-.sw-faq__i.is-open .sw-faq__ic::after{transform:scaleY(0);}
-.sw-faq__a{max-height:0;overflow:hidden;transition:max-height .42s cubic-bezier(.22,1,.36,1);}
-.sw-faq__i.is-open .sw-faq__a{max-height:520px;}
-.sw-faq__a p{font-size:13.5px;line-height:2.15;color:var(--muted);padding:0 26px 24px 70px;}
-@media (max-width:600px){.sw-faq__q{padding:18px 18px;}.sw-faq__a p{padding:0 18px 20px;}}
+.stQ__row{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);}
+.stNote{background:#E9F7F1;border:1px solid #B9E4D2;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stNote__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:12px;color:#0B7A58;}
+.stNote__k em{font-style:normal;font-size:10px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.stNote .stCheck{align-items:flex-start;margin-bottom:12px;}
+.stNote .stCheck:last-child{margin-bottom:0;}
+.stNote .stCheck b{display:block;font-size:13px;font-weight:700;}
+.stNote .stCheck em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.75;}
+.stNote input{margin-top:3px;accent-color:#0E9F73;}
 
-/* empty (blog) */
-.sw-empty{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:56px 34px;text-align:center;}
-.sw-empty__ic{display:inline-flex;align-items:center;justify-content:center;width:66px;height:66px;border-radius:20px;background:var(--sig-s);color:var(--sig);margin-bottom:20px;}
-.sw-empty h2{font-size:22px;font-weight:900;margin-bottom:12px;}
-.sw-empty p{font-size:14px;line-height:2.05;color:var(--muted);max-width:32em;margin:0 auto 26px;}
-.sw-posts{display:grid;gap:14px;}
-.sw-post{display:block;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 28px;height:100%;transition:transform .25s,box-shadow .25s;}
-.sw-post:hover{transform:translateY(-3px);box-shadow:0 22px 40px -30px rgba(26,34,51,.5);}
-.sw-post__meta{display:flex;gap:12px;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:10px;}
-.sw-post__cat{color:var(--sig);border:1px solid var(--line);border-radius:999px;padding:2px 10px;}
-.sw-post h3{font-size:18px;font-weight:700;line-height:1.6;margin-bottom:8px;}
-.sw-post p{font-size:13.5px;line-height:1.95;color:var(--muted);}
+.stWatch{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:16px;}
+.stWatch.is-完了{background:#E6F7F0;border-color:#B9E4D2;}
+.stWatch.is-エラー,.stWatch.is-時間切れ{background:#FDECEA;border-color:#F5C4BF;}
+.stWatch__bar{display:flex;align-items:center;gap:0;margin-bottom:12px;}
+.stWatch__s{flex:1;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);position:relative;}
+.stWatch__s em{width:11px;height:11px;border-radius:50%;background:var(--line);flex-shrink:0;transition:all .3s;}
+.stWatch__s.is-on{color:var(--ink);font-weight:700;}
+.stWatch__s.is-on em{background:var(--ai);}
+.stWatch__s.is-now em{animation:stPulse 1.4s ease-in-out infinite;box-shadow:0 0 0 4px rgba(124,92,214,.2);}
+@keyframes stPulse{50%{opacity:.4;}}
+.stWatch__s:not(:last-child)::after{content:"";flex:1;height:2px;background:var(--line);margin-right:8px;}
+.stWatch__s.is-on:not(:last-child)::after{background:var(--ai);}
+.stWatch__t{font-size:12.5px;line-height:1.85;color:var(--muted);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.stWatch__t a{font-weight:700;color:#0E9F73;text-decoration:underline;}
+.stWatch__x{margin-left:auto;color:#B9C0CB;font-size:16px;padding:2px 8px;border-radius:6px;}
+.stWatch__x:hover{background:var(--white);color:var(--ink);}
 
-/* company table */
-.sw-tb{background:var(--white);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;}
-.sw-tb__r{display:grid;grid-template-columns:190px 1fr;gap:20px;padding:18px 26px;align-items:center;}
-.sw-tb__r + .sw-tb__r{border-top:1px solid var(--line);}
-.sw-tb__k{font-size:13px;color:var(--muted);font-weight:500;}
-.sw-tb__v{font-size:14.5px;}
-.sw-badge{font-size:11px;letter-spacing:.08em;color:var(--muted);background:var(--bg);border-radius:999px;padding:4px 12px;}
-@media (max-width:600px){.sw-tb__r{grid-template-columns:1fr;gap:3px;padding:15px 18px;}}
+.stStep.is-lock{opacity:.5;}
+.stStep__lock{margin-left:auto;font-size:9.5px;font-weight:700;color:#fff;background:#9BA3B1;border-radius:999px;padding:2px 8px;}
+.stGate{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.85;color:#7A5A12;background:#FFF7E8;border:1px solid #F2DCAE;border-radius:12px;padding:12px 15px;margin-top:12px;}
+.stGate svg{color:#B47C10;margin-top:3px;flex-shrink:0;}
+.stMedia{background:var(--bg);border-radius:14px;padding:16px;margin-top:16px;}
+.stMedia__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.stMedia__k em{font-style:normal;font-size:10px;font-weight:700;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.stMedia__n{font-size:11.5px;line-height:1.85;color:var(--muted);margin-bottom:13px;}
+.stMedia__add{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--ai);background:var(--white);border:1.5px solid var(--ai);border-radius:999px;padding:9px 18px;cursor:pointer;transition:all .2s;}
+.stMedia__add:hover{background:var(--ai);color:#fff;}
+.stMedia__l{display:grid;gap:9px;margin-top:13px;}
+.stMedia__i{display:flex;align-items:center;gap:11px;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+.stMedia__i img{width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;}
+.stMedia__i > div{flex:1;min-width:0;}
+.stMedia__i p{font-size:11.5px;font-weight:700;margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stMedia__i input{width:100%;background:var(--bg);border:1px solid transparent;border-radius:8px;padding:7px 10px;font:inherit;font-size:11.5px;}
+.stMedia__i > button{color:#B9C0CB;font-size:16px;padding:4px 8px;border-radius:6px;flex-shrink:0;}
+.stMedia__i > button:hover{color:var(--sig);background:#FDECEA;}
+.stPack{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.stPack__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:11px;}
+.stPack__k em{font-style:normal;font-size:10px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:2px 10px;}
+.stPack__l{display:grid;gap:6px;margin-bottom:13px;}
+.stPack__l li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
+.stPack__l svg{color:#0E9F73;flex-shrink:0;}
+.stPack .stCheck{align-items:flex-start;margin-bottom:0;}
+.stPack .stCheck b{display:block;font-size:12.5px;}
+.stPack .stCheck em{font-style:normal;font-size:11px;color:var(--muted);}
 
-/* cta band */
-.sw-cta{background:var(--ink2);color:#fff;padding:80px 0;text-align:center;position:relative;overflow:hidden;}
-.sw-cta::before{content:"";position:absolute;inset:0;background:radial-gradient(58% 100% at 50% 0%,rgba(224,64,47,.26),transparent 72%);}
-.sw-cta .sw-wrap{position:relative;}
-.sw-cta__h{font-weight:900;font-size:clamp(24px,4.2vw,42px);line-height:1.45;margin-bottom:16px;}
-.sw-cta__b{font-size:14.5px;line-height:2;color:#A9B3C1;margin-bottom:32px;}
-.sw-cta__btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+/* ==== お手本：媒体タブとパーツ ==== */
+.stRefTabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;}
+.stRefTab{display:flex;align-items:center;gap:8px;background:var(--white);border:1.5px solid var(--line);border-radius:999px;padding:9px 16px;white-space:nowrap;transition:all .2s;}
+.stRefTab:hover{border-color:var(--t);}
+.stRefTab.is-on{border-color:var(--t);background:var(--s);}
+.stRefTab.is-ok .stRefTab__d{background:#0E9F73;}
+.stRefTab__d{width:8px;height:8px;border-radius:50%;background:var(--t);}
+.stRefTab b{font-size:13px;font-weight:700;}
+.stRefTab em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.stRefTab.is-ok em{color:#0E9F73;font-weight:700;}
 
-/* contact form */
-.sw-form{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:38px 36px;}
-.sw-form__g{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
-.sw-fd{display:flex;flex-direction:column;gap:9px;}
-.sw-fd--w{grid-column:1/-1;}
-.sw-fd__l{font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:8px;}
-.sw-fd__l em{font-style:normal;font-size:10px;font-weight:700;color:#fff;background:var(--sig);border-radius:4px;padding:2px 7px;}
-.sw-fd input,.sw-fd textarea{width:100%;background:var(--bg);border:1.5px solid transparent;border-radius:12px;color:var(--ink);padding:14px 16px;font-family:var(--sans);font-size:14.5px;line-height:1.8;resize:vertical;transition:border-color .22s,background .22s;}
-.sw-fd input::placeholder,.sw-fd textarea::placeholder{color:#9BA3B1;}
-.sw-fd input:focus,.sw-fd textarea:focus{outline:none;border-color:var(--sig);background:var(--white);}
-.sw-form__err{margin-top:16px;font-size:13px;color:var(--sig);background:var(--sig-s);border-radius:10px;padding:12px 16px;line-height:1.8;}
-.sw-form__f{margin-top:28px;padding-top:24px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;}
-.sw-form__note{font-size:12px;color:var(--muted);line-height:1.9;max-width:30em;}
-@media (max-width:700px){.sw-form{padding:26px 20px;}.sw-form__g{grid-template-columns:1fr;}.sw-form__f .sw-btn{width:100%;}}
-.sw-done{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:52px 36px;text-align:center;}
-.sw-done__ic{display:inline-flex;align-items:center;justify-content:center;width:72px;height:72px;border-radius:22px;background:var(--sig-s);color:var(--sig);margin-bottom:22px;}
-.sw-done h2{font-size:24px;font-weight:900;margin-bottom:14px;}
-.sw-done p{font-size:14px;line-height:2.05;color:var(--muted);max-width:34em;margin:0 auto 26px;}
+.stParts{display:grid;gap:9px;margin-bottom:18px;}
+.stPart{border:1.5px solid var(--line);border-radius:14px;overflow:hidden;background:var(--white);}
+.stPart.is-ok{border-color:#B9E4D2;}
+.stPart.is-open{border-color:var(--ai);}
+.stPart__h{display:flex;align-items:center;gap:11px;width:100%;padding:14px 16px;}
+.stPart__m{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:10px;font-weight:700;background:#FDECEA;color:var(--sig);flex-shrink:0;}
+.stPart.is-ok .stPart__m{background:#E6F7F0;color:#0E9F73;}
+.stPart__t{flex:1;min-width:0;}
+.stPart__t b{display:block;font-size:13.5px;font-weight:700;}
+.stPart__t em{font-style:normal;font-size:11px;color:var(--muted);}
+.stPart__c{font-size:11px;color:var(--muted);white-space:nowrap;}
+.stPart.is-ok .stPart__c{color:#0E9F73;font-weight:700;}
+.stPart__a{color:var(--muted);transition:transform .25s;}
+.stPart__a.is-up{transform:rotate(180deg);}
+.stPart__b{padding:0 16px 16px;border-top:1px solid var(--line);padding-top:14px;}
+.stPart__row{display:flex;gap:9px;align-items:flex-start;margin-bottom:8px;}
+.stPart__n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--bg);font-size:10.5px;font-weight:700;color:var(--muted);flex-shrink:0;margin-top:8px;}
+.stPart__row textarea{flex:1;}
+.stPart__x{color:#B9C0CB;font-size:16px;padding:4px 8px;border-radius:6px;margin-top:6px;}
+.stPart__x:hover{color:var(--sig);background:#FDECEA;}
+.stPart__add{font-size:12px;font-weight:700;color:var(--ai);padding:7px 0;}
+.stPart__stat{display:flex;align-items:flex-start;gap:9px;font-size:11.5px;line-height:1.8;color:var(--muted);background:var(--bg);border-radius:11px;padding:11px 13px;margin-top:11px;}
+.stPart__lv{font-size:10px;font-weight:700;border-radius:999px;padding:3px 9px;white-space:nowrap;background:#FDECEA;color:var(--sig);}
+.stPart__lv.lv-50{background:#FFF4DE;color:#B47C10;}
+.stPart__lv.lv-75,.stPart__lv.lv-100{background:#E6F7F0;color:#0E9F73;}
+.stPart__media{display:flex;gap:9px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+.stPart__vid,.stPart__vnote{flex:1;min-width:190px;}
+.stPart__vnote{margin-top:9px;}
 
-/* footer */
-.sw-ft{background:#0E1626;color:#8B96A6;padding:56px 0 34px;}
-.sw-ft__top{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;padding-bottom:32px;border-bottom:1px solid #1E2739;}
-.sw-ft__logo{font-weight:900;letter-spacing:.12em;font-size:18px;color:#fff;margin-bottom:10px;}
-.sw-ft__logo span{font-family:var(--mono);font-weight:400;font-size:10px;color:#6F7B8B;margin-left:5px;}
-.sw-ft__tag{font-size:15px;font-weight:700;color:#C6CEDA;margin-bottom:6px;}
-.sw-ft__sub{font-size:12px;}
-.sw-ft__cols{display:flex;gap:56px;flex-wrap:wrap;}
-.sw-ft__cols > div{display:flex;flex-direction:column;gap:9px;}
-.sw-ft__k{font-size:9.5px;letter-spacing:.18em;color:#5D6779;margin-bottom:4px;}
-.sw-ft__cols button{font-size:13px;transition:color .2s;}
-.sw-ft__cols button:hover{color:#fff;}
-.sw-ft__note{font-size:11px;line-height:1.9;color:#5C6672;margin:22px 0 16px;}
-.sw-ft__cp{font-size:10px;letter-spacing:.1em;color:#4C5561;}
-@media (max-width:700px){.sw-ft__cols{gap:32px;}}
+.stAuto{background:#F5F1FE;border:1px solid #DCD0F7;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stAuto__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:12px;}
+.stAuto__k svg{color:var(--ai);}
+.stAuto__k button{margin-left:auto;font-size:11.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:6px 15px;}
+.stAuto__l{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+.stAuto__l li{background:var(--white);border-radius:10px;padding:9px 12px;font-size:12.5px;font-weight:700;}
+.stAuto__l li span{display:block;font-size:9.5px;font-weight:400;color:var(--muted);margin-bottom:3px;}
+.stAuto__n{font-size:11.5px;line-height:1.85;color:var(--muted);margin-top:12px;}
+.stDetail__k{display:flex;align-items:center;}
+.stDetail__back{margin-left:auto;font-size:11px;font-weight:700;color:var(--ai);border:1px solid var(--ai);border-radius:999px;padding:5px 13px;}
 
-/* ---- 事業ブランド ---- */
-.sw-bz__c{--t:var(--sig);--s:var(--sig-s);}
-.sw-bz__c:hover{border-color:var(--t);}
-.sw-bz__ic{background:var(--t) !important;}
-.sw-bz__no{color:var(--t) !important;}
-.sw-bz__ul li::before{background:var(--t);}
-.sw-bz__link{color:var(--t);}
-.sw-bz__price{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--t);margin-bottom:18px;}
-.sw-bz__prep{font-style:normal;font-size:11px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;margin-left:10px;vertical-align:middle;}
-.sw-phero--bz{background:linear-gradient(180deg,var(--s),transparent 82%);}
-.sw-phero--bz .sw-btn--sig{background:var(--t);box-shadow:none;}
-.sw-phero--bz .sw-btn--sig:hover{filter:brightness(.92);}
+.stMore{display:block;width:100%;text-align:center;font-size:12.5px;font-weight:700;color:var(--ai);border:1.5px dashed #DCD0F7;border-radius:12px;padding:12px;margin-bottom:16px;transition:all .2s;}
+.stMore:hover{background:#F5F1FE;}
 
-/* ---- 料金プラン ---- */
-.sw-plans{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
-.sw-plans > .sw-rv{height:100%;display:block;}
-.sw-plan{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--t);border-radius:16px;padding:24px 22px;height:100%;transition:transform .25s,box-shadow .25s;}
-.sw-plan:hover{transform:translateY(-3px);box-shadow:0 22px 40px -30px rgba(26,34,51,.5);}
-.sw-plan__n{font-size:15px;font-weight:900;margin-bottom:8px;}
-.sw-plan__d{font-size:12.5px;line-height:1.85;color:var(--muted);margin-bottom:16px;min-height:3.4em;}
-.sw-plan__p{font-family:var(--mono);font-size:19px;font-weight:700;color:var(--t);}
-.sw-plans__n{font-size:12px;line-height:1.9;color:var(--muted);margin-top:18px;}
-@media (max-width:820px){.sw-plans{grid-template-columns:1fr;}.sw-plan__d{min-height:0;}}
+/* ==== 投稿スケジュール ==== */
+.stSched{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:16px;}
+.stDays{display:flex;gap:6px;flex-wrap:wrap;}
+.stDay{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);background:var(--white);font-size:14px;font-weight:700;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.stDay:hover{border-color:var(--ai);}
+.stDay.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
+.stDay.is-we{color:#C4342A;}
+.stDay.is-we.is-on{background:#C4342A;border-color:#C4342A;color:#fff;}
+.stSlots__k{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;margin:16px 0 10px;}
+.stSlots__k em{font-style:normal;font-size:10.5px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:2px 10px;}
+.stSlots{display:grid;gap:10px;}
+.stSlot{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+.stSlot__h{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
+.stSlot__time{width:118px !important;font-family:var(--mono);font-weight:700;font-size:15px !important;padding:8px 10px !important;}
+.stSlot__n{font-size:11px;color:var(--muted);}
+.stSlot__x{margin-left:auto;color:#B9C0CB;font-size:16px;padding:3px 8px;border-radius:6px;}
+.stSlot__x:hover{color:var(--sig);background:#FDECEA;}
+.stSlot__media{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap;}
+.stSlot__media input{flex:1;min-width:170px;font-size:12px !important;padding:9px 12px !important;}
+.stSlot__imgs{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;}
+.stSlot__imgs span{position:relative;}
+.stSlot__imgs img{width:52px;height:52px;object-fit:cover;border-radius:8px;display:block;}
+.stSlot__imgs button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;}
+.stSched__sum{font-size:12px;line-height:1.9;color:var(--muted);background:var(--white);border-radius:10px;padding:11px 14px;margin-top:12px;}
+.stSched__sum b{color:var(--ink);}
 
-.sw-note{display:flex;gap:12px;align-items:flex-start;background:var(--bg);border-left:3px solid var(--t);border-radius:12px;padding:18px 20px;margin-top:20px;}
-.sw-note svg{color:var(--t);margin-top:4px;}
-.sw-note p{font-size:12.5px;line-height:1.95;color:var(--muted);}
+/* ==== 時間スロットのタブ ==== */
+.stSlotTabs{display:flex;gap:6px;flex-wrap:wrap;}
+.stSlotTabs button{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12.5px;font-weight:700;border:1.5px solid var(--line);background:var(--white);border-radius:999px;padding:8px 16px;color:var(--muted);transition:all .2s;}
+.stSlotTabs button:hover{border-color:var(--ai);}
+.stSlotTabs button.is-on{background:var(--ai);border-color:var(--ai);color:#fff;}
+.stSlotTabs em{font-style:normal;font-family:var(--sans);font-size:10px;font-weight:400;opacity:.75;}
+.stSlotNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:10px;padding:10px 14px;margin-bottom:16px;}
 
-/* ---- 事業セレクタ（お問い合わせ） ---- */
-.sw-svcpick__k{margin-bottom:12px;}
-.sw-svcpick{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:26px;padding-bottom:26px;border-bottom:1px solid var(--line);}
-.sw-svcpick__b{display:flex;align-items:center;gap:12px;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;background:var(--white);transition:border-color .2s,background .2s,transform .2s;}
-.sw-svcpick__b:hover{border-color:var(--t);transform:translateY(-1px);}
-.sw-svcpick__b.is-on{border-color:var(--t);background:var(--s);}
-.sw-svcpick__ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--s);color:var(--t);flex-shrink:0;}
-.sw-svcpick__b.is-on .sw-svcpick__ic{background:var(--t);color:#fff;}
-.sw-svcpick__b b{display:block;font-size:14px;font-weight:700;line-height:1.5;}
-.sw-svcpick__b em{font-style:normal;font-size:11.5px;color:var(--muted);}
-@media (max-width:640px){.sw-svcpick{grid-template-columns:1fr;}}
+.stThemeBar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+.stThemeBar span{flex:1;min-width:190px;font-size:11.5px;line-height:1.75;color:var(--muted);}
+.stThemes{display:grid;gap:9px;margin-bottom:16px;}
+.stTheme{display:block;width:100%;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;transition:all .2s;}
+.stTheme:hover{border-color:var(--ai);}
+.stTheme.is-on{border-color:var(--ai);background:#F7F4FE;}
+.stTheme b{display:block;font-size:14px;font-weight:700;margin-bottom:7px;line-height:1.6;}
+.stTheme span{display:grid;gap:4px;}
+.stTheme em{font-style:normal;font-size:12px;line-height:1.75;color:var(--muted);padding-left:14px;position:relative;}
+.stTheme em::before{content:"";position:absolute;left:0;top:.8em;width:7px;height:1.5px;background:var(--ai);}
+.stRevBtn{font-size:11.5px;font-weight:700;color:var(--ai);border:1px solid var(--ai);border-radius:999px;padding:6px 14px;}
+.stRevBtn:hover{background:var(--ai);color:#fff;}
+.stRevise{background:#F7F4FE;border:1.5px solid #DCD0F7;border-radius:14px;padding:16px;margin-top:14px;}
+.stRevise__k{display:flex;align-items:center;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:11px;}
+.stRevise__k button{margin-left:auto;color:#9BA3B1;font-size:16px;padding:2px 8px;}
+.stRevise__f{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap;}
+.stRevise__f span{font-size:11.5px;color:var(--muted);}
 
-/* ---- 2事業レイアウト・制作メニュー ---- */
-.sw-bz{grid-template-columns:repeat(2,1fr);}
-.sw-bz__sub{font-size:12.5px;font-weight:700;color:var(--t);margin-bottom:12px;}
-.sw-phero__sub{font-size:14px;font-weight:700;color:var(--t);margin-bottom:10px;}
-@media (max-width:900px){.sw-bz{grid-template-columns:1fr;}}
+.stModes{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.stMode{border:1.5px solid var(--line);border-radius:14px;padding:14px;background:var(--white);transition:all .2s;text-align:left;}
+.stMode:hover{border-color:var(--t);}
+.stMode.is-on{border-color:var(--t);background:var(--white);box-shadow:0 0 0 3px color-mix(in srgb,var(--t) 14%,transparent);}
+.stMode b{display:block;font-size:14px;font-weight:900;color:var(--t);margin-bottom:5px;}
+.stMode em{display:block;font-style:normal;font-size:11px;line-height:1.7;color:var(--muted);margin-bottom:8px;min-height:3.4em;}
+.stMode__c{display:block;font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--ink);}
+@media (max-width:760px){.stModes{grid-template-columns:1fr;}.stMode em{min-height:0;}}
 
-.sw-menu{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:26px 28px;margin-bottom:16px;}
-.sw-menu__hd{display:flex;align-items:center;gap:12px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:6px;}
-.sw-menu__ic{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:13px;background:var(--s);color:var(--t);}
-.sw-menu__hd h3{font-size:18px;font-weight:900;}
-.sw-menu__en{font-size:9.5px;letter-spacing:.18em;color:var(--muted);margin-left:auto;}
-.sw-menu__i{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:16px 0;}
-.sw-menu__i + .sw-menu__i{border-top:1px solid var(--line);}
-.sw-menu__n{font-size:15px;font-weight:700;line-height:1.6;margin-bottom:4px;}
-.sw-menu__d{font-size:12.5px;line-height:1.85;color:var(--muted);}
-.sw-menu__p{font-size:15px;font-weight:700;color:var(--t);white-space:nowrap;padding-top:2px;}
-@media (max-width:600px){
-  .sw-menu{padding:20px 18px;}
-  .sw-menu__i{flex-direction:column;gap:6px;}
-  .sw-menu__p{padding-top:0;}
-}
+.stEst{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--bg);border-radius:11px;padding:11px 14px;margin-bottom:14px;}
+.stEst__k{font-family:var(--sans);font-size:10px;font-weight:700;color:#fff;background:var(--ai);border-radius:999px;padding:3px 10px;}
 
-/* ============ ヒーロー全面刷新 ============ */
-.sw-hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:110px 24px 70px;overflow:hidden;text-align:center;}
-.sw-hero__bg{position:absolute;inset:0;background:
-  linear-gradient(155deg,#E0402F 0%,#C22C55 34%,#7C3F9E 66%,#3B3A8F 100%);}
-.sw-hero__bg::after{content:"";position:absolute;inset:0;
-  background-image:radial-gradient(rgba(255,255,255,.16) 1px,transparent 1px);background-size:26px 26px;opacity:.5;
-  mask-image:radial-gradient(80% 70% at 50% 45%,#000,transparent 78%);
-  -webkit-mask-image:radial-gradient(80% 70% at 50% 45%,#000,transparent 78%);}
-.sw-hero__glow{position:absolute;left:50%;top:38%;width:min(1100px,120vw);height:min(1100px,120vw);transform:translate(-50%,-50%);
-  background:radial-gradient(circle,rgba(255,255,255,.30),transparent 62%);animation:swBreath 7s ease-in-out infinite;}
-@keyframes swBreath{0%,100%{opacity:.75;transform:translate(-50%,-50%) scale(1);}50%{opacity:1;transform:translate(-50%,-50%) scale(1.08);}}
-.sw-hero__in{position:relative;width:100%;max-width:1100px;}
-.sw-hero__eb{font-size:11px;letter-spacing:.34em;color:rgba(255,255,255,.75);margin-bottom:18px;animation:swUp .8s .05s both cubic-bezier(.22,1,.36,1);}
-.sw-hero__word{display:flex;justify-content:center;gap:.02em;font-weight:900;color:#fff;line-height:.92;letter-spacing:.02em;
-  font-size:clamp(56px,15vw,178px);margin-bottom:26px;}
-.sw-hero__word span{display:inline-block;animation:swDrop .9s both cubic-bezier(.2,1.1,.35,1);}
-@keyframes swDrop{from{opacity:0;transform:translateY(-38px) rotate(-6deg);}to{opacity:1;transform:none;}}
-@keyframes swUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:none;}}
-.sw-hero__cap{font-size:clamp(19px,3.2vw,34px);font-weight:900;color:#fff;line-height:1.55;margin-bottom:18px;animation:swUp .9s .55s both cubic-bezier(.22,1,.36,1);}
-.sw-hero__cap b{color:#FFE27A;font-weight:900;}
-.sw-hero__slash{opacity:.5;margin:0 .25em;font-weight:400;}
-.sw-hero__note{font-size:13.5px;line-height:2;color:rgba(255,255,255,.86);max-width:36em;margin:0 auto 34px;animation:swUp .9s .7s both cubic-bezier(.22,1,.36,1);}
-.sw-hero__cta{animation:swUp .9s .85s both cubic-bezier(.22,1,.36,1);}
-.sw-btn--white{background:#fff;color:#1A2233;box-shadow:0 16px 34px -18px rgba(0,0,0,.55);}
-.sw-btn--white:hover{transform:translateY(-2px);background:#1A2233;color:#fff;}
-.sw-btn em{font-style:normal;transition:transform .25s;display:inline-block;}
-.sw-btn:hover em{transform:translateX(4px);}
-.sw-hero__scroll{position:absolute;left:50%;bottom:-46px;transform:translateX(-50%);width:26px;height:42px;border:1.5px solid rgba(255,255,255,.55);border-radius:999px;display:flex;justify-content:center;padding-top:8px;}
-.sw-hero__scroll em{width:3px;height:8px;border-radius:2px;background:#fff;animation:swScroll 1.8s ease-in-out infinite;}
-@keyframes swScroll{0%{opacity:0;transform:translateY(0);}30%{opacity:1;}100%{opacity:0;transform:translateY(16px);}}
-@media (max-width:760px){.sw-hero{min-height:auto;padding:104px 20px 90px;}.sw-hero__scroll{display:none;}}
+.stOk{display:flex;align-items:flex-start;gap:11px;background:#E9F7F1;border:1px solid #B9E4D2;border-radius:12px;padding:13px 16px;margin-bottom:16px;}
+.stOk svg{color:#0E9F73;margin-top:3px;flex-shrink:0;}
+.stOk p{font-size:12.5px;line-height:1.85;color:#0B6B4F;}
+.stOk a{font-weight:700;text-decoration:underline;margin-left:8px;}
 
-/* キャラクター：指輪 */
-.sw-trio{display:flex;align-items:flex-end;justify-content:center;margin-top:46px;animation:swUp 1s 1s both cubic-bezier(.22,1,.36,1);}
-.sw-trio__i{display:block;}
-.sw-trio__i--c{width:min(190px,32vw);z-index:2;}
-.sw-trio__i--l,.sw-trio__i--r{width:min(150px,26vw);}
-.sw-trio__i--l{margin-right:-26px;}
-.sw-trio__i--r{margin-left:-26px;}
-.sw-ring{width:100%;height:auto;display:block;animation:swFloatY 4.6s ease-in-out infinite;filter:drop-shadow(0 14px 22px rgba(0,0,0,.22));}
-@keyframes swFloatY{0%,100%{transform:translateY(0);}50%{transform:translateY(-11px);}}
-.sw-ring__gem{transform-origin:64px 27px;animation:swGem 3s ease-in-out infinite;}
-@keyframes swGem{0%,100%{opacity:1;}50%{opacity:.62;}}
+.stLearn{background:#F7F4FE;border:1px solid #DCD0F7;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stLearn__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#4A3A75;margin-bottom:12px;}
+.stLearn__k svg{color:var(--ai);}
+.stLearn__l{display:grid;gap:8px;}
+.stLearn__l li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;background:var(--white);border-radius:11px;padding:10px 13px;align-items:center;}
+.stLearn__l b{font-size:13px;font-weight:700;}
+.stLearn__l em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.stLearn__bar{grid-column:1/-1;height:4px;border-radius:999px;background:var(--bg);overflow:hidden;}
+.stLearn__bar i{display:block;height:100%;background:var(--ai);border-radius:999px;}
+.stLearn__n{font-size:11px;line-height:1.85;color:var(--muted);margin-top:11px;}
+.stLearnNote{font-size:11.5px;line-height:1.85;color:var(--muted);background:var(--bg);border-radius:11px;padding:12px 15px;margin-bottom:18px;}
 
-/* ============ ステートメント ============ */
-.sw-state{padding:110px 0;text-align:center;background:var(--white);}
-.sw-state__h{font-size:clamp(26px,4.6vw,48px);font-weight:900;line-height:1.55;margin-bottom:24px;}
-.sw-state__b{font-size:15px;line-height:2.2;color:var(--muted);max-width:40em;margin:0 auto 34px;}
-.sw-state__b b{color:var(--ink);font-weight:700;}
-@media (max-width:760px){.sw-state{padding:72px 0;}}
+.stTarget{background:var(--bg);border-radius:14px;padding:15px;margin-bottom:16px;border-left:4px solid #9BA3B1;}
+.stTarget.is-auto{border-left-color:#0E9F73;background:#E9F7F1;}
+.stTarget__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:7px;}
+.stTarget__k em{font-style:normal;font-size:10.5px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 10px;}
+.stTarget__h{font-size:12px;line-height:1.9;color:var(--muted);margin-bottom:9px;}
+.stTarget.is-auto .stTarget__h{color:#0B6B4F;}
+.stTarget__a{font-size:12px;font-weight:700;color:var(--ai);}
 
-/* ============ マーキー ============ */
-.sw-mq{overflow:hidden;background:var(--ink);padding:16px 0;border-top:1px solid var(--ink);}
-.sw-mq__t{display:flex;width:max-content;animation:swMq 38s linear infinite;}
-.sw-mq__t.is-rev{animation-direction:reverse;}
-.sw-mq__t span{display:flex;align-items:center;gap:22px;font-size:15px;font-weight:700;color:#fff;padding-right:22px;white-space:nowrap;}
-.sw-mq__t em{font-style:normal;font-size:9px;color:var(--sig);}
-@keyframes swMq{to{transform:translateX(-50%);}}
+.stVideo{background:#FBF2E1;border:1px solid #F0DEB4;border-radius:14px;padding:16px;margin-bottom:18px;}
+.stVideo__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#8C5A00;margin-bottom:9px;}
+.stVideo__k em{font-style:normal;font-size:10px;color:#fff;background:#E08A1F;border-radius:999px;padding:2px 10px;}
+.stVideo__h{font-size:12px;line-height:1.95;color:#7A5A12;margin-bottom:12px;}
+.stVideo__h b{font-weight:700;}
+.stVideo__l{counter-reset:v;display:grid;gap:9px;}
+.stVideo__l li{counter-increment:v;position:relative;padding-left:32px;font-size:11.5px;line-height:1.8;color:#7A5A12;}
+.stVideo__l li::before{content:counter(v);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:#E08A1F;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.stVideo__l b{display:block;font-size:12.5px;color:#5C4200;margin-bottom:2px;}
+.stVideo__n{font-size:11px;line-height:1.85;color:#8C5A00;background:var(--white);border-radius:10px;padding:11px 13px;margin-top:12px;}
 
-/* ============ 指標カウントアップ ============ */
-.sw-nums{padding:104px 0;background:var(--bg);}
-.sw-nums__en{font-size:10.5px;letter-spacing:.26em;color:var(--sig);font-weight:700;margin-bottom:12px;}
-.sw-nums__h{font-size:clamp(23px,3.4vw,36px);font-weight:900;line-height:1.5;margin-bottom:40px;}
-.sw-nums__g{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
-.sw-nums__g .sw-stat{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:30px 24px;transition:transform .3s,box-shadow .3s;}
-.sw-nums__g .sw-stat:hover{transform:translateY(-4px);box-shadow:0 26px 46px -32px rgba(26,34,51,.5);}
-.sw-nums__g .sw-stat__v{font-size:clamp(38px,5vw,54px);font-weight:700;line-height:1;color:var(--ink);letter-spacing:-.03em;margin-bottom:10px;}
-.sw-nums__g .sw-stat__v span{font-family:var(--sans);font-size:14px;color:var(--sig);margin-left:5px;letter-spacing:0;}
-.sw-nums__g .sw-stat__l{font-size:12.5px;color:var(--muted);}
-@media (max-width:820px){.sw-nums{padding:70px 0;}.sw-nums__g{grid-template-columns:repeat(2,1fr);}}
+.stTools{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px;}
+.stTool{background:var(--white);border:1.5px solid var(--line);border-radius:14px;padding:13px;text-align:left;transition:all .2s;}
+.stTool:hover{border-color:var(--t);}
+.stTool.is-on{border-color:var(--t);box-shadow:0 0 0 3px color-mix(in srgb,var(--t) 15%,transparent);}
+.stTool b{display:block;font-size:14px;font-weight:900;color:var(--t);}
+.stTool__c{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:9px;}
+.stTool dl{display:grid;gap:5px;}
+.stTool dl > div{display:grid;grid-template-columns:34px 1fr;gap:6px;}
+.stTool dt{font-size:9.5px;color:var(--muted);}
+.stTool dd{font-size:11px;line-height:1.6;}
+@media (max-width:820px){.stTools{grid-template-columns:1fr;}}
 
-/* ============ 3事業グリッド ============ */
-.sw-bz{grid-template-columns:repeat(3,1fr);}
-@media (max-width:1000px){.sw-bz{grid-template-columns:1fr;}}
+.stVideo__one{display:flex;align-items:flex-start;gap:9px;background:var(--white);border-radius:11px;padding:12px 14px;margin-bottom:12px;font-size:12px;line-height:1.85;color:#5C4200;}
+.stVideo__one svg{color:#0E9F73;margin-top:3px;flex-shrink:0;}
+.stVideo__one b{font-weight:700;}
+.stTool.is-on b::after{content:"";}
 
-/* ============ SNS 24/365 特集 ============ */
-.sw-always{position:relative;padding:110px 0;overflow:hidden;background:#151A2B;color:#D9DEEA;}
-.sw-always__bg{position:absolute;inset:0;background:
-  radial-gradient(50% 60% at 12% 20%,rgba(124,92,214,.34),transparent 66%),
-  radial-gradient(46% 56% at 88% 84%,rgba(224,64,47,.22),transparent 68%);}
-.sw-always__in{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center;}
-.sw-always__eb{font-size:10.5px;letter-spacing:.22em;color:#B9A6F0;font-weight:700;margin-bottom:18px;}
-.sw-always__h{font-size:clamp(24px,3.4vw,38px);font-weight:900;line-height:1.5;color:#fff;margin-bottom:22px;}
-.sw-always__big{display:inline-block;font-size:clamp(38px,6.4vw,74px);line-height:1.05;letter-spacing:-.02em;
-  background:linear-gradient(92deg,#fff,#C9B6FF 55%,#FF9C8F);-webkit-background-clip:text;background-clip:text;color:transparent;}
-.sw-always__b{font-size:14.5px;line-height:2.15;color:#98A3B8;margin-bottom:30px;max-width:34em;}
-.sw-btn--soc{background:#7C5CD6;color:#fff;box-shadow:0 16px 30px -18px rgba(124,92,214,.9);}
-.sw-btn--soc:hover{background:#6A4BC4;transform:translateY(-2px);}
-@media (max-width:940px){.sw-always{padding:72px 0;}.sw-always__in{grid-template-columns:1fr;gap:34px;}}
+.stVref{background:#E8EEFB;border:1px solid #C3D3F5;border-radius:14px;padding:16px;margin-bottom:16px;}
+.stVref__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#1B3E86;margin-bottom:7px;}
+.stVref__k em{font-style:normal;font-size:10px;color:#fff;background:#2456C8;border-radius:999px;padding:2px 10px;}
+.stVref__n{font-size:11.5px;line-height:1.85;color:#2A4A8A;margin-bottom:12px;}
+.stVref__f{display:flex;gap:9px;flex-wrap:wrap;}
+.stVref__f input{flex:1;min-width:220px;background:var(--white);border:1.5px solid transparent;border-radius:11px;padding:11px 13px;font-size:13px;}
+.stVref__f input:focus{outline:none;border-color:#2456C8;}
+.stVref__note{width:100%;background:var(--white);border:1.5px solid transparent;border-radius:11px;padding:10px 13px;font-size:12px;margin-top:9px;}
+.stVref__note:focus{outline:none;border-color:#2456C8;}
+.stVref__err{font-size:11.5px;line-height:1.9;color:#8C2A22;background:#FDECEA;border-radius:10px;padding:11px 14px;margin-top:11px;white-space:pre-wrap;}
+.stVref__r{background:var(--white);border-radius:12px;padding:13px 15px;margin-top:12px;}
+.stVref__rk{display:flex;align-items:center;font-size:11.5px;font-weight:700;color:#1B3E86;margin-bottom:8px;}
+.stVref__rk button{margin-left:auto;font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 11px;}
+.stVref__r pre{font-family:var(--sans);font-size:12px;line-height:1.95;white-space:pre-wrap;margin:0;color:var(--ink);max-height:280px;overflow-y:auto;}
+.stVref__t{font-size:11px;line-height:1.85;color:#2A4A8A;background:var(--white);border-radius:10px;padding:10px 13px;margin-top:11px;}
 
-/* 稼働タイムライン */
-.sw-tl{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:24px 26px;backdrop-filter:blur(6px);}
-.sw-tl__k{font-size:9.5px;letter-spacing:.2em;color:#8B93AB;margin-bottom:16px;}
-.sw-tl__r{display:grid;grid-template-columns:56px 20px 1fr;align-items:center;gap:10px;padding:11px 0;animation:swSlide .7s both cubic-bezier(.22,1,.36,1);}
-.sw-tl__r + .sw-tl__r{border-top:1px solid rgba(255,255,255,.07);}
-@keyframes swSlide{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:none;}}
-.sw-tl__t{font-size:12px;color:#C9B6FF;font-weight:700;}
-.sw-tl__dot{position:relative;width:8px;height:8px;border-radius:50%;background:#7C5CD6;justify-self:center;}
-.sw-tl__dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid rgba(124,92,214,.5);animation:swPing 2.4s ease-out infinite;}
-@keyframes swPing{0%{transform:scale(.7);opacity:1;}100%{transform:scale(1.7);opacity:0;}}
-.sw-tl__d{font-size:12.5px;line-height:1.75;color:#A9B2C6;}
-@media (max-width:520px){.sw-tl__r{grid-template-columns:50px 16px 1fr;}.sw-tl__d{font-size:11.5px;}}
+.agDept{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin-bottom:16px;}
+.agDept__i{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--c);border-radius:13px;padding:12px 14px;}
+.agDept__i b{display:block;font-size:12.5px;font-weight:700;color:var(--c);margin-bottom:4px;}
+.agDept__i em{font-style:normal;font-size:11px;line-height:1.7;color:var(--muted);}
+.agEx{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line);}
+.agEx span{font-size:11.5px;color:var(--muted);}
+.agEx button{font-size:12px;font-weight:700;color:var(--t);border:1.5px solid var(--line);border-radius:999px;padding:7px 15px;transition:all .2s;}
+.agEx button:hover{border-color:var(--t);background:var(--s);}
 
-/* ヘッダーをヒーロー上で白抜きに */
-.sw-hd:not(.is-on) .sw-logo__t{color:#fff;}
-.sw-hd:not(.is-on) .sw-logo__t span{color:rgba(255,255,255,.7);}
-.sw-hd:not(.is-on) .sw-logo__m{color:#fff;}
-.sw-hd:not(.is-on) .sw-burger span{background:#fff;}
+.dlSum{display:flex;align-items:center;gap:12px;background:var(--white);border:1px solid var(--line);border-radius:16px;padding:14px 18px;margin-bottom:16px;flex-wrap:wrap;}
+.dlSum > div{font-size:16px;font-weight:900;}
+.dlSum span{display:block;font-size:10px;font-weight:400;color:var(--muted);margin-bottom:2px;}
+.dlSum button{margin-left:auto;}
+.dlBoard{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;align-items:start;}
+.dlCol{background:var(--bg);border-radius:14px;padding:13px;border-top:3px solid var(--c);}
+.dlCol__k{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--c);}
+.dlCol__k em{font-style:normal;font-family:var(--mono);font-size:10px;background:var(--white);border-radius:999px;padding:1px 8px;color:var(--muted);}
+.dlCol__n{font-size:10.5px;color:var(--muted);margin:4px 0 10px;}
+.dlCol__l{display:grid;gap:8px;}
+.dlCard{background:var(--white);border-radius:11px;padding:11px 13px;cursor:pointer;transition:transform .2s,box-shadow .2s;}
+.dlCard:hover{transform:translateY(-2px);box-shadow:0 12px 22px -16px rgba(26,34,51,.5);}
+.dlCard__c{font-size:10.5px;color:var(--muted);}
+.dlCard__t{font-size:12.5px;font-weight:700;line-height:1.6;margin:3px 0 5px;}
+.dlCard__p{font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--c);}
+.dlCard__x{font-size:10.5px;color:var(--muted);background:var(--bg);border-radius:7px;padding:5px 8px;margin-top:6px;}
+.dlCard__f{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;}
+.dlCard__f button{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;}
+.dlCard__f button:hover{border-color:var(--c);color:var(--c);}
 
-/* 運用の流れ */
-.sw-ops{display:grid;gap:0;}
-.sw-op{display:grid;grid-template-columns:64px 1fr;gap:20px;padding-bottom:28px;}
-.sw-op__l{position:relative;display:flex;flex-direction:column;align-items:center;}
-.sw-op__n{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:var(--t);color:#fff;font-size:13px;font-weight:700;flex-shrink:0;}
-.sw-op__line{position:absolute;top:48px;bottom:-28px;width:2px;background:var(--s);}
-.sw-op:last-child .sw-op__line{display:none;}
-.sw-op__m{background:var(--bg);border-radius:16px;padding:20px 24px;}
-.sw-op__m h3{font-size:18px;font-weight:900;margin-bottom:5px;}
-.sw-op__s{font-size:11px;color:var(--t);font-weight:700;margin-bottom:10px;}
-.sw-op__d{font-size:13.5px;line-height:2.05;color:var(--muted);}
-@media (max-width:600px){.sw-op{grid-template-columns:44px 1fr;gap:14px;}.sw-op__n{width:36px;height:36px;font-size:11px;}.sw-op__line{top:40px;}}
+.dbGate__help{font-size:11.5px;line-height:1.85;color:#7C8797;margin-top:14px;}
+.dbGate__help a{color:#E0402F;text-decoration:underline;}
 
-/* 導入すると、こうなります */
-.sw-cando{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;}
-.sw-cd{background:var(--white);border:1px solid var(--line);border-radius:20px;padding:26px 28px;transition:transform .3s,box-shadow .3s;}
-.sw-cd:hover{transform:translateY(-4px);box-shadow:0 28px 50px -34px rgba(26,34,51,.45);}
-.sw-cd h3{font-size:20px;font-weight:900;line-height:1.5;margin-bottom:12px;}
-.sw-cd__d{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:20px;}
-.sw-cd__ba{display:flex;align-items:stretch;gap:12px;}
-.sw-cd__b,.sw-cd__a{flex:1;border-radius:13px;padding:13px 15px;font-size:14px;font-weight:700;line-height:1.5;}
-.sw-cd__b{background:var(--bg);color:var(--muted);}
-.sw-cd__a{background:var(--s);color:var(--t);}
-.sw-cd__b span,.sw-cd__a span{display:block;font-size:10px;font-weight:400;margin-bottom:5px;opacity:.75;}
-.sw-cd__ar{display:flex;align-items:center;font-size:18px;color:var(--t);font-weight:700;}
-@media (max-width:560px){.sw-cd__ba{flex-direction:column;}.sw-cd__ar{transform:rotate(90deg);justify-content:center;}}
-
-/* 事業ページのFAQ */
-.sw-bfaq{display:grid;gap:12px;}
-.sw-bfaq__i{background:var(--bg);border-radius:16px;padding:22px 24px;}
-.sw-bfaq__q{font-size:16px;font-weight:900;line-height:1.6;margin-bottom:9px;position:relative;padding-left:26px;}
-.sw-bfaq__q::before{content:"Q";position:absolute;left:0;top:0;font-family:var(--mono);font-size:14px;color:var(--t);}
-.sw-bfaq__a{font-size:14px;line-height:2.05;color:var(--muted);padding-left:26px;}
-
-/* AI社員とは */
-.sw-what3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;}
-.sw-w3{background:var(--bg);border-radius:20px;padding:28px;position:relative;}
-.sw-w3__n{display:block;font-size:11px;color:var(--sig);font-weight:700;margin-bottom:14px;letter-spacing:.14em;}
-.sw-w3 h3{font-size:20px;font-weight:900;line-height:1.5;margin-bottom:12px;}
-.sw-w3__d{font-size:14px;line-height:2.05;color:var(--muted);margin-bottom:16px;}
-.sw-w3__x{font-size:12.5px;line-height:1.85;color:var(--muted);background:var(--white);border-radius:11px;padding:12px 14px;position:relative;padding-left:34px;}
-.sw-w3__x::before{content:"≠";position:absolute;left:14px;top:11px;font-size:14px;font-weight:700;color:#B9C0CB;}
-.sw-w3__foot{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-top:28px;padding:24px 28px;background:var(--bg);border-radius:18px;flex-wrap:wrap;}
-.sw-w3__foot p{font-size:15px;line-height:1.95;color:var(--muted);flex:1;min-width:260px;}
-.sw-w3__foot b{color:var(--ink);font-weight:900;}
+.dbGateRing__legs{transform-origin:75px 140px;animation:dbStep 2.6s ease-in-out infinite;}
+@keyframes dbStep{0%,100%{transform:translateY(0);}50%{transform:translateY(-2px);}}
+.dbGateRing__arms{transform-origin:75px 100px;animation:dbWave 3.2s ease-in-out infinite;}
+@keyframes dbWave{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-4deg);}}
+.dbGateRing__eyes{animation:dbBlink 5.4s infinite;transform-origin:75px 85px;}
+@keyframes dbBlink{0%,94%,100%{transform:scaleY(1);}97%{transform:scaleY(.12);}}
 `;
+
+export default function Dashboard(props) {
+  return (
+    <Guard>
+      <DashboardInner {...props} />
+    </Guard>
+  );
+}
