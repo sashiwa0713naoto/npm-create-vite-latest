@@ -5745,6 +5745,8 @@ const AGENT_EXAMPLES = [
 function AgentStudio({ pushLog }) {
   const { settings } = useSettings();
   const endpoint = resolveEndpoint(settings);
+  const [pains, setPains] = useState([]);
+  const [painOther, setPainOther] = useState("");
   const [form, setForm] = useState({
     client: "",
     industry: "btob",
@@ -5783,6 +5785,7 @@ function AgentStudio({ pushLog }) {
       "【事業】AGENT／【JOB】AGENT",
       `【お客様】${form.client || "（未記入）"}／【業種】${ind}`,
       form.dept ? `【部署】${form.dept}` : "",
+      pains.length ? `【困っている業務】${pains.filter((x) => x !== "その他").concat(painOther ? [painOther] : []).join("・")}` : "",
       `【対象業務】${form.biz}`,
       `【今のやり方】${form.now.replace(/\n/g, " ／ ")}`,
       form.pain ? `【困っていること】${form.pain.replace(/\n/g, " ／ ")}` : "",
@@ -5852,6 +5855,7 @@ function AgentStudio({ pushLog }) {
           ["品質・倫理部", "検査項目と、人に戻す条件を決める", "#7C5CD6"],
           ["原価・資源部", "構築費用・運用費・効果の見立てを出す", "#E08A1F"],
           ["制作・広報部", "お客様にお見せする提案書を書く", "#2456C8"],
+          ["Web制作部", "サイト・ECの構成と文言を設計する", "#0EA5A5"],
         ].map(([n, d, c]) => (
           <div className="agDept__i" key={n} style={{ "--c": c }}>
             <b>{n}</b>
@@ -5887,6 +5891,29 @@ function AgentStudio({ pushLog }) {
             <input type="text" value={form.volume} onChange={(e) => set("volume", e.target.value)} placeholder="1日10件" />
           </Field>
         </div>
+
+        <Field label="困っている業務" hint="当てはまるものを選んでください。複数選べます">
+          <div className="stChips">
+            {["問い合わせ・メール対応", "定例レポートの作成", "資料・提案書づくり", "データの転記・集計",
+              "社内の情報検索", "見積・請求の処理", "SNS・記事の更新", "予約・日程調整",
+              "サイト・ECの更新", "その他"].map((x) => (
+              <button
+                key={x}
+                type="button"
+                className={pains.indexOf(x) >= 0 ? "is-on" : ""}
+                onClick={() => setPains(pains.indexOf(x) >= 0 ? pains.filter((y) => y !== x) : [...pains, x])}
+              >
+                {x}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {pains.indexOf("その他") >= 0 && (
+          <Field label="その他の内容" hint="選択肢にない業務を、そのままお書きください">
+            <input type="text" value={painOther} onChange={(e) => setPainOther(e.target.value)} placeholder="例：在庫の突合、シフトの調整、クレームの一次受け" />
+          </Field>
+        )}
 
         <Field label="どの業務をAIに任せたいか" hint="1行で。ここが設計の起点になります">
           <input type="text" value={form.biz} onChange={(e) => set("biz", e.target.value)} placeholder="メールでの問い合わせ対応" />
@@ -6125,6 +6152,687 @@ function DealsView({ pushLog }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ============================== 会計 ============================== */
+
+const ACCT_ITEMS = {
+  売上: ["AI社員構築", "制作（文書・動画）", "SNS運用", "サイト制作", "保守・運用", "その他売上"],
+  経費: ["AI利用料", "外注費", "ソフト利用料", "通信費", "広告費", "交通費", "書籍・研修", "その他経費"],
+};
+
+function AcctView({ pushLog }) {
+  const { settings } = useSettings();
+  const [contracts, setContracts] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [sum, setSum] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState(null);
+  const [tab, setTab] = useState("contracts");
+
+  const load = useCallback(async () => {
+    if (!settings.gasUrl) return;
+    setLoading(true);
+    try {
+      const r = await fetch(`${settings.gasUrl}?action=billing`);
+      const d = await r.json();
+      if (d && d.ok) {
+        setContracts(d.contracts || []);
+        setInvoices(d.invoices || []);
+        setSum(d.sum || null);
+      }
+    } catch (e) {} finally { setLoading(false); }
+  }, [settings.gasUrl]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const post = async (body) => {
+    if (!settings.gasUrl) return;
+    try {
+      await fetch(settings.gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body),
+      });
+      setForm(null);
+      load();
+      if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] BILLING UPDATED`);
+    } catch (e) {}
+  };
+
+  const yen = (n) => Number(n || 0).toLocaleString();
+  const unpaid = invoices.filter((v) => v.入金 !== "済");
+
+  return (
+    <div className="stRoot" style={{ "--t": "#0E9F73", "--s": "#E9F7F1" }}>
+      <Style id="CSS_STUDIO" css={CSS_STUDIO} />
+
+      <header className="stHead">
+        <p className="stHead__en">CONTRACTS &amp; BILLING</p>
+        <h1>契約・請求</h1>
+        <p className="stHead__s">契約時の初期費用と、毎月いただく金額を管理します。月額は請求日に自動で作られます。</p>
+      </header>
+
+      {sum && (
+        <div className="acSum">
+          {[
+            ["毎月の売上（MRR）", sum.MRR, "#0E9F73"],
+            ["年間の見込み", sum.年換算, "#2456C8"],
+            ["継続中の契約", sum.契約数, "#7C5CD6", "件"],
+            ["今月の請求", sum.今月請求, "#E08A1F"],
+            ["未回収", sum.未回収, "#E0402F"],
+          ].map(([k, v, c, unit]) => (
+            <div key={k} style={{ "--c": c }}>
+              <span>{k}</span>
+              <b>{yen(v)}<em>{unit || "円"}</em></b>
+            </div>
+          ))}
+          <button className="stIdeaBtn" onClick={() => setForm({ 状態: "継続中", 請求日: 1, 支払方法: "銀行振込", 開始日: new Date().toISOString().slice(0, 10) })}>
+            <Sic name="spark" size={15} />
+            契約を追加
+          </button>
+        </div>
+      )}
+
+      <div className="lbTabs">
+        <button className={tab === "contracts" ? "is-on" : ""} onClick={() => setTab("contracts")}>
+          契約<em>{contracts.length}</em>
+        </button>
+        <button className={tab === "invoices" ? "is-on" : ""} onClick={() => setTab("invoices")}>
+          請求<em>{invoices.length}</em>
+        </button>
+        <button className={tab === "unpaid" ? "is-on" : ""} onClick={() => setTab("unpaid")}>
+          未回収<em>{unpaid.length}</em>
+        </button>
+      </div>
+
+      {loading && <p className="stFlash">読み込んでいます...</p>}
+
+      {!loading && tab === "contracts" && (
+        contracts.length === 0 ? (
+          <div className="lbEmpty">
+            <Sic name="doc" size={30} />
+            <h2>契約がありません</h2>
+            <p>「契約を追加」から登録してください。初期費用の請求はその場で作られ、月額は請求日に自動で作られます。</p>
+          </div>
+        ) : (
+          <div className="ctList">
+            {contracts.map((c) => (
+              <div className={`ctCard ${c.状態 !== "継続中" ? "is-off" : ""}`} key={c.contract_id} onClick={() => setForm(c)}>
+                <div className="ctCard__h">
+                  <b>{c.顧客}</b>
+                  <span className={`ctCard__s ${c.状態 === "継続中" ? "is-on" : ""}`}>{c.状態}</span>
+                </div>
+                <p className="ctCard__p">{c.プラン}</p>
+                <dl className="ctCard__m">
+                  <div><dt>初期費用</dt><dd>{yen(c.初期費用)}円</dd></div>
+                  <div><dt>月額</dt><dd className="is-big">{yen(c.月額)}円</dd></div>
+                  <div><dt>請求日</dt><dd>毎月{c.請求日}日</dd></div>
+                  <div><dt>開始</dt><dd>{c.開始日}</dd></div>
+                </dl>
+                {c.メモ && <p className="ctCard__n">{c.メモ}</p>}
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {!loading && (tab === "invoices" || tab === "unpaid") && (
+        (tab === "unpaid" ? unpaid : invoices).length === 0 ? (
+          <div className="lbEmpty">
+            <Sic name="check" size={30} />
+            <h2>{tab === "unpaid" ? "未回収はありません" : "請求がありません"}</h2>
+            <p>{tab === "unpaid" ? "すべて入金済みです。" : "契約を登録すると、ここに請求が並びます。"}</p>
+          </div>
+        ) : (
+          <div className="acList">
+            {(tab === "unpaid" ? unpaid : invoices).map((v) => (
+              <div className={`acRow ${v.入金 === "済" ? "is-sale" : "is-cost"}`} key={v.invoice_id}>
+                <span className="acRow__d">{v.発行日}</span>
+                <span className="acRow__k">{v.種別}</span>
+                <span className="acRow__t">{v.顧客}</span>
+                <span className="acRow__a">{yen(v.合計)}</span>
+                <button
+                  className={`acRow__s ${v.入金 === "済" ? "is-done" : ""}`}
+                  onClick={() => post({ type: "invoice", invoice_id: v.invoice_id, 入金: v.入金 !== "済" })}
+                  title={v.入金 === "済" ? "未入金に戻す" : "入金済みにする"}
+                >
+                  {v.入金 === "済" ? "済" : "未"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {form && (
+        <div className="acModal" onClick={() => setForm(null)}>
+          <div className="acModal__b" onClick={(e) => e.stopPropagation()}>
+            <div className="acModal__h">
+              <h2>{form.contract_id ? "契約を編集" : "契約を追加"}</h2>
+              <button onClick={() => setForm(null)} aria-label="閉じる"><Sic name="x" size={18} /></button>
+            </div>
+            <div className="acForm">
+              <div className="acForm__r">
+                <label><span>お客様</span>
+                  <input type="text" value={form.顧客 || ""} onChange={(e) => setForm({ ...form, 顧客: e.target.value })} placeholder="株式会社◯◯" />
+                </label>
+                <label><span>プラン名</span>
+                  <input list="planList" type="text" value={form.プラン || ""} onChange={(e) => setForm({ ...form, プラン: e.target.value })} placeholder="AI社員構築＋運用サポート" />
+                  <datalist id="planList">
+                    <option value="AI社員構築＋運用サポート" />
+                    <option value="サイト制作＋更新代行" />
+                    <option value="サイト更新代行（月2回まで）" />
+                    <option value="サイト更新代行（回数無制限）" />
+                    <option value="SNS運用代行" />
+                    <option value="文書・動画 制作" />
+                  </datalist>
+                </label>
+              </div>
+              <div className="acForm__r">
+                <label><span>初期費用（税抜・円）</span>
+                  <input type="number" value={form.初期費用 || ""} onChange={(e) => setForm({ ...form, 初期費用: e.target.value })} placeholder="300000" />
+                </label>
+                <label><span>月額（税抜・円）</span>
+                  <input type="number" value={form.月額 || ""} onChange={(e) => setForm({ ...form, 月額: e.target.value })} placeholder="40000" />
+                </label>
+              </div>
+              <div className="acForm__r">
+                <label><span>開始日</span>
+                  <input type="date" value={form.開始日 || ""} onChange={(e) => setForm({ ...form, 開始日: e.target.value })} />
+                </label>
+                <label><span>毎月の請求日</span>
+                  <select value={form.請求日 || 1} onChange={(e) => setForm({ ...form, 請求日: Number(e.target.value) })}>
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}日</option>)}
+                    <option value={31}>月末</option>
+                  </select>
+                </label>
+              </div>
+              <div className="acForm__r">
+                <label><span>状態</span>
+                  <select value={form.状態 || "継続中"} onChange={(e) => setForm({ ...form, 状態: e.target.value })}>
+                    <option>継続中</option><option>停止</option><option>解約</option>
+                  </select>
+                </label>
+                <label><span>支払方法</span>
+                  <select value={form.支払方法 || "銀行振込"} onChange={(e) => setForm({ ...form, 支払方法: e.target.value })}>
+                    <option>銀行振込</option><option>クレジットカード</option><option>口座振替</option>
+                  </select>
+                </label>
+              </div>
+              <label><span>メモ</span>
+                <textarea rows={2} value={form.メモ || ""} onChange={(e) => setForm({ ...form, メモ: e.target.value })} />
+              </label>
+              <p className="acNote">
+                消費税10%は請求時に自動で加算されます。新規登録すると、初期費用の請求がその場で作られます。
+                月額は請求日の朝に自動で作られます（Apps Scriptで「月額請求を自動にする」を1回実行してください）。
+              </p>
+            </div>
+            <div className="acModal__f">
+              {form.contract_id && (
+                <button className="acGhost" onClick={() => post({ type: "contract", ...form, remove: true })}>削除</button>
+              )}
+              <button className="acGhost" onClick={() => setForm(null)}>キャンセル</button>
+              <button className="acAdd" onClick={() => post({ type: "contract", ...form })}>保存する</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ========================== サイト制作スタジオ ========================== */
+
+const SITE_GOALS = [
+  { id: "集客", label: "問い合わせを増やす", d: "サービスを知ってもらい、相談につなげる" },
+  { id: "販売", label: "商品を売る", d: "そのまま購入・申込に進んでもらう" },
+  { id: "採用", label: "人を集める", d: "働く姿を見せて、応募につなげる" },
+  { id: "信頼", label: "会社を知ってもらう", d: "取引前に見られる、会社の顔をつくる" },
+];
+
+const SITE_TONES = [
+  { id: "信頼", label: "信頼・堅実", d: "紺と白。落ち着いた印象", c: "#1B3E86" },
+  { id: "親近", label: "親しみやすい", d: "暖色。やわらかい印象", c: "#E08A1F" },
+  { id: "高級", label: "上質・高級", d: "黒と金。静かで重厚", c: "#1A2233" },
+  { id: "先進", label: "先進・技術", d: "青緑。すっきりと現代的", c: "#0EA5A5" },
+  { id: "自然", label: "自然・やさしい", d: "緑とベージュ。穏やか", c: "#0E9F73" },
+];
+
+const SITE_PAGES = ["トップ", "サービス紹介", "料金", "導入の流れ", "よくある質問", "お客様の声", "会社概要", "お問い合わせ", "採用情報", "ブログ"];
+
+function WebStudio({ pushLog }) {
+  const { settings } = useSettings();
+  const endpoint = resolveEndpoint(settings);
+  const [f, setF] = useState({
+    client: "", industry: "btob", biz: "", goal: "集客", tone: "信頼",
+    pages: ["トップ", "サービス紹介", "料金", "お問い合わせ"],
+    ec: false, items: "", strength: "", target: "", ref: "", contact: "", ng: "", plan: "self",
+  });
+  const [sending, setSending] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const [watch, setWatch] = useState(null);
+  const [mode, setMode] = useState("new");
+  const [sites, setSites] = useState([]);
+  const [target, setTarget] = useState("");
+  const [changes, setChanges] = useState("");
+  const [imgs, setImgs] = useState([]);
+  const [video, setVideo] = useState("");
+
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const togglePage = (p) => set("pages", f.pages.indexOf(p) >= 0 ? f.pages.filter((x) => x !== p) : [...f.pages, p]);
+
+  useEffect(() => {
+    if (!endpoint.isGas) return;
+    fetch(`${endpoint.url}?action=sites`)
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.sites)) setSites(d.sites); })
+      .catch(() => {});
+  }, [endpoint.isGas, endpoint.url]);
+
+  const addImages = (files, done) => {
+    Array.from(files || []).slice(0, 4).forEach((file) => {
+      readImageSmall(file, (data) => {
+        setImgs((v) => [...v, { name: file.name, data: data, place: "", note: "" }].slice(0, 4));
+      });
+    });
+    if (done) done();
+  };
+
+  const submit = async () => {
+    if (mode === "update") {
+      if (!target) { setFlash({ ok: false, msg: "更新するサイトを選んでください。" }); return; }
+      if (!changes.trim()) { setFlash({ ok: false, msg: "どこを直すかをご記入ください。" }); return; }
+    } else if (!f.biz.trim()) {
+      setFlash({ ok: false, msg: "「何をしている会社か」をご記入ください。" });
+      setTimeout(() => setFlash(null), 4000);
+      return;
+    }
+    if (!endpoint.isGas) return setFlash({ ok: false, msg: "先に接続設定でGoogle Apps Scriptを接続してください。" });
+    setSending(true);
+    setFlash(null);
+    const ind = (INDUSTRIES.find((x) => x.id === f.industry) || {}).label || "";
+    const tone = SITE_TONES.find((x) => x.id === f.tone) || SITE_TONES[0];
+    const msg = mode === "update" ? [
+      "【事業】WEB／【JOB】WEB",
+      `【更新対象】${target}`,
+      `【更新内容】${changes.replace(/\n/g, " ／ ")}`,
+      imgs.length ? `【差し込む写真】${imgs.length}枚（${imgs.map((m) => m.place || "指定なし").join("・")}）` : "",
+      video ? `【差し込む動画】${video}` : "",
+    ].filter(Boolean).join("／") : [
+      "【事業】WEB／【JOB】WEB",
+      `【お客様】${f.client || "自社"}／【業種】${ind}`,
+      `【事業内容】${f.biz}`,
+      `【サイトの目的】${(SITE_GOALS.find((x) => x.id === f.goal) || {}).label}`,
+      `【デザインの方向】${tone.label}（${tone.d}／基調色 ${tone.c}）`,
+      `【必要なページ】${f.pages.join("・")}`,
+      `【EC】${f.ec ? "あり" : "なし"}`,
+      f.ec && f.items ? `【扱う商品】${f.items}` : "",
+      f.target ? `【見に来る人】${f.target}` : "",
+      f.strength ? `【強み】${f.strength.replace(/\n/g, " ／ ")}` : "",
+      f.contact ? `【連絡先】${f.contact}` : "",
+      f.ref ? `【参考サイト】${f.ref}` : "",
+      `【更新プラン】${f.plan === "self" ? "ご自身で更新（従業員専用ページを付ける）" : "おまかせ（ご依頼を受けて当社が修正）"}`,
+      f.ng ? `【NG】${f.ng}` : "",
+      imgs.length ? `【差し込む写真】${imgs.length}枚（${imgs.map((m) => m.place || "指定なし").join("・")}）` : "",
+      video ? `【差し込む動画】${video}` : "",
+    ].filter(Boolean).join("／");
+
+    try {
+      const r = await fetch(endpoint.url, {
+        method: "POST",
+        headers: { "Content-Type": endpoint.contentType },
+        body: JSON.stringify({
+          client_name: f.client || "自社",
+          client_email: "",
+          message: msg,
+          site_images: imgs.map((m) => ({ data: m.data, place: m.place, note: m.note })),
+        }),
+      });
+      const d = await r.json();
+      if (d && d.ok) {
+        setFlash({ ok: true, msg: "サイトをつくっています。構成を決めてからHTMLを書き出します（2〜3分）。" });
+        if (typeof pushLog === "function") pushLog(`[${new Date().toLocaleTimeString()}] WEB BUILD STARTED`);
+        if (d.job_id) {
+          setWatch({ id: d.job_id, status: "受付", url: "" });
+          let n = 0;
+          const t = setInterval(async () => {
+            n++;
+            if (n > 40) { clearInterval(t); setWatch((w) => (w ? { ...w, status: "時間切れ" } : w)); return; }
+            try {
+              const r2 = await fetch(`${endpoint.url}?action=jobs`);
+              const d2 = await r2.json();
+              const hit = (d2.jobs || []).find((j) => j.job_id === d.job_id);
+              if (!hit) return;
+              setWatch({ id: d.job_id, status: hit["状態"], url: hit["成果物URL"] || "" });
+              if (hit["状態"] === "完了" || hit["状態"] === "エラー") clearInterval(t);
+            } catch (e) {}
+          }, 8000);
+        }
+      } else setFlash({ ok: false, msg: "送信できませんでした。" + ((d && d.error) || "") });
+    } catch (e) {
+      setFlash({ ok: false, msg: "送信できませんでした。接続設定をご確認ください。" });
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div className="stRoot" style={{ "--t": "#0EA5A5", "--s": "#E4F6F6" }}>
+      <Style id="CSS_STUDIO" css={CSS_STUDIO} />
+
+      <header className="stHead">
+        <p className="stHead__en">WEB STUDIO</p>
+        <h1>サイト制作スタジオ</h1>
+        <p className="stHead__s">目的とデザインを選ぶと、そのまま公開できるサイトを書き出します。</p>
+      </header>
+
+      <div className="lbTabs">
+        <button className={mode === "new" ? "is-on" : ""} onClick={() => setMode("new")}>新しくつくる</button>
+        <button className={mode === "update" ? "is-on" : ""} onClick={() => setMode("update")}>
+          更新する<em>{sites.length}</em>
+        </button>
+      </div>
+
+      <section className="stCard">
+        {mode === "update" ? (
+          <>
+            {sites.length === 0 ? (
+              <p className="stPrev__e">
+                まだサイトがありません。「新しくつくる」で1つ作ると、ここから何度でも更新できます。
+              </p>
+            ) : (
+              <>
+                <Field label="更新するサイト">
+                  <div className="wsSites">
+                    {sites.map((st) => (
+                      <button
+                        key={st.site_id}
+                        type="button"
+                        className={`wsSite ${target === st.site_id ? "is-on" : ""}`}
+                        onClick={() => setTarget(st.site_id)}
+                      >
+                        <b>{st.顧客}</b>
+                        <em>第{st.版}版　{st.更新日}</em>
+                        {st.合言葉 && (
+                          <span className="wsSite__pass">
+                            合言葉 <code>{st.合言葉}</code>
+                          </span>
+                        )}
+                        {st.URL && (
+                          <a href={st.URL} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                            今のサイトを見る →
+                          </a>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+
+                {target && (() => {
+                  const st = sites.find((x) => x.site_id === target);
+                  if (!st || !st.合言葉) return null;
+                  return (
+                    <div className="wsPass">
+                      <p className="wsPass__k">お客様にお渡しするもの</p>
+                      <div className="wsPass__g">
+                        <div>
+                          <span>更新ページ</span>
+                          <code>https://sashiwa-inc.vercel.app/#/edit</code>
+                        </div>
+                        <div>
+                          <span>合言葉</span>
+                          <code className="is-big">{st.合言葉}</code>
+                        </div>
+                      </div>
+                      <button
+                        className="wsPass__c"
+                        onClick={() => {
+                          try {
+                            navigator.clipboard.writeText(
+                              `${st.顧客} 様\n\nサイトの更新は、下記のページからお願いいたします。\n\n` +
+                              `更新ページ：https://sashiwa-inc.vercel.app/#/edit\n合言葉：${st.合言葉}\n\n` +
+                              `直したいところを書いて送信いただければ、数分で反映されます。\n株式会社SASHIWA`
+                            );
+                            setFlash({ ok: true, msg: "ご案内文をコピーしました。そのままお客様にお送りいただけます。" });
+                            setTimeout(() => setFlash(null), 4000);
+                          } catch (e) {}
+                        }}
+                      >
+                        ご案内文をコピー
+                      </button>
+                      <p className="wsPass__n">
+                        この2つをお伝えすると、お客様ご自身で更新を依頼できます。届いた依頼は自動で反映され、社内にも通知が届きます。
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                <Field label="どこを、どう直しますか" hint="そのまま書いてください。指示された箇所だけを直し、他は1文字も変えません">
+                  <textarea
+                    rows={5}
+                    value={changes}
+                    onChange={(e) => setChanges(e.target.value)}
+                    placeholder={"例：\n・料金の「30,000円」を「35,000円」に変える\n・お客様の声を1件追加（株式会社◯◯様／導入して3ヶ月で…）\n・トップの写真を、添付したものに差し替える\n・営業時間を 9:00-18:00 に修正"}
+                  />
+                </Field>
+              </>
+            )}
+          </>
+        ) : (
+        <>
+        <div className="stRow">
+          <Field label="お客様名" hint="自社サイトなら空欄で構いません">
+            <input type="text" value={f.client} onChange={(e) => set("client", e.target.value)} placeholder="株式会社◯◯" />
+          </Field>
+          <Field label="業種">
+            <select value={f.industry} onChange={(e) => set("industry", e.target.value)}>
+              {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
+            </select>
+          </Field>
+        </div>
+
+        <Field label="何をしている会社か" hint="1〜2行で。ここが1行目の見出しのもとになります">
+          <input type="text" value={f.biz} onChange={(e) => set("biz", e.target.value)} placeholder="中小企業向けに、業務をAIに任せる仕組みをつくっています" />
+        </Field>
+
+        <Field label="サイトの目的">
+          <div className="stCards">
+            {SITE_GOALS.map((g) => (
+              <button key={g.id} type="button" className={f.goal === g.id ? "is-on" : ""} onClick={() => set("goal", g.id)}>
+                <b>{g.label}</b><em>{g.d}</em>
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="デザインの方向">
+          <div className="wsTones">
+            {SITE_TONES.map((t) => (
+              <button key={t.id} type="button" className={`wsTone ${f.tone === t.id ? "is-on" : ""}`} style={{ "--c": t.c }} onClick={() => set("tone", t.id)}>
+                <span className="wsTone__sw" />
+                <b>{t.label}</b>
+                <em>{t.d}</em>
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="必要なページ" hint="クリックで選び直せます">
+          <div className="stChips">
+            {SITE_PAGES.map((pg) => (
+              <button key={pg} type="button" className={f.pages.indexOf(pg) >= 0 ? "is-on" : ""} onClick={() => togglePage(pg)}>{pg}</button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="公開したあとの更新">
+          <div className="stCards">
+            <button type="button" className={f.plan === "self" ? "is-on" : ""} onClick={() => set("plan", "self")}>
+              <b>ご自身で更新できる</b>
+              <em>サイトに従業員専用ページが付きます。文章はその場で直せます</em>
+            </button>
+            <button type="button" className={f.plan === "ask" ? "is-on" : ""} onClick={() => set("plan", "ask")}>
+              <b>おまかせ</b>
+              <em>ご連絡をいただいて、こちらで修正します</em>
+            </button>
+          </div>
+        </Field>
+
+        {f.plan === "self" && (
+          <div className="wsSelf">
+            <p className="wsSelf__k">
+              <Sic name="check" size={15} />
+              従業員専用ページが付きます
+            </p>
+            <p className="wsSelf__d">
+              サイトの一番下に「従業員専用」の小さなリンクが入ります。押してパスコードを入れると、
+              <b>文章をその場で書き換えられます</b>。保存すると、そのまま公開中のサイトに反映されます。
+              写真の差し替えなど大きな変更は、同じ画面から当社にご依頼いただけます。
+            </p>
+            <p className="wsSelf__n">
+              パスコードは自動で作られ、納品メールに記載されます。お客様にお伝えください。
+            </p>
+          </div>
+        )}
+
+        <label className="stCheck">
+          <input type="checkbox" checked={f.ec} onChange={(e) => set("ec", e.target.checked)} />
+          <span>
+            <b>商品を売る（EC）を加える</b>
+            <em>商品を並べる節と、購入への導線を入れます。カート機能そのものは含みません</em>
+          </span>
+        </label>
+
+        {f.ec && (
+          <Field label="扱う商品" hint="種類と価格帯が分かると精度が上がります">
+            <input type="text" value={f.items} onChange={(e) => set("items", e.target.value)} placeholder="自家焙煎のコーヒー豆（200g・1,200〜2,400円）" />
+          </Field>
+        )}
+
+        <div className="stRow">
+          <Field label="見に来る人" hint="任意">
+            <input type="text" value={f.target} onChange={(e) => set("target", e.target.value)} placeholder="従業員10〜50名の会社の経営者" />
+          </Field>
+          <Field label="連絡先" hint="任意。ボタンの飛び先になります">
+            <input type="text" value={f.contact} onChange={(e) => set("contact", e.target.value)} placeholder="info@example.com" />
+          </Field>
+        </div>
+
+        <Field label="強み・他と違う点" hint="任意。ここが弱いと、ありきたりな文章になります">
+          <textarea rows={2} value={f.strength} onChange={(e) => set("strength", e.target.value)} placeholder="自社の業務を実際に100%AIで回している" />
+        </Field>
+
+        <div className="stRow">
+          <Field label="参考サイト" hint="任意">
+            <input type="text" value={f.ref} onChange={(e) => set("ref", e.target.value)} placeholder="https://..." />
+          </Field>
+          <Field label="避けたい表現" hint="任意">
+            <input type="text" value={f.ng} onChange={(e) => set("ng", e.target.value)} placeholder="煽り表現、業界No.1" />
+          </Field>
+        </div>
+
+        </>
+        )}
+
+        {/* 差し込む写真・動画 */}
+        <div className="wsMedia">
+          <p className="wsMedia__k">
+            差し込む写真・動画
+            <em>任意</em>
+          </p>
+          <p className="wsMedia__n">
+            写真はサイトに直接埋め込まれます。1枚ごとに「どこに置くか」を書いておくと、その場所に入ります。
+          </p>
+          <div className="wsMedia__f">
+            <label className="stMedia__add">
+              <Sic name="image" size={15} />
+              写真を選ぶ（4枚まで）
+              <input type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files, () => (e.target.value = ""))} />
+            </label>
+            <input
+              type="text"
+              value={video}
+              onChange={(e) => setVideo(e.target.value)}
+              placeholder="YouTubeのURL（任意。動画を載せる場合）"
+            />
+          </div>
+
+          {imgs.length > 0 && (
+            <div className="wsImgs">
+              {imgs.map((m, i) => (
+                <div className="wsImg" key={i}>
+                  <img src={m.data} alt="" />
+                  <div>
+                    <input
+                      type="text"
+                      value={m.place}
+                      onChange={(e) => setImgs((v) => v.map((x, k) => (k === i ? { ...x, place: e.target.value } : x)))}
+                      placeholder="どこに置くか（例：トップの一番上、サービス紹介の横）"
+                    />
+                    <input
+                      type="text"
+                      value={m.note}
+                      onChange={(e) => setImgs((v) => v.map((x, k) => (k === i ? { ...x, note: e.target.value } : x)))}
+                      placeholder="何の写真か（例：店内の様子）"
+                    />
+                  </div>
+                  <button onClick={() => setImgs((v) => v.filter((_, k) => k !== i))} aria-label="削除">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="stFoot">
+          <p className="stFoot__c">
+            <span>納品</span>
+            {mode === "update"
+              ? "更新したHTMLと、変更の記録。前の版も残ります"
+              : "HTMLファイル1枚と、構成・文言の設計書。ダウンロードしてそのまま公開できます"}
+          </p>
+          <button className="stSend" onClick={submit} disabled={sending}>
+            <span className={sending ? "stSpin" : ""}><Sic name={sending ? "loader" : "send"} size={16} /></span>
+            {sending ? "送信中..." : mode === "update" ? "この内容で更新する" : "サイトをつくる"}
+          </button>
+        </div>
+
+        {flash && <p className={`stFlash ${flash.ok ? "" : "is-ng"}`}>{flash.msg}</p>}
+
+        {watch && (
+          <div className={`stWatch is-${watch.status}`}>
+            <div className="stWatch__bar">
+              {["受付", "制作中", "完了"].map((st) => {
+                const order = { 受付: 0, 保留: 0, 制作中: 1, 完了: 2, エラー: 1, 時間切れ: 1 };
+                const cur = order[watch.status] !== undefined ? order[watch.status] : 0;
+                const idx = { 受付: 0, 制作中: 1, 完了: 2 }[st];
+                return (
+                  <span key={st} className={`stWatch__s ${idx <= cur ? "is-on" : ""} ${idx === cur ? "is-now" : ""}`}>
+                    <em />{st}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="stWatch__t">
+              {watch.status === "完了" ? (
+                <>
+                  できました。
+                  {watch.url && <a href={watch.url} target="_blank" rel="noopener noreferrer">HTMLを開く →</a>}
+                </>
+              ) : watch.status === "エラー" ? "失敗しました。接続設定の「詳細ログを見る」で原因をご確認ください。"
+                : "構成を決めてから、HTMLを書き出しています。2〜3分お待ちください。"}
+              <button className="stWatch__x" onClick={() => setWatch(null)} aria-label="閉じる">×</button>
+            </p>
+          </div>
+        )}
+
+        <p className="wsNote">
+          書き出されるのは1枚のHTMLです。ダウンロードしてブラウザで開けば、すぐ確認できます。
+          公開するには、Vercelやレンタルサーバーにこのファイルを置いてください。
+        </p>
+      </section>
     </div>
   );
 }
@@ -6791,36 +7499,66 @@ function DashboardInner() {
           </div>
 
           <nav className="dbSide__nav">
+            <p className="dbSide__k">経営 / MANAGEMENT</p>
             <button
               className={`dbNavAll ${view === "org" && !deptId ? "is-cur" : ""}`}
-              onClick={() => {
-                setView("org");
-                goDept(null);
-              }}
+              onClick={() => { setView("org"); setDeptId(null); setAgentId(null); setNavOpen(false); }}
             >
-              <Ico name="grid" size={17} />
+              <Ico name="grid" size={16} />
               全社ダッシュボード
             </button>
             <button
-              className={`dbNavAll dbNavStudio ${view === "accounts" ? "is-cur" : ""}`}
+              className={`dbNavAll ${view === "deals" ? "is-cur" : ""}`}
+              onClick={() => { setView("deals"); setNavOpen(false); }}
+            >
+              <Ico name="check" size={16} />
+              案件ボード
+            </button>
+            <button
+              className={`dbNavAll ${view === "acct" ? "is-cur" : ""}`}
+              onClick={() => { setView("acct"); setNavOpen(false); }}
+            >
+              <Ico name="chart" size={16} />
+              契約・請求
+            </button>
+
+            <p className="dbSide__k">つくる / STUDIOS</p>
+            <button
+              className={`dbNavAll dbNavHi ${view === "agent" ? "is-cur" : ""}`}
+              onClick={() => { setView("agent"); setNavOpen(false); }}
+            >
+              <Ico name="bot" size={16} />
+              AI社員 設計スタジオ
+              <em className="dbNavTag">主力</em>
+            </button>
+            <button
+              className={`dbNavAll ${view === "web" ? "is-cur" : ""}`}
+              onClick={() => { setView("web"); setNavOpen(false); }}
+            >
+              <Ico name="grid" size={16} />
+              サイト制作スタジオ
+            </button>
+            <button
+              className={`dbNavAll ${view === "studio" ? "is-cur" : ""}`}
+              onClick={() => { setView("studio"); setNavOpen(false); }}
+            >
+              <Ico name="send" size={16} />
+              SNS制作スタジオ
+            </button>
+
+            <p className="dbSide__k">管理 / TOOLS</p>
+            <button
+              className={`dbNavAll ${view === "accounts" ? "is-cur" : ""}`}
               onClick={() => { setView("accounts"); setNavOpen(false); }}
             >
               <Ico name="bot" size={16} />
               アカウント管理
             </button>
             <button
-              className={`dbNavAll dbNavDesign ${view === "design" ? "is-cur" : ""}`}
-              onClick={() => { setView("design"); setNavOpen(false); }}
-            >
-              <Ico name="bot" size={16} />
-              AI社員の設計
-              <em>主力</em>
-            </button>
-            <button
               className={`dbNavAll ${view === "library" ? "is-cur" : ""}`}
               onClick={() => { setView("library"); setLibFilter("all"); setNavOpen(false); }}
             >
-              <Ico name="check" size={16} />
+              <Ico name="doc" size={16} />
               成果物ライブラリ
             </button>
             <button
@@ -6830,16 +7568,7 @@ function DashboardInner() {
               <Ico name="refresh" size={16} />
               接続設定
             </button>
-            <button
-              className={`dbNavAll ${view === "studio" ? "is-cur" : ""}`}
-              onClick={() => {
-                setView("studio");
-                setNavOpen(false);
-              }}
-            >
-              <Ico name="send" size={16} />
-              制作スタジオ
-            </button>
+
 
             <p className="dbSide__k">部署 / DEPARTMENTS</p>
             {company.map((d) => (
@@ -6900,6 +7629,10 @@ function DashboardInner() {
                 <span>制作スタジオ</span>
               ) : view === "accounts" ? (
                 <span>アカウント管理</span>
+              ) : view === "web" ? (
+                <span>サイト制作</span>
+              ) : view === "acct" ? (
+                <span>会計</span>
               ) : view === "deals" ? (
                 <span>案件ボード</span>
               ) : view === "agent" ? (
@@ -6939,6 +7672,8 @@ function DashboardInner() {
             {view === "settings" && <SettingsView pushLog={pushLog} />}
             {view === "library" && <LibraryView pushLog={pushLog} initialFilter={libFilter} />}
             {view === "design" && <DesignView pushLog={pushLog} />}
+            {view === "web" && <WebStudio pushLog={pushLog} />}
+            {view === "acct" && <AcctView pushLog={pushLog} />}
             {view === "deals" && <DealsView pushLog={pushLog} />}
             {view === "agent" && <AgentStudio pushLog={pushLog} />}
             {view === "studio" && <Studio pushLog={pushLog} />}
@@ -7905,6 +8640,114 @@ const CSS_DASHBOARD = `
 @keyframes dbWave{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-4deg);}}
 .dbGateRing__eyes{animation:dbBlink 5.4s infinite;transform-origin:75px 85px;}
 @keyframes dbBlink{0%,94%,100%{transform:scaleY(1);}97%{transform:scaleY(.12);}}
+
+.acSum{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--white);border:1px solid var(--line);border-radius:16px;padding:15px 18px;margin-bottom:14px;}
+.acSum > div{border-left:3px solid var(--c);padding-left:11px;}
+.acSum span{display:block;font-size:10px;color:var(--muted);margin-bottom:3px;}
+.acSum b{font-family:var(--mono);font-size:19px;font-weight:900;color:var(--c);}
+.acSum b em{font-style:normal;font-size:11px;font-family:var(--sans);margin-left:2px;}
+.acSum > button{margin-left:auto;}
+.acChart{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:14px;}
+.acChart__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:14px;}
+.acChart__k em{font-style:normal;font-size:10.5px;color:var(--muted);font-weight:400;}
+.acChart__b{display:flex;align-items:flex-end;gap:12px;height:130px;}
+.acChart__m{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;}
+.acChart__bars{flex:1;display:flex;align-items:flex-end;gap:4px;width:100%;justify-content:center;}
+.acChart__bars span{width:16px;border-radius:4px 4px 0 0;min-height:3px;}
+.acChart__bars .is-sale{background:#0E9F73;}
+.acChart__bars .is-cost{background:#E0402F;opacity:.75;}
+.acChart__l{font-size:10.5px;color:var(--muted);margin-top:7px;}
+.acChart__p{font-family:var(--mono);font-size:10.5px;font-weight:700;color:#0E9F73;}
+.acChart__p.is-ng{color:var(--sig);}
+.acChart__lg{font-size:10.5px;color:var(--muted);margin-top:12px;display:flex;align-items:center;gap:5px;}
+.acChart__lg i{display:inline-block;width:10px;height:10px;border-radius:3px;}
+.acChart__lg .is-sale{background:#0E9F73;}
+.acChart__lg .is-cost{background:#E0402F;opacity:.75;}
+.acList{display:grid;gap:6px;}
+.acRow{display:grid;grid-template-columns:82px 118px 1fr 110px 34px;gap:11px;align-items:center;background:var(--white);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:11px;padding:11px 14px;cursor:pointer;transition:all .2s;}
+.acRow:hover{border-color:var(--t);}
+.acRow.is-sale{border-left-color:#0E9F73;}
+.acRow.is-cost{border-left-color:#E0402F;}
+.acRow__d{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+.acRow__k{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.acRow__t{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acRow__t em{font-style:normal;font-size:10.5px;font-weight:400;color:var(--muted);margin-left:8px;}
+.acRow__a{font-family:var(--mono);font-size:13px;font-weight:700;text-align:right;}
+.acRow.is-sale .acRow__a{color:#0E9F73;}
+.acRow.is-cost .acRow__a{color:var(--sig);}
+.acRow__s{font-size:10px;font-weight:700;color:var(--sig);background:#FDECEA;border-radius:999px;padding:3px 0;text-align:center;}
+.acRow__s.is-done{color:#0E9F73;background:#E6F7F0;}
+@media (max-width:820px){.acRow{grid-template-columns:1fr auto;gap:4px 10px;}.acRow__k,.acRow__d{grid-column:1;}.acRow__t{grid-column:1/-1;}}
+
+.wsTones{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;}
+.wsTone{border:1.5px solid var(--line);border-radius:13px;padding:13px;text-align:left;transition:all .2s;}
+.wsTone:hover{border-color:var(--c);}
+.wsTone.is-on{border-color:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 16%,transparent);}
+.wsTone__sw{display:block;width:100%;height:22px;border-radius:7px;background:var(--c);margin-bottom:9px;}
+.wsTone b{display:block;font-size:13px;font-weight:700;margin-bottom:3px;}
+.wsTone em{font-style:normal;font-size:11px;color:var(--muted);line-height:1.6;}
+.wsNote{font-size:11.5px;line-height:1.9;color:var(--muted);background:var(--bg);border-radius:11px;padding:13px 15px;margin-top:16px;}
+
+.ctList{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:11px;}
+.ctCard{background:var(--white);border:1px solid var(--line);border-left:3px solid #0E9F73;border-radius:14px;padding:16px 18px;cursor:pointer;transition:all .2s;}
+.ctCard:hover{transform:translateY(-2px);box-shadow:0 18px 32px -24px rgba(26,34,51,.5);}
+.ctCard.is-off{opacity:.5;border-left-color:#9BA3B1;}
+.ctCard__h{display:flex;align-items:center;gap:9px;margin-bottom:4px;}
+.ctCard__h b{font-size:15px;font-weight:900;}
+.ctCard__s{margin-left:auto;font-size:10px;font-weight:700;color:var(--muted);background:var(--bg);border-radius:999px;padding:3px 10px;}
+.ctCard__s.is-on{color:#0E9F73;background:#E6F7F0;}
+.ctCard__p{font-size:12px;color:var(--muted);margin-bottom:12px;}
+.ctCard__m{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding-top:11px;border-top:1px solid var(--line);}
+.ctCard__m dt{font-size:9.5px;color:var(--muted);margin-bottom:2px;}
+.ctCard__m dd{font-family:var(--mono);font-size:12.5px;font-weight:700;}
+.ctCard__m dd.is-big{font-size:16px;color:#0E9F73;}
+.ctCard__n{font-size:11px;line-height:1.7;color:var(--muted);margin-top:10px;}
+.acRow__s{border:none;cursor:pointer;}
+
+.wsSites{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;}
+.wsSite{border:1.5px solid var(--line);border-radius:13px;padding:13px 15px;text-align:left;transition:all .2s;}
+.wsSite:hover{border-color:var(--t);}
+.wsSite.is-on{border-color:var(--t);background:var(--s);}
+.wsSite b{display:block;font-size:13.5px;font-weight:700;margin-bottom:3px;}
+.wsSite em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:6px;}
+.wsSite a{font-size:11.5px;font-weight:700;color:var(--t);}
+.wsMedia{background:var(--bg);border-radius:14px;padding:16px;margin-bottom:18px;}
+.wsMedia__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:6px;}
+.wsMedia__k em{font-style:normal;font-size:10px;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.wsMedia__n{font-size:11.5px;line-height:1.85;color:var(--muted);margin-bottom:12px;}
+.wsMedia__f{display:flex;gap:9px;flex-wrap:wrap;align-items:center;}
+.wsMedia__f input{flex:1;min-width:220px;background:var(--white);border:1.5px solid transparent;border-radius:11px;padding:10px 13px;font-size:12.5px;}
+.wsMedia__f input:focus{outline:none;border-color:var(--t);}
+.wsImgs{display:grid;gap:9px;margin-top:12px;}
+.wsImg{display:flex;align-items:center;gap:11px;background:var(--white);border-radius:12px;padding:10px 12px;}
+.wsImg img{width:64px;height:64px;object-fit:cover;border-radius:9px;flex-shrink:0;}
+.wsImg > div{flex:1;min-width:0;display:grid;gap:6px;}
+.wsImg input{width:100%;background:var(--bg);border:1px solid transparent;border-radius:8px;padding:7px 10px;font-size:11.5px;}
+.wsImg input:focus{outline:none;border-color:var(--t);background:var(--white);}
+.wsImg > button{color:#B9C0CB;font-size:16px;padding:4px 8px;border-radius:6px;flex-shrink:0;}
+.wsImg > button:hover{color:var(--sig);background:#FDECEA;}
+.dbNavHi{position:relative;}
+.dbNavTag{margin-left:auto;font-style:normal;font-size:9px;font-weight:700;color:#fff;background:var(--sig,#E0402F);border-radius:999px;padding:2px 8px;}
+
+.wsSelf{background:#E9F7F1;border:1px solid #B9E4D2;border-radius:14px;padding:15px 17px;margin-bottom:18px;}
+.wsSelf__k{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;color:#0B6B4F;margin-bottom:8px;}
+.wsSelf__k svg{color:#0E9F73;}
+.wsSelf__d{font-size:12.5px;line-height:1.95;color:#0B6B4F;margin-bottom:9px;}
+.wsSelf__d b{font-weight:700;}
+.wsSelf__n{font-size:11.5px;line-height:1.8;color:#0B6B4F;background:var(--white);border-radius:9px;padding:9px 12px;}
+
+.wsSite__pass{display:block;font-size:10.5px;color:var(--muted);margin-bottom:6px;}
+.wsSite__pass code{font-family:var(--mono);font-weight:700;color:var(--t);letter-spacing:.1em;}
+.wsPass{background:var(--s);border:1px solid color-mix(in srgb,var(--t) 25%,transparent);border-radius:14px;padding:16px;margin-bottom:18px;}
+.wsPass__k{font-size:12px;font-weight:700;color:var(--t);margin-bottom:11px;}
+.wsPass__g{display:grid;grid-template-columns:1fr auto;gap:11px;margin-bottom:12px;}
+.wsPass__g > div{background:var(--white);border-radius:11px;padding:11px 14px;}
+.wsPass__g span{display:block;font-size:10px;color:var(--muted);margin-bottom:4px;}
+.wsPass__g code{font-family:var(--mono);font-size:12px;word-break:break-all;}
+.wsPass__g code.is-big{font-size:20px;font-weight:700;letter-spacing:.2em;color:var(--t);}
+.wsPass__c{font-size:12px;font-weight:700;color:#fff;background:var(--t);border-radius:999px;padding:9px 18px;}
+.wsPass__n{font-size:11px;line-height:1.85;color:var(--muted);margin-top:11px;}
+@media (max-width:640px){.wsPass__g{grid-template-columns:1fr;}}
 `;
 
 export default function Dashboard(props) {
