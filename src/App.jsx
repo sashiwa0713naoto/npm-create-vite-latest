@@ -413,6 +413,10 @@ const POSTS = [];
 
 /* ---------------------------------------------------------------- ルート定義 */
 
+/* お客様の更新ページから、更新依頼を送る先。
+   ダッシュボードの「接続設定」に入れたURLと同じものを貼ってください。 */
+const EDIT_ENDPOINT = "";
+
 const ROUTES = {
   home: { title: "株式会社SASHIWA｜社員は全員AI。AI社員構築代行" },
   business: { title: "事業内容｜株式会社SASHIWA" },
@@ -421,6 +425,7 @@ const ROUTES = {
   company: { title: "会社概要｜株式会社SASHIWA" },
   contact: { title: "お問い合わせ｜株式会社SASHIWA" },
   staff: { title: "社員専用｜株式会社SASHIWA" },
+  edit: { title: "サイトの更新｜株式会社SASHIWA" },
   dashboard: { title: "CONTROL｜株式会社SASHIWA" },
 };
 
@@ -794,59 +799,180 @@ function Accordion({ q, a, delay }) {
   );
 }
 
-function StaffPage() {
-  const tools = [
-    { t: "全社ダッシュボード", d: "稼働中のAI社員、処理件数、直近の履歴を1画面で確認します。", ic: "grid" },
-    { t: "AI社員 設計", d: "お客様の業務から、設計書一式を5部署が同時に作成します。", ic: "robot" },
-    { t: "案件ボード", d: "問い合わせから納品までを追います。取りこぼしを防ぎます。", ic: "check" },
-    { t: "制作スタジオ", d: "文章・画像・動画を、運用設計から投稿予約まで一貫して作ります。", ic: "studio" },
-    { t: "アカウント管理", d: "投稿先の管理と、投稿の実績を確認します。", ic: "sns" },
-    { t: "成果物ライブラリ", d: "これまでに作ったものを、条件つきで探して開けます。", ic: "doc" },
-  ];
-  return (
-    <>
-      <section className="sw-hero sw-hero--sub">
-        <div className="sw-wrap">
-          <p className="sw-mono sw-hero__en">FOR STAFF</p>
-          <h1 className="sw-hero__t">社員専用</h1>
-          <p className="sw-hero__lede">SASHIWAの業務システムです。社内の担当者のみご利用いただけます。</p>
-        </div>
-      </section>
+function EditPage() {
+  const [code, setCode] = useState("");
+  const [changes, setChanges] = useState("");
+  const [email, setEmail] = useState("");
+  const [imgs, setImgs] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(null);
+  const [err, setErr] = useState("");
 
-      <section className="sw-sec sw-sec--white">
+  const addImages = (files, clear) => {
+    Array.from(files || []).slice(0, 4).forEach((file) => {
+      if (file.size > 8 * 1024 * 1024) { setErr(file.name + " は大きすぎます（8MBまで）。"); return; }
+      const r = new FileReader();
+      r.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const max = 1200;
+          const sc = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement("canvas");
+          c.width = Math.round(img.width * sc);
+          c.height = Math.round(img.height * sc);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          setImgs((v) => [...v, { name: file.name, data: c.toDataURL("image/jpeg", 0.78), place: "", note: "" }].slice(0, 4));
+        };
+        img.onerror = () => setErr("画像を読み込めませんでした。");
+        img.src = String(r.result);
+      };
+      r.readAsDataURL(file);
+    });
+    if (clear) clear();
+  };
+
+  const submit = async () => {
+    setErr("");
+    if (!code.trim()) return setErr("合言葉をご入力ください。");
+    if (!changes.trim()) return setErr("直したい内容をご記入ください。");
+    if (!EDIT_ENDPOINT) return setErr("受付先が設定されていません。お手数ですが、担当者までご連絡ください。");
+    setSending(true);
+    try {
+      const r = await fetch(EDIT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          type: "siteedit",
+          code: code.trim(),
+          changes: changes,
+          email: email,
+          images: imgs.map((m) => ({ data: m.data, place: m.place, note: m.note })),
+        }),
+      });
+      const d = await r.json();
+      if (d && d.ok) setDone(d);
+      else setErr((d && d.error) || "送信できませんでした。時間をおいてお試しください。");
+    } catch (e) {
+      setErr("送信できませんでした。通信の状況をご確認ください。");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <section className="sw-edit">
         <div className="sw-wrap sw-narrow">
-          <div className="sw-staff__card">
-            <p className="sw-mono sw-staff__k">CONTROL CONSOLE</p>
-            <h2>コントロールコンソール</h2>
-            <p className="sw-staff__d">
-              AI社員の稼働状況、案件の進行、制作、投稿の管理をここから行います。入室にはパスコードが必要です。
-            </p>
-            <a className="sw-btn sw-btn--fill" href="#/dashboard">コンソールに入る</a>
-            <p className="sw-staff__note">パスコードをお忘れの場合は、管理者にお問い合わせください。</p>
-          </div>
-
-          <div className="sw-staff__grid">
-            {tools.map((t) => (
-              <div className="sw-staff__i" key={t.t}>
-                <span className="sw-staff__ic"><Icon name={t.ic} size={18} /></span>
-                <div>
-                  <b>{t.t}</b>
-                  <em>{t.d}</em>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="sw-staff__warn">
+          <div className="sw-edit__done">
+            <p className="sw-mono">RECEIVED</p>
+            <h1>承りました</h1>
             <p>
-              <b>取り扱いの注意</b>
-              このシステムには、お客様の業務情報と契約情報が含まれます。画面の共有、外部への転載はしないでください。
-              共用の端末では、作業後に必ず退室してください。
+              {done.client && <b>{done.client} 様</b>}
+              のサイトの更新を開始しました。数分で反映され、完了しましたらご連絡いたします。
             </p>
+            <p className="sw-edit__num">受付番号：{done.job_id}</p>
+            <button className="sw-btn sw-btn--line" onClick={() => { setDone(null); setChanges(""); setImgs([]); }}>
+              続けて依頼する
+            </button>
           </div>
         </div>
       </section>
-    </>
+    );
+  }
+
+  return (
+    <section className="sw-edit">
+      <div className="sw-wrap sw-narrow">
+        <p className="sw-mono sw-edit__en">SITE UPDATE</p>
+        <h1 className="sw-edit__t">サイトの更新</h1>
+        <p className="sw-edit__lede">
+          直したいところを書いて送るだけです。数分で反映され、完了しましたらご連絡します。
+          専門知識は要りません。
+        </p>
+
+        <div className="sw-edit__box">
+          <label className="sw-edit__f">
+            <span>合言葉</span>
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="A1B2C3"
+              maxLength={12}
+              className="sw-edit__code"
+            />
+            <em>納品時にお渡しした6文字です。</em>
+          </label>
+
+          <label className="sw-edit__f">
+            <span>どこを、どう直しますか</span>
+            <textarea
+              rows={7}
+              value={changes}
+              onChange={(e) => setChanges(e.target.value)}
+              placeholder={"例\n・料金を 30,000円 から 35,000円 に変えてください\n・営業時間を 9:00-18:00 にしてください\n・「お客様の声」に1件足してください（株式会社◯◯様／導入して3ヶ月で問い合わせが倍になりました）\n・トップの写真を、添付したものに差し替えてください"}
+            />
+            <em>普段の言葉で構いません。箇条書きだと確実に伝わります。</em>
+          </label>
+
+          <div className="sw-edit__f">
+            <span>写真を差し替える・追加する<i>任意</i></span>
+            <label className="sw-edit__file">
+              写真を選ぶ（4枚まで）
+              <input type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files, () => (e.target.value = ""))} />
+            </label>
+            {imgs.length > 0 && (
+              <div className="sw-edit__imgs">
+                {imgs.map((m, i) => (
+                  <div key={i}>
+                    <img src={m.data} alt="" />
+                    <input
+                      type="text"
+                      value={m.place}
+                      onChange={(e) => setImgs((v) => v.map((x, k) => (k === i ? { ...x, place: e.target.value } : x)))}
+                      placeholder="どこに使うか（例：トップの一番上）"
+                    />
+                    <button onClick={() => setImgs((v) => v.filter((_, k) => k !== i))} aria-label="削除">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <label className="sw-edit__f">
+            <span>ご連絡先<i>任意</i></span>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            <em>完了のご連絡をお送りします。</em>
+          </label>
+
+          {err && <p className="sw-edit__err">{err}</p>}
+
+          <button className="sw-btn sw-btn--fill sw-edit__send" onClick={submit} disabled={sending}>
+            {sending ? "送信しています..." : "この内容で更新を依頼する"}
+          </button>
+
+          <p className="sw-edit__note">
+            送信後、内容を確認してから反映します。公開されている情報に関わるため、
+            事実と異なる記載や、根拠のない表現はお受けできない場合があります。
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StaffPage() {
+  return (
+    <section className="sw-staff">
+      <div className="sw-wrap sw-narrow">
+        <div className="sw-staff__box">
+          <p className="sw-mono sw-staff__k">FOR STAFF</p>
+          <h1>社員専用</h1>
+          <p className="sw-staff__d">コントロールコンソールへ入ります。パスコードが必要です。</p>
+          <a className="sw-btn sw-btn--fill" href="#/dashboard">コンソールに入る</a>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2077,6 +2203,7 @@ export default function App() {
   else if (route.page === "blog") body = <BlogPage go={go} />;
   else if (route.page === "company") body = <CompanyPage go={go} />;
   else if (route.page === "staff") body = <StaffPage />;
+  else if (route.page === "edit") body = <EditPage />;
   else if (route.page === "contact") body = <ContactPage />;
   else body = <HomePage go={go} />;
 
@@ -2700,21 +2827,13 @@ const CSS = `
 .sw-menu__cta{display:inline-flex;}
 
 /* 社員専用 */
-.sw-staff__card{background:var(--ink);color:#fff;border-radius:24px;padding:40px;text-align:center;margin-bottom:24px;}
-.sw-staff__k{font-size:10px;letter-spacing:.2em;color:#7C8797;margin-bottom:12px;}
-.sw-staff__card h2{font-size:clamp(24px,3.4vw,32px);font-weight:900;margin-bottom:14px;}
-.sw-staff__d{font-size:14.5px;line-height:2.05;color:#B9C0CB;margin-bottom:26px;max-width:520px;margin-left:auto;margin-right:auto;}
-.sw-staff__card .sw-btn--fill{background:#fff;color:var(--ink);}
-.sw-staff__card .sw-btn--fill:hover{background:var(--sig);color:#fff;}
-.sw-staff__note{font-size:12px;color:#7C8797;margin-top:16px;}
-.sw-staff__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:11px;margin-bottom:24px;}
-.sw-staff__i{display:flex;align-items:flex-start;gap:12px;background:var(--bg);border-radius:14px;padding:16px 18px;}
-.sw-staff__ic{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:11px;background:var(--white);color:var(--sig);flex-shrink:0;}
-.sw-staff__i b{display:block;font-size:14px;font-weight:700;margin-bottom:4px;}
-.sw-staff__i em{font-style:normal;font-size:12.5px;line-height:1.8;color:var(--muted);}
-.sw-staff__warn{background:#FFF7E8;border:1px solid #F2DCAE;border-radius:14px;padding:18px 22px;}
-.sw-staff__warn b{display:block;font-size:13px;color:#8C5A00;margin-bottom:6px;}
-.sw-staff__warn p{font-size:12.5px;line-height:1.95;color:#7A5A12;}
+.sw-staff{min-height:72vh;display:flex;align-items:center;padding:80px 0;}
+.sw-staff__box{background:var(--ink);color:#fff;border-radius:24px;padding:56px 40px;text-align:center;}
+.sw-staff__k{font-size:10px;letter-spacing:.22em;color:#7C8797;margin-bottom:14px;}
+.sw-staff__box h1{font-size:clamp(26px,4vw,34px);font-weight:900;margin-bottom:14px;}
+.sw-staff__d{font-size:14.5px;line-height:2;color:#B9C0CB;margin-bottom:28px;}
+.sw-staff__box .sw-btn--fill{background:#fff;color:var(--ink);}
+.sw-staff__box .sw-btn--fill:hover{background:var(--sig);color:#fff;}
 .sw-ft__staff{display:inline-block;font-size:11.5px;color:#7C8797;margin-top:10px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:2px;}
 .sw-ft__staff:hover{color:#fff;}
 
@@ -2724,4 +2843,33 @@ const CSS = `
 @keyframes swWave{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-4deg);}}
 .sw-ring__eyes{animation:swBlink 5.4s infinite;transform-origin:75px 85px;}
 @keyframes swBlink{0%,94%,100%{transform:scaleY(1);}97%{transform:scaleY(.12);}}
+
+/* お客様のサイト更新ページ */
+.sw-edit{padding:72px 0 96px;}
+.sw-edit__en{font-size:10px;letter-spacing:.2em;color:var(--sig);font-weight:700;margin-bottom:12px;}
+.sw-edit__t{font-size:clamp(26px,4vw,36px);font-weight:900;margin-bottom:14px;}
+.sw-edit__lede{font-size:15px;line-height:2.05;color:var(--muted);margin-bottom:32px;}
+.sw-edit__box{background:var(--bg);border-radius:22px;padding:32px;}
+.sw-edit__f{display:block;margin-bottom:24px;}
+.sw-edit__f > span{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:900;margin-bottom:9px;}
+.sw-edit__f > span i{font-style:normal;font-size:10.5px;font-weight:400;color:var(--muted);background:var(--white);border-radius:999px;padding:2px 9px;}
+.sw-edit__f > em{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:7px;line-height:1.8;}
+.sw-edit__f input,.sw-edit__f textarea{width:100%;background:var(--white);border:2px solid transparent;border-radius:12px;padding:14px 16px;font-family:inherit;font-size:15px;line-height:1.9;resize:vertical;}
+.sw-edit__f input:focus,.sw-edit__f textarea:focus{outline:none;border-color:var(--sig);}
+.sw-edit__code{font-family:var(--mono);font-size:20px !important;letter-spacing:.28em;text-align:center;font-weight:700;}
+.sw-edit__file{display:inline-block;background:var(--white);border:2px dashed #CBD2DC;border-radius:12px;padding:14px 24px;font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s;}
+.sw-edit__file:hover{border-color:var(--sig);color:var(--sig);}
+.sw-edit__imgs{display:grid;gap:9px;margin-top:12px;}
+.sw-edit__imgs > div{display:flex;align-items:center;gap:11px;background:var(--white);border-radius:12px;padding:10px 12px;}
+.sw-edit__imgs img{width:60px;height:60px;object-fit:cover;border-radius:9px;flex-shrink:0;}
+.sw-edit__imgs input{flex:1;background:var(--bg) !important;font-size:13px !important;padding:9px 12px !important;}
+.sw-edit__imgs > div > button{background:none;border:none;color:#B9C0CB;font-size:20px;cursor:pointer;padding:4px 8px;}
+.sw-edit__err{font-size:13.5px;line-height:1.9;color:#B3241C;background:#FDECEA;border-radius:12px;padding:14px 16px;margin-bottom:18px;}
+.sw-edit__send{width:100%;justify-content:center;font-size:15px;padding:18px;}
+.sw-edit__note{font-size:12px;line-height:1.95;color:var(--muted);margin-top:18px;}
+.sw-edit__done{background:var(--bg);border-radius:22px;padding:56px 32px;text-align:center;}
+.sw-edit__done .sw-mono{font-size:10px;letter-spacing:.2em;color:#0E9F73;font-weight:700;margin-bottom:12px;}
+.sw-edit__done h1{font-size:28px;font-weight:900;margin-bottom:16px;}
+.sw-edit__done p{font-size:15px;line-height:2.05;color:var(--muted);margin-bottom:8px;}
+.sw-edit__num{font-family:var(--mono);font-size:12px !important;margin-bottom:26px !important;}
 `;
